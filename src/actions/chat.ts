@@ -29,7 +29,6 @@ export async function saveUserPublicKey(publicKey: string) {
       { onConflict: 'user_id' },
     );
   if (keyError) throw new Error(keyError.message);
-
   return true;
 }
 
@@ -56,7 +55,6 @@ export async function getUserPublicKey(userId: string) {
     .eq('user_id', userId)
     .maybeSingle();
   if (legacyError) throw new Error(legacyError.message);
-
   return legacyKey?.public_key ?? null;
 }
 
@@ -148,15 +146,15 @@ export async function deleteMessageForEveryone(messageId: string, roomId: string
   try {
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
+
     if (authError || !user) throw new Error("Unauthorized");
 
     const { error } = await supabase
       .from('messages')
-      .update({ 
-        is_deleted: true, 
+      .update({
+        is_deleted: true,
         content: '🚫 This message was deleted',
-        file_url: null 
+        file_url: null
       })
       .eq('id', messageId)
       .eq('room_id', roomId)

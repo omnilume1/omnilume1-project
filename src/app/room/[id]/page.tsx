@@ -2,6 +2,7 @@
 
 import { useState, use, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import RoomChat from '@/components/room/RoomChat';
 import MembersTab from '@/components/room/MembersTab';
 import FilesTab from '@/components/room/FilesTab';
@@ -11,13 +12,27 @@ import { getRoomAccess } from '@/actions/members';
 import { convertRoomToGroup } from '@/actions/rooms';
 import { useRoomSync } from '@/hooks/useRoomSync';
 
+type AccessStatus = 'loading' | 'approved' | 'pending' | 'not_found' | 'unauthorized' | 'public_not_joined' | 'private_not_joined';
+
+type RoomData = {
+  id: string;
+  name: string;
+  is_private: boolean;
+  created_by: string;
+  username: string | null;
+  expiration_type: string;
+  expires_at: string | null;
+  is_group?: boolean;
+};
+
 export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const identifier = resolvedParams.id;
+  const router = useRouter();
 
-  const [accessStatus, setAccessStatus] = useState<'loading' | 'approved' | 'pending' | 'not_found' | 'unauthorized' | 'public_not_joined' | 'private_not_joined'>('loading');
+  const [accessStatus, setAccessStatus] = useState<AccessStatus>('loading');
   const [userRole, setUserRole] = useState<string | null>(null);
-  const [roomData, setRoomData] = useState<any>(null);
+  const [roomData, setRoomData] = useState<RoomData | null>(null);
 
   const [timeLeft, setTimeLeft] = useState<string>('');
   const [isExpired, setIsExpired] = useState(false);
@@ -61,6 +76,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
   const handleConvert = async () => {
     if (!groupUsername.trim()) return alert("Please provide a group username.");
+    if (!roomData) return;
     setConverting(true);
     try {
       await convertRoomToGroup(roomData.id, groupUsername);
@@ -72,14 +88,14 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         setCountdown((prev) => {
           if (prev === null || prev <= 1) {
             clearInterval(timer);
-            window.location.href = `/room/${groupUsername.toLowerCase()}`;
+            router.push(`/room/${groupUsername.toLowerCase()}`);
             return 0;
           }
           return prev - 1;
         });
       }, 1000);
-    } catch (error: any) {
-      alert(error.message);
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : 'Unable to upgrade this room.');
       setConverting(false);
     }
   };
@@ -88,10 +104,10 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     async function checkAccess() {
       try {
         const { status, role, room } = await getRoomAccess(identifier);
-        setAccessStatus(status as any);
+        setAccessStatus(status as AccessStatus);
         setUserRole(role);
         if (room) setRoomData(room);
-      } catch (error) {
+      } catch {
         setAccessStatus('not_found');
       }
     }
@@ -100,10 +116,11 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
   useEffect(() => {
     if (!roomData || roomData.expiration_type === 'permanent' || !roomData.expires_at) return;
+    const expiresAt = roomData.expires_at;
 
     const interval = setInterval(() => {
       const now = new Date().getTime();
-      const expiry = new Date(roomData.expires_at).getTime();
+      const expiry = new Date(expiresAt).getTime();
       const distance = expiry - now;
 
       if (distance <= 0) {
@@ -132,6 +149,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   if (accessStatus === 'not_found') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl">❌ Space Not Found</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Explore</Link></div>;
   if (accessStatus === 'pending') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-amber-500">⏳ Waiting for Approval</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
   if (accessStatus === 'unauthorized' || accessStatus === 'public_not_joined' || accessStatus === 'private_not_joined') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-red-500">🔒 Access Restricted</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Go to Explore to Join</Link></div>;
+
+  if (!roomData) return <div className="h-screen bg-[#050505] text-neutral-500 flex items-center justify-center text-sm">Loading room...</div>;
 
   if (showConvertModal) {
     return (
