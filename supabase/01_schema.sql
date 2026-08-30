@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict PVBbpnmbzR5i0bfy38IflK7jc66zNfvmCIYzmIG7ZyV1wHJodTgYP4fFfi7s0Hl
+\restrict Aye66g8knQmpNT0AZqzvwdKQi9tXoFIyCDNy8GCyNYXuFS8FYVuteuE2RQk32e1
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.11
@@ -520,6 +520,20 @@ CREATE POLICY "Creators can view their own rooms" ON public.rooms FOR SELECT USI
 
 
 --
+-- Name: messages Enable insert access for authenticated users; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY "Enable insert access for authenticated users" ON public.messages FOR INSERT WITH CHECK ((auth.uid() = sender_id));
+
+
+--
+-- Name: messages Enable read access for all users; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY "Enable read access for all users" ON public.messages FOR SELECT USING (true);
+
+
+--
 -- Name: rooms Members can view rooms they joined; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -766,5 +780,5 @@ CREATE POLICY "users update own membership" ON public.room_members FOR UPDATE TO
 -- PostgreSQL database dump complete
 --
 
-\unrestrict PVBbpnmbzR5i0bfy38IflK7jc66zNfvmCIYzmIG7ZyV1wHJodTgYP4fFfi7s0Hl
+\unrestrict Aye66g8knQmpNT0AZqzvwdKQi9tXoFIyCDNy8GCyNYXuFS8FYVuteuE2RQk32e1
 
