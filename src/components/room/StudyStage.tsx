@@ -30,6 +30,7 @@ interface StudyStageProps {
 
 interface StudyMiniTimerProps {
   timerState: TimerState;
+  roomId?: string;
   focusLockExpiresAt?: number | null;
   onOpen: () => void;
 }
@@ -108,8 +109,9 @@ function writeLoggedSeconds(roomId: string, sessionId: string, seconds: number) 
   }
 }
 
-export function StudyMiniTimer({ timerState, focusLockExpiresAt = null, onOpen }: StudyMiniTimerProps) {
+export function StudyMiniTimer({ timerState, roomId, focusLockExpiresAt, onOpen }: StudyMiniTimerProps) {
   const [now, setNow] = useState<number | null>(null);
+  const [detectedFocusLock, setDetectedFocusLock] = useState<FocusLockState | null>(null);
 
   useEffect(() => {
     const tick = () => setNow(Date.now());
@@ -118,24 +120,47 @@ export function StudyMiniTimer({ timerState, focusLockExpiresAt = null, onOpen }
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (focusLockExpiresAt !== undefined) return;
+
+    const refreshFocusLock = () => setDetectedFocusLock(readFocusLock());
+    refreshFocusLock();
+    const interval = window.setInterval(refreshFocusLock, 1_000);
+    window.addEventListener('storage', refreshFocusLock);
+    window.addEventListener(FOCUS_LOCK_EVENT, refreshFocusLock);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('storage', refreshFocusLock);
+      window.removeEventListener(FOCUS_LOCK_EVENT, refreshFocusLock);
+    };
+  }, [focusLockExpiresAt]);
+
   if (!timerState.isRunning) return null;
 
   const timerRemaining = now === null ? timerState.remaining : getTimerRemaining(timerState, now);
-  const focusRemaining = focusLockExpiresAt && now !== null ? getRemainingSeconds(focusLockExpiresAt, now) : 0;
+  const detectedExpiry = detectedFocusLock && (!roomId || detectedFocusLock.roomId === roomId)
+    ? detectedFocusLock.expiresAt
+    : null;
+  const effectiveFocusLockExpiresAt = focusLockExpiresAt === undefined ? detectedExpiry : focusLockExpiresAt;
+  const focusRemaining = effectiveFocusLockExpiresAt && now !== null
+    ? getRemainingSeconds(effectiveFocusLockExpiresAt, now)
+    : 0;
+  const focusLockActive = focusRemaining > 0;
 
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="fixed bottom-5 right-5 z-40 w-56 cursor-pointer rounded-2xl border border-white/15 bg-[#121212]/95 p-3 text-left shadow-2xl backdrop-blur-md transition hover:border-indigo-500/60 hover:bg-[#181818]"
+      className={`fixed bottom-5 right-5 z-40 w-56 cursor-pointer rounded-2xl border p-3 text-left shadow-2xl backdrop-blur-md transition ${focusLockActive ? 'border-red-500/60 bg-red-950/90 hover:border-red-400 hover:bg-red-950' : 'border-white/15 bg-[#121212]/95 hover:border-indigo-500/60 hover:bg-[#181818]'}`}
       aria-label="Open the study timer"
     >
       <div className="flex items-center justify-between gap-3">
-        <span className="truncate text-[10px] font-bold uppercase tracking-widest text-indigo-300">Study timer</span>
-        <span className="text-[10px] text-neutral-500">Open</span>
+        <span className={`truncate text-[10px] font-bold uppercase tracking-widest ${focusLockActive ? 'text-red-300' : 'text-indigo-300'}`}>{focusLockActive ? 'Focus locked' : 'Study timer'}</span>
+        <span className={`text-[10px] ${focusLockActive ? 'text-red-200/70' : 'text-neutral-500'}`}>Open</span>
       </div>
-      <p className="mt-1 truncate text-xs font-semibold text-white">{timerState.subject || 'Study session'}</p>
-      <p className="mt-1 font-mono text-2xl font-black tabular-nums text-white">{formatCountdown(timerRemaining)}</p>
+      <p className={`mt-1 truncate text-xs font-semibold ${focusLockActive ? 'text-red-50' : 'text-white'}`}>{timerState.subject || 'Study session'}</p>
+      <p className={`mt-1 font-mono text-2xl font-black tabular-nums ${focusLockActive ? 'text-red-100' : 'text-white'}`}>{formatCountdown(timerRemaining)}</p>
       {focusRemaining > 0 && <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-red-400">Focus lock · {formatCountdown(focusRemaining)}</p>}
     </button>
   );
@@ -155,10 +180,7 @@ export default function StudyStage({ roomId, focusRoomPath, sync, timerNavigatio
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [isSavingSession, setIsSavingSession] = useState(false);
-  const [focusLock, setFocusLock] = useState<FocusLockState | null>(() => {
-    const lock = readFocusLock();
-    return lock?.roomId === roomId ? lock : null;
-  });
+  const [focusLock, setFocusLock] = useState<FocusLockState | null>(null);
   const [showFocusWarning, setShowFocusWarning] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);

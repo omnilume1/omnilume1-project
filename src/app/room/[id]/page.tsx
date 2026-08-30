@@ -257,6 +257,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
           {mainActivity !== 'study' && roomSync.timerState.isRunning && (
             <StudyMiniTimer
+              roomId={roomData.id}
               timerState={roomSync.timerState}
               onOpen={() => {
                 setMainActivity('study');

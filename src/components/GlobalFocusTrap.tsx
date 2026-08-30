@@ -5,7 +5,6 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   FOCUS_LOCK_EVENT,
   clearFocusLock,
-  formatCountdown,
   getRemainingSeconds,
   readFocusLock,
   type FocusLockState,
@@ -23,11 +22,12 @@ function hideLeaveControls(hidden: boolean) {
 export default function GlobalFocusTrap() {
   const router = useRouter();
   const pathname = usePathname();
-  const [lock, setLock] = useState<FocusLockState | null>(() => readFocusLock());
+  // Read localStorage after hydration so the server and browser produce the
+  // same initial markup.
+  const [lock, setLock] = useState<FocusLockState | null>(null);
 
   const refreshLock = useCallback(() => {
-    const nextLock = readFocusLock();
-    setLock(nextLock);
+    setLock(readFocusLock());
   }, []);
 
   useEffect(() => {
@@ -84,16 +84,6 @@ export default function GlobalFocusTrap() {
     if (lock && getRemainingSeconds(lock.expiresAt) === 0) clearFocusLock();
   }, [lock]);
 
-  if (!lock) return null;
-
-  return (
-    <div className="pointer-events-none fixed left-0 top-1/2 z-[9999] -translate-y-1/2 select-none">
-      <div
-        className="flex items-center justify-center rounded-r-xl border border-red-400/30 bg-red-500 px-2 py-6 text-[10px] font-black uppercase tracking-widest text-black shadow-[4px_0_20px_rgba(239,68,68,0.3)]"
-        style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}
-      >
-        Focus Lock · {formatCountdown(getRemainingSeconds(lock.expiresAt))}
-      </div>
-    </div>
-  );
+  // The active lock is intentionally represented by the room's mini timer.
+  return null;
 }
