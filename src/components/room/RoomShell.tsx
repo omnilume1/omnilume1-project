@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { MediaStage } from "@/components/room/MediaStage";
+import MediaStage from "@/components/room/MediaStage";
 import { RoomControls } from "@/components/room/RoomControls";
 import { RoomSidebar } from "@/components/room/RoomSidebar";
 
@@ -35,7 +35,7 @@ export function RoomShell({ roomId }: { roomId: string }) {
       </header>
 
       <div className="relative flex min-h-0 flex-1">
-        <MediaStage roomId={roomId} />
+        <MediaStage roomId={roomId} currentUserRole={null} />
 
         <div
           className={`${sidebarOpen ? "absolute inset-y-0 right-0 z-20 flex w-[min(100%,20rem)] shadow-2xl" : "hidden"} lg:relative lg:flex lg:w-80 lg:shadow-none`}
