@@ -9,6 +9,14 @@ export interface ChatMessage {
   created_at: string;
 }
 
+interface EncryptedMessageRow {
+  id: string;
+  sender_id: string;
+  created_at: string;
+  ciphertext: string;
+  iv: string;
+}
+
 export function usePrivateChat(chatId: string | null, sharedKey: CryptoKey | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const supabase = createClient();
@@ -24,7 +32,7 @@ export function usePrivateChat(chatId: string | null, sharedKey: CryptoKey | nul
         .order('created_at', { ascending: true });
 
       if (data && !error) {
-        const decryptedPromises = data.map(async (msg) => ({
+        const decryptedPromises = (data as EncryptedMessageRow[]).map(async (msg) => ({
           id: msg.id,
           sender_id: msg.sender_id,
           created_at: msg.created_at,
@@ -42,8 +50,8 @@ export function usePrivateChat(chatId: string | null, sharedKey: CryptoKey | nul
       .channel(`chat_${chatId}`)
       .on('postgres_changes', 
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` }, 
-        async (payload) => {
-          const newPayload = payload.new;
+        async (payload: unknown) => {
+          const newPayload = (payload as { new: EncryptedMessageRow }).new;
           const decryptedText = await decryptMessage(newPayload.ciphertext, newPayload.iv, sharedKey);
           
           setMessages((prev) => [

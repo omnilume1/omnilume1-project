@@ -2,16 +2,25 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/utils/supabase/client';
-import { useRoomSync } from '@/hooks/useRoomSync';
+import type { RoomSyncValue } from '@/hooks/useRoomSync';
 import { deleteMessageForEveryone } from '@/actions/chat';
 
 interface RoomChatProps {
   roomId: string;
   currentUserRole: string | null;
+  sync: RoomSyncValue;
 }
 
-export default function RoomChat({ roomId, currentUserRole }: RoomChatProps) {
-  const [messages, setMessages] = useState<any[]>([]);
+interface RoomChatMessage {
+  id: string;
+  sender_id: string;
+  content: string | null;
+  is_deleted?: boolean;
+  created_at: string;
+}
+
+export default function RoomChat({ roomId, currentUserRole, sync }: RoomChatProps) {
+  const [messages, setMessages] = useState<RoomChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   
@@ -20,7 +29,7 @@ export default function RoomChat({ roomId, currentUserRole }: RoomChatProps) {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
-  const { typingUsers, broadcastEvent } = useRoomSync(roomId);
+  const { typingUsers, broadcastEvent } = sync;
 
   const isAdmin = currentUserRole === 'owner' || currentUserRole === 'admin';
 
@@ -38,16 +47,17 @@ export default function RoomChat({ roomId, currentUserRole }: RoomChatProps) {
       if (user && isMounted) setCurrentUserId(user.id);
 
       const { data } = await supabase.from('messages').select('*').eq('room_id', roomId).order('created_at', { ascending: true });
-      if (data && isMounted) setMessages(data);
+      if (data && isMounted) setMessages(data as RoomChatMessage[]);
     };
     setupChat();
 
     const chatChannel = supabase.channel(`chat_${roomId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload) => {
-        if (isMounted) setMessages(prev => [...prev, payload.new]);
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload: unknown) => {
+        if (isMounted) setMessages(prev => [...prev, (payload as { new: RoomChatMessage }).new]);
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload) => {
-        if (isMounted) setMessages(prev => prev.map(msg => msg.id === payload.new.id ? payload.new : msg));
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload: unknown) => {
+        const updatedMessage = (payload as { new: RoomChatMessage }).new;
+        if (isMounted) setMessages(prev => prev.map(msg => msg.id === updatedMessage.id ? updatedMessage : msg));
       })
       .subscribe();
 

@@ -31,8 +31,8 @@ export function useRoomChat(roomId: string) {
       .channel(`room_${roomId}`)
       .on('postgres_changes', 
         { event: 'INSERT', schema: 'public', table: 'room_messages', filter: `room_id=eq.${roomId}` }, 
-        (payload) => {
-          setMessages((prev) => [...prev, payload.new as RoomMessage]);
+        (payload: unknown) => {
+          setMessages((prev) => [...prev, (payload as { new: RoomMessage }).new]);
         }
       )
       .subscribe();

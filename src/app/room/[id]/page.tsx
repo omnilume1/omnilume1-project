@@ -6,9 +6,10 @@ import RoomChat from '@/components/room/RoomChat';
 import MembersTab from '@/components/room/MembersTab';
 import FilesTab from '@/components/room/FilesTab';
 import MediaStage from '@/components/room/MediaStage'; 
-import StudyStage from '@/components/room/StudyStage'; // NEW: Imported the StudyStage
+import StudyStage, { StudyMiniTimer } from '@/components/room/StudyStage';
 import { getRoomAccess } from '@/actions/members';
 import { convertRoomToGroup } from '@/actions/rooms';
+import { useRoomSync } from '@/hooks/useRoomSync';
 
 export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -123,6 +124,9 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
   const [mainActivity, setMainActivity] = useState<'watch' | 'study' | 'whiteboard'>('watch');
   const [activeTool, setActiveTool] = useState<'chat' | 'members' | 'files' | 'notes' | 'timer'>('chat');
+  const [timerNavigationRequest, setTimerNavigationRequest] = useState(0);
+  const roomSync = useRoomSync(roomData?.id ?? '', userRole === 'owner' || userRole === 'admin');
+  const focusRoomPath = `/room/${encodeURIComponent(identifier)}`;
 
   if (accessStatus === 'loading') return <div className="h-screen bg-[#050505] text-neutral-500 flex items-center justify-center text-sm animate-pulse">Verifying secure access...</div>;
   if (accessStatus === 'not_found') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl">❌ Space Not Found</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Explore</Link></div>;
@@ -190,7 +194,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         </div>
         <div className="flex items-center gap-4">
           {userRole === 'owner' && roomData?.expiration_type === 'recoverable' && <button onClick={() => setShowConvertModal(true)} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition">🚀 Upgrade to Group</button>}
-          <Link href="/explore" className="px-4 py-1.5 bg-neutral-100 hover:bg-white text-black rounded text-xs font-semibold transition">Leave</Link>
+          <Link href="/explore" data-room-leave className="px-4 py-1.5 bg-neutral-100 hover:bg-white text-black rounded text-xs font-semibold transition">Leave</Link>
         </div>
       </header>
 
@@ -208,16 +212,44 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           </div>
         </nav>
 
-        <main className="flex-1 p-0 flex flex-col relative bg-[#050505] min-w-0">
-          {mainActivity === 'watch' ? (
-            <MediaStage roomId={roomData.id} currentUserRole={userRole} />
-          ) : mainActivity === 'study' ? (
-            // NEW: Render the synchronized StudyStage when the book icon is clicked
-            <StudyStage roomId={roomData.id} currentUserRole={userRole} />
-          ) : (
-            <div className="flex-1 p-4 flex flex-col">
-              <div className="flex-1 bg-[#0a0a0a] rounded-xl border border-neutral-800 flex items-center justify-center">
-                <span className="text-neutral-500 text-sm">Whiteboard coming soon...</span>
+        <main className="relative flex min-w-0 flex-1 flex-col bg-[#050505] p-0">
+          {/* Keep the media element mounted while another room section is open.
+              Hiding this layer visually preserves playback and audio position. */}
+          <div
+            aria-hidden={mainActivity !== 'watch'}
+            className={`absolute inset-0 flex min-h-0 ${mainActivity === 'watch' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
+          >
+            <MediaStage roomId={roomData.id} currentUserRole={userRole} sync={roomSync} />
+          </div>
+
+          {/* Keep the study timer mounted too, so it continues through room
+              navigation and can finish/log a session outside the Study view. */}
+          <div
+            aria-hidden={mainActivity !== 'study'}
+            className={`absolute inset-0 flex min-h-0 ${mainActivity === 'study' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
+          >
+            <StudyStage
+              roomId={roomData.id}
+              focusRoomPath={focusRoomPath}
+              sync={roomSync}
+              timerNavigationRequest={timerNavigationRequest}
+            />
+          </div>
+
+          {mainActivity !== 'study' && roomSync.timerState.isRunning && (
+            <StudyMiniTimer
+              timerState={roomSync.timerState}
+              onOpen={() => {
+                setMainActivity('study');
+                setTimerNavigationRequest((request) => request + 1);
+              }}
+            />
+          )}
+
+          {mainActivity === 'whiteboard' && (
+            <div className="relative z-10 flex min-h-0 flex-1 flex-col p-4">
+              <div className="flex flex-1 items-center justify-center rounded-xl border border-neutral-800 bg-[#0a0a0a]">
+                <span className="text-sm text-neutral-500">Whiteboard coming soon...</span>
               </div>
             </div>
           )}
@@ -236,9 +268,9 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             <h3 className="font-medium text-sm text-white uppercase tracking-wider">{activeTool}</h3>
           </div>
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            {activeTool === 'chat' && roomData && <RoomChat roomId={roomData.id} />}
+            {activeTool === 'chat' && roomData && <RoomChat roomId={roomData.id} currentUserRole={userRole} sync={roomSync} />}
             {activeTool === 'members' && roomData && <MembersTab roomId={roomData.id} currentUserRole={userRole} />}
-            {activeTool === 'files' && roomData && <FilesTab roomId={roomData.id} />}
+            {activeTool === 'files' && roomData && <FilesTab roomId={roomData.id} currentUserRole={userRole} sync={roomSync} />}
           </div>
         </aside>
       </div>

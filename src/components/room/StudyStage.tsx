@@ -1,349 +1,598 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { useRoomSync } from '@/hooks/useRoomSync';
-import { logStudySession, getStudyHistory, deleteStudySubject } from '@/actions/study';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type MouseEvent,
+} from 'react';
+import { deleteStudySubject, getStudyHistory, logStudySession, type StudyHistoryEntry } from '@/actions/study';
+import type { RoomSyncValue, TimerState } from '@/hooks/useRoomSync';
+import {
+  FOCUS_LOCK_EVENT,
+  activateFocusLock,
+  formatCountdown,
+  getRemainingSeconds,
+  readFocusLock,
+  type FocusLockState,
+} from '@/lib/focus-lock';
+
+type StudyTab = 'TIMER' | 'NOTES' | 'WHITEBOARD' | 'PDF';
 
 interface StudyStageProps {
   roomId: string;
-  currentUserRole: string | null;
+  focusRoomPath: string;
+  sync: RoomSyncValue;
+  timerNavigationRequest?: number;
 }
 
-export default function StudyStage({ roomId, currentUserRole }: StudyStageProps) {
-  const { timerState, broadcastEvent } = useRoomSync(roomId);
-  
-  const [activeTab, setActiveTab] = useState<'timer' | 'notes' | 'whiteboard' | 'pdf'>('timer');
-  const [subject, setSubject] = useState('');
-  const [subjectError, setSubjectError] = useState(false);
-  
-  const [inputH, setInputH] = useState('0');
-  const [inputM, setInputM] = useState('25');
-  const [inputS, setInputS] = useState('0');
+interface StudyMiniTimerProps {
+  timerState: TimerState;
+  focusLockExpiresAt?: number | null;
+  onOpen: () => void;
+}
 
-  const [timeLeft, setTimeLeft] = useState(25 * 60);
-  const [showFocusWarning, setShowFocusWarning] = useState(false);
-  
-  // Analytics State
-  const [showHistory, setShowHistory] = useState(false);
-  const [studyHistory, setStudyHistory] = useState<any[]>([]);
+const RECENT_SUBJECTS_KEY_PREFIX = 'omnilume_recent_subjects:';
 
-  // PERFECTED: Uses localStorage to sync with the GlobalFocusTrap in layout.tsx
-  const [isFocusLocked, setIsFocusLocked] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('omnilume_focus_lock') === roomId : false);
-  
+function createId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+export function getTimerRemaining(timerState: TimerState, now = Date.now()) {
+  if (timerState.completed) return 0;
+  if (!timerState.isRunning || !timerState.endTime) return Math.max(0, Math.ceil(timerState.remaining));
+  return Math.max(0, Math.ceil((timerState.endTime - now) / 1_000));
+}
+
+function getElapsedSeconds(timerState: TimerState, now = Date.now()) {
+  const activeSeconds = timerState.isRunning && timerState.segmentStartedAt
+    ? Math.max(0, (now - timerState.segmentStartedAt) / 1_000)
+    : 0;
+  return Math.max(0, timerState.elapsedSeconds + activeSeconds);
+}
+
+function formatStudyMinutes(minutes: number) {
+  const roundedMinutes = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(roundedMinutes / 60);
+  const remainder = roundedMinutes % 60;
+  if (hours === 0) return `${remainder} min`;
+  if (remainder === 0) return `${hours}h`;
+  return `${hours}h ${remainder}m`;
+}
+
+function readRecentSubjects(roomId: string) {
+  if (typeof window === 'undefined') return [];
+  try {
+    const saved = window.localStorage.getItem(`${RECENT_SUBJECTS_KEY_PREFIX}${roomId}`);
+    const subjects = saved ? JSON.parse(saved) as unknown : [];
+    return Array.isArray(subjects)
+      ? subjects.filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).slice(0, 3)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentSubject(roomId: string, subject: string) {
+  if (typeof window === 'undefined') return;
+  const cleanSubject = subject.trim();
+  if (!cleanSubject) return;
+  const next = [cleanSubject, ...readRecentSubjects(roomId).filter((item) => item.toLowerCase() !== cleanSubject.toLowerCase())].slice(0, 3);
+  try {
+    window.localStorage.setItem(`${RECENT_SUBJECTS_KEY_PREFIX}${roomId}`, JSON.stringify(next));
+  } catch {
+    // Local suggestions are optional; the timer remains usable if storage is unavailable.
+  }
+}
+
+function readLoggedSeconds(roomId: string, sessionId: string) {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const saved = window.localStorage.getItem(`omnilume_study_logged:${roomId}:${sessionId}`);
+    const value = saved ? Number(saved) : 0;
+    return Number.isFinite(value) ? Math.max(0, value) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeLoggedSeconds(roomId: string, sessionId: string, seconds: number) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(`omnilume_study_logged:${roomId}:${sessionId}`, String(Math.max(0, Math.floor(seconds))));
+  } catch {
+    // The database history remains the source of truth when local storage is unavailable.
+  }
+}
+
+export function StudyMiniTimer({ timerState, focusLockExpiresAt = null, onOpen }: StudyMiniTimerProps) {
+  const [now, setNow] = useState<number | null>(null);
+
   useEffect(() => {
-    const savedSubject = sessionStorage.getItem(`subject:${roomId}`);
-    if (savedSubject) setSubject(savedSubject);
-    loadHistory();
+    const tick = () => setNow(Date.now());
+    tick();
+    const interval = window.setInterval(tick, 1_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  if (!timerState.isRunning) return null;
+
+  const timerRemaining = now === null ? timerState.remaining : getTimerRemaining(timerState, now);
+  const focusRemaining = focusLockExpiresAt && now !== null ? getRemainingSeconds(focusLockExpiresAt, now) : 0;
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="fixed bottom-5 right-5 z-40 w-56 cursor-pointer rounded-2xl border border-white/15 bg-[#121212]/95 p-3 text-left shadow-2xl backdrop-blur-md transition hover:border-indigo-500/60 hover:bg-[#181818]"
+      aria-label="Open the study timer"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="truncate text-[10px] font-bold uppercase tracking-widest text-indigo-300">Study timer</span>
+        <span className="text-[10px] text-neutral-500">Open</span>
+      </div>
+      <p className="mt-1 truncate text-xs font-semibold text-white">{timerState.subject || 'Study session'}</p>
+      <p className="mt-1 font-mono text-2xl font-black tabular-nums text-white">{formatCountdown(timerRemaining)}</p>
+      {focusRemaining > 0 && <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-red-400">Focus lock · {formatCountdown(focusRemaining)}</p>}
+    </button>
+  );
+}
+
+export default function StudyStage({ roomId, focusRoomPath, sync, timerNavigationRequest = 0 }: StudyStageProps) {
+  const { timerState, broadcastEvent, currentUserId } = sync;
+  const [activeTab, setActiveTab] = useState<StudyTab>('TIMER');
+  const [subject, setSubject] = useState('');
+  const [inputHrs, setInputHrs] = useState(0);
+  const [inputMin, setInputMin] = useState(25);
+  const [inputSec, setInputSec] = useState(0);
+  const [now, setNow] = useState<number | null>(null);
+  const [recentSubjects, setRecentSubjects] = useState<string[]>([]);
+  const [studyHistory, setStudyHistory] = useState<StudyHistoryEntry[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [isSavingSession, setIsSavingSession] = useState(false);
+  const [focusLock, setFocusLock] = useState<FocusLockState | null>(() => {
+    const lock = readFocusLock();
+    return lock?.roomId === roomId ? lock : null;
+  });
+  const [showFocusWarning, setShowFocusWarning] = useState(false);
+
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [ctx, setCtx] = useState<CanvasRenderingContext2D | null>(null);
+  const completionSessionRef = useRef<string | null>(null);
+  const loggingSessionRef = useRef(new Set<string>());
+  const previousTimerSessionRef = useRef<string | null>(timerState.sessionId);
+  const [notesContent, setNotesContent] = useState('');
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+
+  const draftDurationSeconds = (inputHrs * 3_600) + (inputMin * 60) + inputSec;
+  const hasSession = Boolean(timerState.sessionId);
+  const canManageTimer = !timerState.ownerId || timerState.ownerId === currentUserId;
+  const displayedRemaining = timerState.completed
+    ? 0
+    : hasSession || timerState.isRunning
+      ? now === null ? timerState.remaining : getTimerRemaining(timerState, now)
+      : draftDurationSeconds;
+  const focusLockActive = Boolean(focusLock && focusLock.roomId === roomId);
+  const focusLockRemaining = focusLockActive && focusLock && now !== null ? getRemainingSeconds(focusLock.expiresAt, now) : 0;
+  const displayedSubject = timerState.subject || subject;
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    const result = await getStudyHistory(roomId);
+    if (result.success && result.history) {
+      setStudyHistory(result.history);
+      setHistoryError(null);
+    } else {
+      setHistoryError(result.error ?? 'Unable to load study history.');
+    }
+    setHistoryLoading(false);
   }, [roomId]);
 
-  const loadHistory = async () => {
-    const res = await getStudyHistory(roomId);
-    if (res.success && res.history) setStudyHistory(res.history);
-  };
+  const refreshFocusLock = useCallback(() => {
+    const lock = readFocusLock();
+    setFocusLock(lock?.roomId === roomId ? lock : null);
+  }, [roomId]);
 
-  // STRICT BROWSER TRAP: Blocks F5 and Back Button natively
+  const persistStudyProgress = useCallback(async (state: TimerState, elapsedSeconds: number) => {
+    if (!state.sessionId || !state.subject.trim() || !currentUserId || state.ownerId !== currentUserId) return;
+
+    const totalSeconds = Math.floor(Math.max(0, elapsedSeconds));
+    const loggedSeconds = readLoggedSeconds(roomId, state.sessionId);
+    const newSeconds = totalSeconds - loggedSeconds;
+    if (newSeconds < 1 || loggingSessionRef.current.has(state.sessionId)) return;
+
+    loggingSessionRef.current.add(state.sessionId);
+    setIsSavingSession(true);
+    try {
+      const result = await logStudySession(roomId, state.subject, Math.max(1, Math.round(newSeconds / 60)));
+      if (!result.success) {
+        setHistoryError(result.error ?? 'The session could not be saved.');
+        return;
+      }
+      writeLoggedSeconds(roomId, state.sessionId, totalSeconds);
+      await loadHistory();
+    } finally {
+      loggingSessionRef.current.delete(state.sessionId);
+      setIsSavingSession(false);
+    }
+  }, [currentUserId, loadHistory, roomId]);
+
   useEffect(() => {
-    if (!isFocusLocked) return;
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "Focus Lock is active. Leaving will disrupt your session.";
-      return e.returnValue;
-    };
-    const handlePopState = (e: PopStateEvent) => {
-      window.history.pushState(null, '', window.location.href);
-      alert("Focus Lock active: You are locked in this room. Please unlock to leave.");
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    window.history.pushState(null, '', window.location.href);
-    window.addEventListener('popstate', handlePopState);
+    const tick = () => setNow(Date.now());
+    tick();
+    const interval = window.setInterval(tick, 1_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => {
+      setRecentSubjects(readRecentSubjects(roomId));
+      void loadHistory();
+    }, 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [loadHistory, roomId]);
+
+  useEffect(() => {
+    const initialRefresh = window.setTimeout(refreshFocusLock, 0);
+    const interval = window.setInterval(refreshFocusLock, 1_000);
+    window.addEventListener('storage', refreshFocusLock);
+    window.addEventListener(FOCUS_LOCK_EVENT, refreshFocusLock);
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('popstate', handlePopState);
+      window.clearInterval(interval);
+      window.clearTimeout(initialRefresh);
+      window.removeEventListener('storage', refreshFocusLock);
+      window.removeEventListener(FOCUS_LOCK_EVENT, refreshFocusLock);
     };
-  }, [isFocusLocked]);
-
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [hasCompleted, setHasCompleted] = useState(false);
-
-  const isOwnerOrAdmin = currentUserRole === 'owner' || currentUserRole === 'admin';
+  }, [refreshFocusLock]);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (timerState.isRunning && timerState.endTime) {
-      interval = setInterval(() => {
-        const remainingNow = Math.round((timerState.endTime! - Date.now()) / 1000);
-        if (remainingNow <= 0) setTimeLeft(0);
-        else { setTimeLeft(remainingNow); setHasCompleted(false); }
-      }, 500);
-    } else setTimeLeft(timerState.remaining);
-    return () => clearInterval(interval);
-  }, [timerState]);
+    if (timerNavigationRequest <= 0) return;
+    const navigation = window.setTimeout(() => setActiveTab('TIMER'), 0);
+    return () => window.clearTimeout(navigation);
+  }, [timerNavigationRequest]);
 
   useEffect(() => {
-    if (timeLeft === 0 && timerState.isRunning && !hasCompleted) {
-      setHasCompleted(true);
-      executeCompletion();
+    if (timerState.subject && timerState.sessionId && timerState.sessionId !== previousTimerSessionRef.current) {
+      const subjectUpdate = window.setTimeout(() => setSubject(timerState.subject), 0);
+      previousTimerSessionRef.current = timerState.sessionId;
+      return () => window.clearTimeout(subjectUpdate);
     }
-  }, [timeLeft, timerState.isRunning, hasCompleted]);
+    previousTimerSessionRef.current = timerState.sessionId;
+  }, [timerState.sessionId, timerState.subject]);
 
-  const executeCompletion = async () => {
-    try { const audio = new Audio('/sounds/bell.mp3'); audio.play().catch(()=>{}); } catch (e) {}
-    
-    if (subject.trim() && timerState.duration > 0) {
-      setIsSaving(true);
-      setSaveMessage("Saving to analytics...");
-      const result = await logStudySession(roomId, subject, Math.ceil(timerState.duration / 60));
-      if (result.success) {
-        setSaveMessage(`✓ Logged ${Math.ceil(timerState.duration / 60)} mins`);
-        loadHistory(); 
-      } else setSaveMessage("❌ Failed to save session.");
-      setIsSaving(false);
-      setTimeout(() => setSaveMessage(null), 4000);
+  useEffect(() => {
+    if (!timerState.isRunning || !timerState.endTime || !timerState.sessionId) return;
+
+    const interval = window.setInterval(() => {
+      const remaining = getTimerRemaining(timerState, Date.now());
+      setNow(Date.now());
+      if (remaining > 0 || completionSessionRef.current === timerState.sessionId) return;
+      if (timerState.ownerId && timerState.ownerId !== currentUserId) return;
+
+      completionSessionRef.current = timerState.sessionId;
+      const elapsedSeconds = getElapsedSeconds(timerState);
+      void persistStudyProgress(timerState, elapsedSeconds);
+      broadcastEvent('timer_pause', {
+        remaining: 0,
+        duration: timerState.duration,
+        subject: timerState.subject,
+        sessionId: timerState.sessionId,
+        ownerId: timerState.ownerId,
+        startedAt: timerState.startedAt,
+        elapsedSeconds,
+        completed: true,
+      });
+    }, 250);
+
+    return () => window.clearInterval(interval);
+  }, [broadcastEvent, currentUserId, persistStudyProgress, timerState]);
+
+  useEffect(() => {
+    if (!focusLockActive || !focusLock || focusLockRemaining !== 0) return;
+    const expiryRefresh = window.setTimeout(refreshFocusLock, 0);
+    return () => window.clearTimeout(expiryRefresh);
+  }, [focusLock, focusLockActive, focusLockRemaining, refreshFocusLock]);
+
+  useEffect(() => {
+    if (activeTab !== 'WHITEBOARD' || !canvasRef.current || ctx) return;
+    const canvas = canvasRef.current;
+    canvas.width = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+    const context = canvas.getContext('2d');
+    if (context) {
+      context.lineCap = 'round';
+      context.lineWidth = 3;
+      context.strokeStyle = '#6366f1';
+      setCtx(context);
     }
-    broadcastEvent('timer_pause', { remaining: 0, duration: timerState.duration });
-    toggleFocusLock(false);
+  }, [activeTab, ctx]);
+
+  useEffect(() => () => {
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+  }, [pdfUrl]);
+
+  const rememberSubject = (value: string) => {
+    saveRecentSubject(roomId, value);
+    setRecentSubjects(readRecentSubjects(roomId));
   };
 
-  const calculateInputSeconds = () => (parseInt(inputH) || 0) * 3600 + (parseInt(inputM) || 0) * 60 + (parseInt(inputS) || 0);
+  const makeTimerPayload = (remaining: number, elapsedSeconds: number) => ({
+    remaining,
+    duration: timerState.duration,
+    subject: timerState.subject || subject.trim(),
+    sessionId: timerState.sessionId,
+    ownerId: timerState.ownerId || currentUserId,
+    startedAt: timerState.startedAt,
+    elapsedSeconds,
+  });
 
-  const handleSubjectChange = (val: string) => {
-    setSubject(val);
-    setSubjectError(false);
-    sessionStorage.setItem(`subject:${roomId}`, val);
+  const startTimer = () => {
+    if (timerState.isRunning || !canManageTimer || !currentUserId) return;
+    const cleanSubject = (timerState.sessionId ? timerState.subject : subject).trim();
+    if (!cleanSubject) {
+      setHistoryError('Enter a subject before starting the timer.');
+      return;
+    }
+
+    const isResume = Boolean(timerState.sessionId && !timerState.completed);
+    const duration = isResume ? timerState.remaining : draftDurationSeconds;
+    if (duration <= 0) {
+      setHistoryError('Set a timer longer than zero.');
+      return;
+    }
+
+    const startedAt = isResume ? timerState.startedAt : Date.now();
+    const sessionId = isResume && timerState.sessionId ? timerState.sessionId : createId();
+    const elapsedSeconds = isResume ? timerState.elapsedSeconds : 0;
+    completionSessionRef.current = null;
+    setHistoryError(null);
+    setSubject(cleanSubject);
+    rememberSubject(cleanSubject);
+    broadcastEvent('timer_start', {
+      endTime: Date.now() + duration * 1_000,
+      remaining: duration,
+      duration: isResume ? timerState.duration : duration,
+      subject: cleanSubject,
+      sessionId,
+      ownerId: isResume ? timerState.ownerId : currentUserId,
+      startedAt: startedAt ?? Date.now(),
+      segmentStartedAt: Date.now(),
+      elapsedSeconds,
+    });
   };
 
-  const startFromHistory = (histSubject: string) => {
-    handleSubjectChange(histSubject);
+  const pauseTimer = async () => {
+    if (!timerState.isRunning || !timerState.sessionId || !canManageTimer) return;
+    const elapsedSeconds = getElapsedSeconds(timerState);
+    const remaining = getTimerRemaining(timerState);
+    await persistStudyProgress(timerState, elapsedSeconds);
+    broadcastEvent('timer_pause', {
+      ...makeTimerPayload(remaining, elapsedSeconds),
+      subject: timerState.subject || subject.trim(),
+      sessionId: timerState.sessionId,
+      ownerId: timerState.ownerId || currentUserId,
+      startedAt: timerState.startedAt,
+      completed: false,
+    });
+  };
+
+  const resetTimer = async () => {
+    if (!canManageTimer || isSavingSession) return;
+    if (timerState.isRunning && timerState.sessionId) {
+      await persistStudyProgress(timerState, getElapsedSeconds(timerState));
+    }
+    const duration = Math.max(0, draftDurationSeconds);
+    completionSessionRef.current = null;
+    broadcastEvent('timer_reset', { remaining: duration, duration, subject: subject.trim() });
+  };
+
+  const updateTimeInput = (type: 'hrs' | 'min' | 'sec', value: string) => {
+    const parsed = Math.max(0, Number.parseInt(value, 10) || 0);
+    if (type === 'hrs') setInputHrs(Math.min(99, parsed));
+    if (type === 'min') setInputMin(Math.min(59, parsed));
+    if (type === 'sec') setInputSec(Math.min(59, parsed));
+  };
+
+  const confirmFocusLock = () => {
+    const lock = activateFocusLock(roomId, focusRoomPath);
+    setFocusLock(lock);
+    setShowFocusWarning(false);
+  };
+
+  const startDraw = (event: MouseEvent<HTMLCanvasElement>) => {
+    if (!ctx) return;
+    ctx.beginPath();
+    ctx.moveTo(event.nativeEvent.offsetX, event.nativeEvent.offsetY);
+    setIsDrawing(true);
+  };
+
+  const draw = (event: MouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawing || !ctx) return;
+    ctx.lineTo(event.nativeEvent.offsetX, event.nativeEvent.offsetY);
+    ctx.stroke();
+  };
+
+  const stopDraw = () => {
+    if (!ctx) return;
+    ctx.closePath();
+    setIsDrawing(false);
+  };
+
+  const handlePdfUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+    setPdfUrl(URL.createObjectURL(file));
+  };
+
+  const selectHistorySubject = (historySubject: string) => {
+    if (timerState.isRunning) return;
+    setSubject(historySubject);
     setShowHistory(false);
   };
 
-  const handleDeleteSubject = async (histSubject: string) => {
-    if (!window.confirm(`Delete all study history for ${histSubject}?`)) return;
-    await deleteStudySubject(roomId, histSubject);
-    loadHistory();
-  };
-
-  const handleStart = () => {
-    if (!subject.trim()) { setSubjectError(true); return; }
-    const durationSeconds = calculateInputSeconds();
-    if (durationSeconds <= 0) return;
-    const endTime = Date.now() + durationSeconds * 1000;
-    broadcastEvent('timer_start', { duration: durationSeconds, remaining: durationSeconds, endTime });
-  };
-
-  const handleResume = () => {
-    const endTime = Date.now() + timerState.remaining * 1000;
-    broadcastEvent('timer_start', { duration: timerState.duration, remaining: timerState.remaining, endTime });
-  };
-
-  const handlePause = () => broadcastEvent('timer_pause', { remaining: timeLeft, duration: timerState.duration });
-
-  const handleReset = () => {
-    const durationSeconds = calculateInputSeconds() || 25 * 60;
-    broadcastEvent('timer_reset', { remaining: durationSeconds, duration: durationSeconds });
-  };
-
-  // PERFECTED: Uses localStorage so GlobalFocusTrap can intercept URL changes instantly
-  const toggleFocusLock = (locked: boolean) => {
-    setIsFocusLocked(locked);
-    setShowFocusWarning(false);
-    if (locked) {
-      localStorage.setItem('omnilume_focus_lock', roomId);
-    } else {
-      localStorage.removeItem('omnilume_focus_lock');
+  const removeHistorySubject = async (historySubject: string) => {
+    const result = await deleteStudySubject(roomId, historySubject);
+    if (!result.success) {
+      setHistoryError(result.error ?? 'Unable to remove this subject.');
+      return;
     }
+    await loadHistory();
   };
 
-  const formatTime = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    if (h > 0) return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const formatDuration = (totalMins: number) => {
-    if (totalMins < 60) return `${totalMins}m`;
-    const h = Math.floor(totalMins / 60);
-    const m = totalMins % 60;
-    return m > 0 ? `${h}h ${m}m` : `${h}h`;
-  };
-
-  const WorkspaceUI = (
-    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-neutral-800 bg-[#0a0a0a] shadow-2xl">
-      <div className="absolute top-0 inset-x-0 border-b border-neutral-800 bg-[#0a0a0a] z-10 flex flex-col">
-        <div className="p-4 flex justify-between items-center">
-          <span className="text-white font-semibold text-sm">Study Room Workspace</span>
-          <div className="flex items-center gap-3">
-            {saveMessage && <span className="text-emerald-400 text-xs font-bold bg-emerald-500/10 px-3 py-1 rounded-full animate-in fade-in">{saveMessage}</span>}
-            <button onClick={() => setShowHistory(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 text-neutral-400 hover:text-white rounded-lg text-xs font-bold transition cursor-pointer">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-              History
-            </button>
-          </div>
+  const renderHistoryPanel = showHistory && (
+    <div className="absolute right-6 top-20 z-30 w-[min(25rem,calc(100%-3rem))] overflow-hidden rounded-2xl border border-neutral-700 bg-[#111]/95 shadow-2xl backdrop-blur-md">
+      <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+        <div>
+          <h3 className="text-sm font-bold text-white">Study history</h3>
+          <p className="mt-0.5 text-[10px] text-neutral-500">Your completed and paused focus time in this room</p>
         </div>
-        
-        <div className="flex px-4 gap-6 border-t border-neutral-800/50 bg-[#111] overflow-x-auto no-scrollbar">
-          {['timer', 'notes', 'whiteboard', 'pdf'].map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab as any)} className={`py-3 text-xs font-bold uppercase tracking-wider transition border-b-2 cursor-pointer ${activeTab === tab ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-neutral-500 hover:text-neutral-300'}`}>
-              {tab}
-            </button>
+        <button type="button" onClick={() => setShowHistory(false)} className="cursor-pointer text-lg text-neutral-500 hover:text-white" aria-label="Close study history">×</button>
+      </div>
+      <div className="max-h-80 overflow-y-auto p-3">
+        {historyLoading && <p className="px-2 py-4 text-xs text-neutral-500">Loading history...</p>}
+        {!historyLoading && studyHistory.length === 0 && <p className="px-2 py-6 text-center text-xs text-neutral-500">No study sessions recorded yet.</p>}
+        <div className="flex flex-col gap-2">
+          {studyHistory.map((entry) => (
+            <div key={entry.subject} className="rounded-xl border border-neutral-800 bg-[#171717] p-3">
+              <div className="flex items-center justify-between gap-3">
+                <button type="button" onClick={() => selectHistorySubject(entry.subject)} className="min-w-0 cursor-pointer truncate text-left text-sm font-bold text-white hover:text-indigo-300" title="Load this subject">
+                  {entry.subject}
+                </button>
+                <span className="shrink-0 text-sm font-black text-indigo-300">{formatStudyMinutes(entry.totalMinutes)}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-neutral-500">
+                <span>Last studied {new Date(entry.lastStudied).toLocaleDateString()}</span>
+                <button type="button" onClick={() => void removeHistorySubject(entry.subject)} className="cursor-pointer text-neutral-600 hover:text-red-300">Remove</button>
+              </div>
+            </div>
           ))}
         </div>
       </div>
+    </div>
+  );
 
-      <div className="flex-1 flex flex-col mt-[105px] overflow-y-auto">
-        {activeTab === 'timer' && (
-          <div className="flex-1 flex flex-col items-center justify-center p-6">
-            
-            <div className="flex flex-wrap items-start justify-center gap-4 mb-4 w-full max-w-2xl">
-              <div className="flex-1 min-w-[200px] flex flex-col gap-1.5 relative">
-                <label className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold ml-1">Subject</label>
-                <input type="text" value={subject} onChange={(e) => handleSubjectChange(e.target.value)} disabled={timerState.isRunning || !isOwnerOrAdmin} placeholder="Mathematics..." className={`w-full bg-[#121212] border ${subjectError ? 'border-red-500/50' : 'border-neutral-800'} rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 transition disabled:opacity-50`} />
-                
-                {!timerState.isRunning && studyHistory.length > 0 && (
-                  <div className="flex gap-2 mt-2 absolute top-full left-0">
-                    {studyHistory.slice(0, 3).map((hist, idx) => (
-                      <button key={idx} onClick={() => handleSubjectChange(hist.subject)} className="px-2.5 py-1 bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white rounded-full text-[10px] font-bold transition cursor-pointer">
-                        {hist.subject}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {subjectError && <span className="text-red-500 text-[10px] lowercase font-semibold ml-1 absolute top-full left-1 mt-1">please enter a subject</span>}
-              </div>
-              
-              <div className="flex gap-2">
-                <div className="w-16 flex flex-col gap-1.5">
-                  <label className="text-[10px] text-neutral-500 uppercase font-bold text-center">Hrs</label>
-                  <input type="number" value={inputH} onChange={(e) => setInputH(e.target.value)} disabled={timerState.isRunning || !isOwnerOrAdmin} min="0" max="23" className="w-full bg-[#121212] border border-neutral-800 rounded-xl px-2 py-3 text-white text-center focus:outline-none focus:border-indigo-500 transition disabled:opacity-50 font-mono" />
-                </div>
-                <div className="w-16 flex flex-col gap-1.5">
-                  <label className="text-[10px] text-neutral-500 uppercase font-bold text-center">Min</label>
-                  <input type="number" value={inputM} onChange={(e) => setInputM(e.target.value)} disabled={timerState.isRunning || !isOwnerOrAdmin} min="0" max="59" className="w-full bg-[#121212] border border-neutral-800 rounded-xl px-2 py-3 text-white text-center focus:outline-none focus:border-indigo-500 transition disabled:opacity-50 font-mono" />
-                </div>
-                <div className="w-16 flex flex-col gap-1.5">
-                  <label className="text-[10px] text-neutral-500 uppercase font-bold text-center">Sec</label>
-                  <input type="number" value={inputS} onChange={(e) => setInputS(e.target.value)} disabled={timerState.isRunning || !isOwnerOrAdmin} min="0" max="59" className="w-full bg-[#121212] border border-neutral-800 rounded-xl px-2 py-3 text-white text-center focus:outline-none focus:border-indigo-500 transition disabled:opacity-50 font-mono" />
-                </div>
-              </div>
-            </div>
-
-            <div className="text-8xl md:text-[10rem] font-mono font-bold text-white tracking-tight mt-6 mb-12 tabular-nums drop-shadow-[0_0_40px_rgba(99,102,241,0.15)]">
-              {formatTime(timeLeft)}
-            </div>
-
-            <div className="flex flex-wrap items-center justify-center gap-4">
-              {!timerState.isRunning && timerState.remaining === timerState.duration && (
-                <button onClick={handleStart} disabled={!isOwnerOrAdmin} className="px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-bold transition disabled:opacity-50 cursor-pointer shadow-lg shadow-indigo-500/20">Start Session</button>
-              )}
-              {!timerState.isRunning && timerState.remaining < timerState.duration && timerState.remaining > 0 && (
-                <button onClick={handleResume} disabled={!isOwnerOrAdmin} className="px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-bold transition disabled:opacity-50 cursor-pointer shadow-lg shadow-indigo-500/20">Resume</button>
-              )}
-              {timerState.isRunning && (
-                <button onClick={handlePause} disabled={!isOwnerOrAdmin} className="px-8 py-4 bg-amber-600 hover:bg-amber-500 text-white rounded-2xl font-bold transition disabled:opacity-50 cursor-pointer">Pause</button>
-              )}
-              <button onClick={handleReset} disabled={!isOwnerOrAdmin} className="px-6 py-4 bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 text-white rounded-2xl font-bold transition disabled:opacity-50 cursor-pointer">Reset</button>
-              <button onClick={() => { if(!timerState.isRunning) return; setShowFocusWarning(true); }} disabled={!timerState.isRunning || isFocusLocked} className={`px-6 py-4 rounded-2xl font-bold transition flex items-center gap-2 border ${timerState.isRunning && !isFocusLocked ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20 cursor-pointer' : 'bg-neutral-900 border-neutral-800 text-neutral-600 cursor-not-allowed'}`}>
-                Focus Lock
-              </button>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'notes' && (<div className="flex-1 p-6 flex flex-col"><div className="flex-1 border border-neutral-800 rounded-xl bg-[#121212] flex items-center justify-center"><p className="text-sm text-neutral-500">Collaborative notes pending deployment (Phase 33).</p></div></div>)}
-        {activeTab === 'whiteboard' && (<div className="flex-1 p-6 flex flex-col"><div className="flex-1 border border-neutral-800 rounded-xl bg-[#121212] flex items-center justify-center"><p className="text-sm text-neutral-500">Whiteboard pending deployment (Phase 36).</p></div></div>)}
-        {activeTab === 'pdf' && (<div className="flex-1 p-6 flex flex-col"><div className="flex-1 border border-neutral-800 rounded-xl bg-[#121212] flex items-center justify-center"><p className="text-sm text-neutral-500">PDF reader pending deployment (Phase 34).</p></div></div>)}
+  const focusWarning = showFocusWarning && (
+    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl border border-red-500/30 bg-[#111] p-6 shadow-2xl">
+        <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-full bg-red-500/15 text-xl text-red-400">⏱</div>
+        <h3 className="text-lg font-bold text-white">Turn on Focus Lock?</h3>
+        <p className="mt-3 text-sm leading-6 text-neutral-400">
+          After turning on Focus Lock, you will be locked in this room for 1 hour. You can continue using this room’s casting, study, chat, members, and files features, but leaving the room or changing its URL will bring you back here.
+        </p>
+        <p className="mt-3 text-xs text-neutral-500">Focus Lock is separate from your main study timer. It will expire after one hour even if you pause or reset the main timer.</p>
+        <div className="mt-6 flex gap-3">
+          <button type="button" onClick={() => setShowFocusWarning(false)} className="flex-1 cursor-pointer rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-3 text-sm font-bold text-neutral-300 transition hover:bg-neutral-800">Cancel</button>
+          <button type="button" onClick={confirmFocusLock} className="flex-1 cursor-pointer rounded-xl bg-red-500 px-4 py-3 text-sm font-bold text-black transition hover:bg-red-400">Agree & lock for 1 hour</button>
+        </div>
       </div>
     </div>
   );
 
   return (
-    <section className="relative flex min-h-0 flex-1 flex-col p-4">
-      {/* 1. SOFT WARNING MODAL */}
-      {showFocusWarning && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center">
-          <div className="bg-[#121212] border border-neutral-800 p-8 rounded-3xl max-w-md w-full shadow-2xl">
-            <h3 className="text-2xl font-bold text-white mb-3">Enable Focus Lock?</h3>
-            <p className="text-neutral-400 text-sm mb-6 leading-relaxed">
-              After accepting, you will be locked inside this Room. You can still use the Chat, Media, and Notes, but you cannot navigate to other parts of the website or leave the room.
-            </p>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setShowFocusWarning(false)} className="px-5 py-2.5 text-white font-bold hover:bg-neutral-800 rounded-xl transition cursor-pointer">Cancel</button>
-              <button onClick={() => toggleFocusLock(true)} className="px-5 py-2.5 bg-emerald-600 text-white font-bold hover:bg-emerald-500 rounded-xl transition shadow-lg shadow-emerald-900/50 cursor-pointer">Accept & Lock</button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+    <div className="relative flex min-h-0 flex-1 flex-col rounded-2xl border border-neutral-800 bg-[#0a0a0a] p-4 transition-all duration-300 sm:p-6">
+      {renderHistoryPanel}
+      {focusWarning}
 
-      {/* 2. HISTORY MODAL */}
-      {showHistory && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#121212] border border-neutral-800 rounded-3xl max-w-lg w-full shadow-2xl flex flex-col max-h-[80vh]">
-            <div className="p-6 border-b border-neutral-800 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-white">Study Analytics History</h3>
-              <button onClick={() => setShowHistory(false)} className="text-neutral-500 hover:text-white transition p-2 cursor-pointer">✕</button>
-            </div>
-            <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
-              {studyHistory.length === 0 ? (
-                <p className="text-neutral-500 text-center py-8 text-sm">No study history recorded in this room yet.</p>
-              ) : (
-                studyHistory.map((hist, idx) => (
-                  <div key={idx} className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl flex items-center justify-between group">
-                    <div className="flex flex-col">
-                      <span className="text-white font-bold text-lg">{hist.subject}</span>
-                      <span className="text-neutral-500 text-xs">Total: <strong className="text-indigo-400">{formatDuration(hist.totalMinutes)}</strong> · Last: {new Date(hist.lastStudied).toLocaleDateString()}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => startFromHistory(hist.subject)} className="px-3 py-1.5 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600/30 rounded-lg text-xs font-bold transition cursor-pointer">Load</button>
-                      <button onClick={() => handleDeleteSubject(hist.subject)} className="px-3 py-1.5 bg-red-500/10 text-red-500 hover:bg-red-500/20 rounded-lg text-xs font-bold transition opacity-0 group-hover:opacity-100 cursor-pointer">Delete</button>
-                    </div>
-                  </div>
-                ))
+      <div className="mb-5 flex items-center justify-between gap-4 border-b border-neutral-800 pb-4">
+        <h2 className="hidden text-lg font-bold text-white sm:block">Study Workspace</h2>
+        <div className="flex min-w-0 gap-1 overflow-x-auto rounded-xl bg-[#121212] p-1">
+          {(['TIMER', 'NOTES', 'WHITEBOARD', 'PDF'] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={`shrink-0 cursor-pointer rounded-lg px-3 py-2 text-[10px] font-bold tracking-wider transition sm:px-4 ${activeTab === tab ? 'bg-indigo-600 text-white shadow-lg' : 'text-neutral-500 hover:bg-white/5 hover:text-white'}`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+        <button type="button" onClick={() => { setShowHistory((visible) => !visible); if (!showHistory) void loadHistory(); }} className="shrink-0 cursor-pointer rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-neutral-300 transition hover:border-neutral-500 hover:text-white">
+          History
+        </button>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        {activeTab === 'TIMER' && (
+          <div className="flex h-full w-full flex-col items-center justify-center overflow-y-auto py-4">
+            <div className="w-full max-w-md">
+              <label htmlFor="study-subject" className="mb-2 block text-center text-[10px] font-bold uppercase tracking-widest text-neutral-500">Current subject</label>
+              <input
+                id="study-subject"
+                type="text"
+                value={displayedSubject}
+                onChange={(event) => setSubject(event.target.value)}
+                placeholder="What are you focusing on?"
+                disabled={timerState.isRunning || hasSession}
+                className="w-full border-b-2 border-neutral-800 bg-transparent pb-2 text-center text-sm text-white outline-none transition placeholder:text-neutral-600 focus:border-indigo-500 disabled:cursor-not-allowed disabled:text-neutral-400"
+              />
+              {recentSubjects.length > 0 && !timerState.isRunning && !hasSession && (
+                <div className="mt-3 flex flex-wrap justify-center gap-2">
+                  <span className="self-center text-[10px] uppercase tracking-wider text-neutral-600">Recent</span>
+                  {recentSubjects.map((recentSubject) => (
+                    <button key={recentSubject} type="button" onClick={() => setSubject(recentSubject)} className="cursor-pointer rounded-full border border-neutral-700 bg-neutral-900 px-3 py-1 text-xs text-neutral-300 transition hover:border-indigo-500/60 hover:text-white">
+                      {recentSubject}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
-          </div>
-        </div>,
-        document.body
-      )}
 
-      {/* 3. INVISIBLE FOCUS LOCK LAYER */}
-      {isFocusLocked && typeof document !== 'undefined' && createPortal(
-        <>
-          <style dangerouslySetInnerHTML={{__html: `
-            /* This disables the sidebar and global header natively */
-            aside, header, nav, .global-leave-btn { 
-              pointer-events: none !important; 
-              opacity: 0.3 !important; 
-            }
-          `}} />
-          <div className="fixed left-0 top-1/3 -rotate-90 origin-left translate-x-4 bg-emerald-600 text-white px-6 py-1.5 font-black text-[10px] tracking-[0.3em] uppercase z-[9999] rounded-t-md shadow-2xl pointer-events-none">
-            Focus Mode Active
-          </div>
-          <button onClick={() => toggleFocusLock(false)} className="fixed bottom-6 left-6 z-[9999] px-5 py-2.5 bg-neutral-900 border border-neutral-700 text-neutral-300 hover:text-white hover:bg-neutral-800 rounded-full text-xs font-bold transition shadow-2xl cursor-pointer">
-            Unlock Room
-          </button>
-        </>,
-        document.body
-      )}
+            {!hasSession && !timerState.isRunning && (
+              <div className="mt-8 flex gap-3 sm:gap-5">
+                <label className="flex flex-col items-center gap-2"><span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Hrs</span><input type="number" value={inputHrs} onChange={(event) => updateTimeInput('hrs', event.target.value)} min="0" max="99" className="h-12 w-16 rounded-xl border border-neutral-800 bg-[#121212] text-center text-lg font-bold text-white outline-none focus:border-indigo-500" /></label>
+                <label className="flex flex-col items-center gap-2"><span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Min</span><input type="number" value={inputMin} onChange={(event) => updateTimeInput('min', event.target.value)} min="0" max="59" className="h-12 w-16 rounded-xl border border-neutral-800 bg-[#121212] text-center text-lg font-bold text-white outline-none focus:border-indigo-500" /></label>
+                <label className="flex flex-col items-center gap-2"><span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Sec</span><input type="number" value={inputSec} onChange={(event) => updateTimeInput('sec', event.target.value)} min="0" max="59" className="h-12 w-16 rounded-xl border border-neutral-800 bg-[#121212] text-center text-lg font-bold text-white outline-none focus:border-indigo-500" /></label>
+              </div>
+            )}
 
-      {/* 4. FLOATING MINI-TIMER */}
-      {timerState.isRunning && activeTab !== 'timer' && typeof document !== 'undefined' && createPortal(
-        <div onClick={() => setActiveTab('timer')} className="fixed bottom-6 right-6 bg-[#121212] border border-neutral-800 text-white px-5 py-3 rounded-2xl shadow-2xl cursor-pointer hover:border-indigo-500 transition-all z-[9999] flex items-center gap-4 group">
-          <div className="flex flex-col">
-            <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-widest leading-none mb-1">{subject || 'Studying'}</span>
-            <span className="font-mono font-bold text-xl leading-none text-indigo-400">{formatTime(timeLeft)}</span>
-          </div>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5 text-neutral-600 group-hover:text-indigo-400 transition"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-        </div>,
-        document.body
-      )}
+            <div className={`mt-8 font-mono text-6xl font-black tabular-nums tracking-tighter transition-colors sm:text-8xl ${focusLockActive ? 'text-red-400' : 'text-white'}`}>
+              {formatCountdown(displayedRemaining)}
+            </div>
+            <p className="mt-3 text-xs text-neutral-500">
+              {timerState.isRunning ? `Studying ${displayedSubject || 'your subject'}` : timerState.completed ? 'Session complete' : hasSession ? 'Paused — resume when ready' : 'Ready to focus'}
+            </p>
+            {focusLockRemaining > 0 && <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-red-400">Focus lock · {formatCountdown(focusLockRemaining)} remaining</p>}
 
-      {WorkspaceUI}
-    </section>
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+              {!timerState.isRunning && (
+                <button type="button" onClick={startTimer} disabled={!canManageTimer || !currentUserId || isSavingSession} className="cursor-pointer rounded-xl bg-indigo-600 px-6 py-3 text-sm font-bold text-white shadow-[0_0_20px_rgba(79,70,229,0.25)] transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">
+                  {hasSession && !timerState.completed ? 'Resume' : 'Start session'}
+                </button>
+              )}
+              {timerState.isRunning && (
+                <button type="button" onClick={() => void pauseTimer()} disabled={!canManageTimer || isSavingSession} className="cursor-pointer rounded-xl bg-amber-500 px-6 py-3 text-sm font-bold text-black transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50">
+                  {isSavingSession ? 'Saving…' : 'Pause'}
+                </button>
+              )}
+              <button type="button" onClick={() => void resetTimer()} disabled={!canManageTimer || isSavingSession} className="cursor-pointer rounded-xl border border-neutral-700 bg-neutral-900 px-5 py-3 text-sm font-bold text-neutral-200 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50">Reset</button>
+              <button type="button" onClick={() => { if (!focusLockActive) setShowFocusWarning(true); }} disabled={focusLockActive} className={`cursor-pointer rounded-xl border px-5 py-3 text-sm font-bold transition disabled:cursor-not-allowed ${focusLockActive ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-neutral-700 bg-neutral-900 text-neutral-300 hover:border-red-500/50 hover:text-red-300'}`}>
+                {focusLockActive ? `Locked · ${formatCountdown(focusLockRemaining)}` : 'Focus lock'}
+              </button>
+            </div>
+
+            {!canManageTimer && timerState.isRunning && <p className="mt-4 text-center text-[10px] text-neutral-500">This room timer is controlled by another student.</p>}
+            {historyError && <p className="mt-4 max-w-md text-center text-xs text-amber-300">{historyError}</p>}
+          </div>
+        )}
+
+        {activeTab === 'NOTES' && <textarea value={notesContent} onChange={(event) => setNotesContent(event.target.value)} placeholder="Type your private study notes here..." className="min-h-0 flex-1 w-full resize-none rounded-xl border border-neutral-800 bg-[#121212] p-6 text-white shadow-inner outline-none focus:border-indigo-500" />}
+        {activeTab === 'WHITEBOARD' && <div className="relative min-h-0 flex-1 w-full cursor-crosshair overflow-hidden rounded-xl border border-neutral-800 bg-[#121212]"><canvas ref={canvasRef} onMouseDown={startDraw} onMouseMove={draw} onMouseUp={stopDraw} onMouseLeave={stopDraw} className="block h-full w-full" /></div>}
+        {activeTab === 'PDF' && (
+          <div className="relative flex min-h-0 flex-1 w-full flex-col overflow-hidden rounded-xl border border-neutral-800 bg-[#121212]">
+            {!pdfUrl ? <div className="flex flex-1 flex-col items-center justify-center gap-4"><label className="cursor-pointer rounded-lg bg-indigo-600 px-6 py-3 font-bold text-white shadow-lg transition hover:bg-indigo-500">Upload PDF<input type="file" accept="application/pdf" className="hidden" onChange={handlePdfUpload} /></label></div> : <iframe src={pdfUrl} className="h-full w-full flex-1 border-none bg-white" title="PDF Viewer" />}
+          </div>
+        )}
+      </div>
+
+      {activeTab !== 'TIMER' && timerState.isRunning && <StudyMiniTimer timerState={timerState} focusLockExpiresAt={focusLockActive && focusLock ? focusLock.expiresAt : null} onOpen={() => setActiveTab('TIMER')} />}
+    </div>
   );
 }
