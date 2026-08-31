@@ -51,13 +51,26 @@ DROP POLICY IF EXISTS "Users can add themselves on creation" ON public.room_memb
 DROP POLICY IF EXISTS "users join rooms" ON public.room_members;
 
 -- Create new insert policy that forces role='member' and join_status='pending'
--- Only the room creator (owner) can insert with role='owner' via the room creation flow
+-- Exceptions: room creator becomes owner of their own new room;
+-- public rooms auto-approve members instantly.
 CREATE POLICY "Users can request to join rooms" ON public.room_members
 FOR INSERT TO authenticated
 WITH CHECK (
   auth.uid() = user_id
-  AND role = 'member'
-  AND join_status = 'pending'
+  AND (
+    -- Standard join request (private rooms: pending approval)
+    (role = 'member' AND join_status = 'pending')
+    -- Room creator becomes owner of their own new room
+    OR (role = 'owner' AND join_status = 'approved' AND EXISTS (
+      SELECT 1 FROM public.rooms r
+      WHERE r.id = room_id AND r.created_by = auth.uid()
+    ))
+    -- Public rooms auto-approve members instantly
+    OR (role = 'member' AND join_status = 'approved' AND EXISTS (
+      SELECT 1 FROM public.rooms r
+      WHERE r.id = room_id AND r.is_private = false
+    ))
+  )
 );
 
 -- Drop existing problematic update policy

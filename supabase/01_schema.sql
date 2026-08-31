@@ -613,7 +613,11 @@ CREATE POLICY "Room members read room messages" ON public.messages FOR SELECT TO
 -- Name: room_members Users can request to join rooms; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Users can request to join rooms" ON public.room_members FOR INSERT TO authenticated WITH CHECK (((auth.uid() = user_id) AND (role = 'member'::text) AND (join_status = 'pending'::text)));
+CREATE POLICY "Users can request to join rooms" ON public.room_members FOR INSERT TO authenticated WITH CHECK (((auth.uid() = user_id) AND (((role = 'member'::text) AND (join_status = 'pending'::text)) OR ((role = 'owner'::text) AND (join_status = 'approved'::text) AND (EXISTS ( SELECT 1
+   FROM public.rooms r
+  WHERE ((r.id = room_members.room_id) AND (r.created_by = auth.uid()))))) OR ((role = 'member'::text) AND (join_status = 'approved'::text) AND (EXISTS ( SELECT 1
+   FROM public.rooms r
+  WHERE ((r.id = room_members.room_id) AND (r.is_private = false))))))));
 
 
 --
