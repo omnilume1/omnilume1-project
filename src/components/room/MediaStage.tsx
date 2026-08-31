@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import dynamic from 'next/dynamic';
-import { getActiveTemporaryMedia, logCastHistory, logTemporaryMedia } from '@/actions/media';
+import { getActiveTemporaryMedia, logCastHistory, logTemporaryMedia, getSignedStorageUrl } from '@/actions/media';
 import type { RoomSyncValue } from '@/hooks/useRoomSync';
 import { uploadFileWithProgress } from '@/lib/storage';
 import { createClient } from '@/utils/supabase/client';
@@ -291,14 +291,27 @@ export default function MediaStage({ roomId, currentUserRole, sync }: MediaStage
     }
   };
 
-  const castHistoryItem = (item: TemporaryMedia) => {
+  const castHistoryItem = async (item: TemporaryMedia) => {
     if (!canCast) return;
     setPlayerError(null);
     setErrorUrl(null);
     readyCastIdRef.current = null;
     setReadyCastId(null);
+
+    // Check if this is a URL cast (external URL) or file path (needs signed URL)
+    let castUrl = item.file_url;
+    if (!item.file_url.startsWith('http')) {
+      // This is a file path, generate signed URL
+      const result = await getSignedStorageUrl(item.file_url, roomId);
+      if (!result.success || !result.url) {
+        setPlayerError(result.error ?? 'Unable to generate playback URL.');
+        return;
+      }
+      castUrl = result.url;
+    }
+
     broadcastEvent('cast', {
-      url: item.file_url,
+      url: castUrl,
       title: item.file_name,
       sourceType: item.media_type === 'url' ? 'url' : 'upload',
       mediaId: item.id,
@@ -318,8 +331,10 @@ export default function MediaStage({ roomId, currentUserRole, sync }: MediaStage
       const filePath = `${roomId}/sub-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
       const { error } = await supabase.storage.from('room_attachments').upload(filePath, file, { cacheControl: '3600' });
       if (error) throw error;
-      const { data: { publicUrl } } = supabase.storage.from('room_attachments').getPublicUrl(filePath);
-      broadcastEvent('subtitle_upload', { subtitleUrl: publicUrl });
+      // Generate signed URL for subtitle (private storage)
+      const result = await getSignedStorageUrl(filePath, roomId);
+      if (!result.success || !result.url) throw new Error(result.error ?? 'Unable to generate subtitle URL.');
+      broadcastEvent('subtitle_upload', { subtitleUrl: result.url });
     } catch (error) {
       alert(`Subtitle upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
@@ -349,15 +364,21 @@ export default function MediaStage({ roomId, currentUserRole, sync }: MediaStage
       });
 
       setLocalUpload((current) => current ? { ...current, loaded: current.total, percent: 100, phase: 'saving' } : current);
-      const { data: { publicUrl } } = supabase.storage.from('room_attachments').getPublicUrl(filePath);
       const mediaType = file.type.startsWith('audio/') ? 'audio' : 'video';
-      const result = await logTemporaryMedia(roomId, file.name, publicUrl, mediaType);
+      // Store file path (not public URL) for private storage compatibility
+      const result = await logTemporaryMedia(roomId, file.name, filePath, mediaType);
       if (!result.success) throw new Error(result.error ?? 'Unable to save the uploaded media.');
+
+      // Generate signed URL for immediate casting
+      const signedUrlResult = await getSignedStorageUrl(filePath, roomId);
+      if (!signedUrlResult.success || !signedUrlResult.url) {
+        throw new Error(signedUrlResult.error ?? 'Unable to generate playback URL.');
+      }
 
       // The file is immediately available to the room and is also added to
       // the same 24-hour history used by the Files tab.
       broadcastEvent('cast', {
-        url: publicUrl,
+        url: signedUrlResult.url,
         title: file.name,
         sourceType: 'upload',
         speed: 1,

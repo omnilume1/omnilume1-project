@@ -74,6 +74,8 @@ CREATE FUNCTION public.get_room_by_identifier(identifier text) RETURNS SETOF pub
   limit 1;
 $$;
 
+REVOKE EXECUTE ON FUNCTION public.get_room_by_identifier(text) FROM anon;
+
 
 --
 -- Name: message_reactions; Type: TABLE; Schema: public; Owner: -
@@ -478,10 +480,12 @@ CREATE POLICY "Allow read access to public keys" ON public.user_keys FOR SELECT 
 
 
 --
--- Name: room_messages Anyone can read room messages; Type: POLICY; Schema: public; Owner: -
+-- Name: room_messages Room members can read room messages; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Anyone can read room messages" ON public.room_messages FOR SELECT USING (true);
+CREATE POLICY "Room members can read room messages" ON public.room_messages FOR SELECT TO authenticated USING ((EXISTS ( SELECT 1
+   FROM public.room_members rm
+  WHERE ((rm.room_id = room_messages.room_id) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text)))));
 
 
 --
@@ -492,10 +496,12 @@ CREATE POLICY "Anyone can view reactions" ON public.message_reactions FOR SELECT
 
 
 --
--- Name: temporary_media Anyone in room can view temporary media; Type: POLICY; Schema: public; Owner: -
+-- Name: temporary_media Approved room members can view temporary media; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Anyone in room can view temporary media" ON public.temporary_media FOR SELECT USING (true);
+CREATE POLICY "Approved room members can view temporary media" ON public.temporary_media FOR SELECT TO authenticated USING ((EXISTS ( SELECT 1
+   FROM public.room_members rm
+  WHERE ((rm.room_id = temporary_media.room_id) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text)))));
 
 
 --
@@ -506,10 +512,12 @@ CREATE POLICY "Authenticated users can create rooms" ON public.rooms FOR INSERT 
 
 
 --
--- Name: room_messages Authenticated users can insert room messages; Type: POLICY; Schema: public; Owner: -
+-- Name: room_messages Room members can send room messages; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Authenticated users can insert room messages" ON public.room_messages FOR INSERT TO authenticated WITH CHECK ((auth.uid() = user_id));
+CREATE POLICY "Room members can send room messages" ON public.room_messages FOR INSERT TO authenticated WITH CHECK (((auth.uid() = user_id) AND (EXISTS ( SELECT 1
+   FROM public.room_members rm
+  WHERE ((rm.room_id = room_messages.room_id) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text))))));
 
 
 --
@@ -520,17 +528,14 @@ CREATE POLICY "Creators can view their own rooms" ON public.rooms FOR SELECT USI
 
 
 --
--- Name: messages Enable insert access for authenticated users; Type: POLICY; Schema: public; Owner: -
+-- Name: messages Users can insert messages; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Enable insert access for authenticated users" ON public.messages FOR INSERT WITH CHECK ((auth.uid() = sender_id));
-
-
---
--- Name: messages Enable read access for all users; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY "Enable read access for all users" ON public.messages FOR SELECT USING (true);
+CREATE POLICY "Users can insert messages" ON public.messages FOR INSERT TO authenticated WITH CHECK ((((chat_id IS NOT NULL) AND (auth.uid() = sender_id) AND (EXISTS ( SELECT 1
+   FROM public.private_chats pc
+  WHERE ((pc.id = messages.chat_id) AND ((pc.user_one = auth.uid()) OR (pc.user_two = auth.uid())))))) OR ((room_id IS NOT NULL) AND (auth.uid() = sender_id) AND (EXISTS ( SELECT 1
+   FROM public.room_members rm
+  WHERE ((rm.room_id = messages.room_id) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text)))))));
 
 
 --
@@ -605,17 +610,10 @@ CREATE POLICY "Room members read room messages" ON public.messages FOR SELECT TO
 
 
 --
--- Name: messages Senders insert messages; Type: POLICY; Schema: public; Owner: -
+-- Name: room_members Users can request to join rooms; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Senders insert messages" ON public.messages FOR INSERT TO authenticated WITH CHECK ((auth.uid() = sender_id));
-
-
---
--- Name: room_members Users can add themselves on creation; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY "Users can add themselves on creation" ON public.room_members FOR INSERT TO authenticated WITH CHECK ((auth.uid() = user_id));
+CREATE POLICY "Users can request to join rooms" ON public.room_members FOR INSERT TO authenticated WITH CHECK (((auth.uid() = user_id) AND (role = 'member'::text) AND (join_status = 'pending'::text)));
 
 
 --
@@ -640,10 +638,12 @@ CREATE POLICY "Users can update own messages" ON public.messages FOR UPDATE USIN
 
 
 --
--- Name: temporary_media Users can upload temporary media; Type: POLICY; Schema: public; Owner: -
+-- Name: temporary_media Approved room members can upload temporary media; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Users can upload temporary media" ON public.temporary_media FOR INSERT WITH CHECK ((auth.uid() = user_id));
+CREATE POLICY "Approved room members can upload temporary media" ON public.temporary_media FOR INSERT TO authenticated WITH CHECK (((auth.uid() = user_id) AND (EXISTS ( SELECT 1
+   FROM public.room_members rm
+  WHERE ((rm.room_id = temporary_media.room_id) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text))))));
 
 
 --
@@ -654,17 +654,12 @@ CREATE POLICY "Users update own public key" ON public.user_keys TO authenticated
 
 
 --
--- Name: room_messages authenticated read room messages; Type: POLICY; Schema: public; Owner: -
+-- Name: room_members Users can update own membership status; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "authenticated read room messages" ON public.room_messages FOR SELECT TO authenticated USING (true);
-
-
---
--- Name: room_messages authenticated send room messages; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY "authenticated send room messages" ON public.room_messages FOR INSERT TO authenticated WITH CHECK ((auth.uid() = user_id));
+CREATE POLICY "Users can update own membership status" ON public.room_members FOR UPDATE TO authenticated USING ((auth.uid() = user_id)) WITH CHECK (((auth.uid() = user_id) AND (role = ( SELECT room_members.role
+   FROM public.room_members
+  WHERE ((room_members.room_id = room_members.room_id) AND (room_members.user_id = auth.uid())))) AND (join_status = ANY (ARRAY['pending'::text, 'rejected'::text]))));
 
 
 --
@@ -742,13 +737,6 @@ ALTER TABLE public.temporary_media ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_keys ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: room_members users join rooms; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY "users join rooms" ON public.room_members FOR INSERT TO authenticated WITH CHECK ((auth.uid() = user_id));
-
-
---
 -- Name: room_members users leave rooms; Type: POLICY; Schema: public; Owner: -
 --
 
@@ -767,13 +755,6 @@ CREATE POLICY "users manage own profile" ON public.profiles TO authenticated USI
 --
 
 CREATE POLICY "users manage own study sessions" ON public.study_sessions TO authenticated USING ((auth.uid() = user_id)) WITH CHECK ((auth.uid() = user_id));
-
-
---
--- Name: room_members users update own membership; Type: POLICY; Schema: public; Owner: -
---
-
-CREATE POLICY "users update own membership" ON public.room_members FOR UPDATE TO authenticated USING ((auth.uid() = user_id)) WITH CHECK ((auth.uid() = user_id));
 
 
 --

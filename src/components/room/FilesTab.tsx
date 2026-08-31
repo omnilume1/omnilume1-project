@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { getActiveTemporaryMedia, logTemporaryMedia } from '@/actions/media';
+import { getActiveTemporaryMedia, logTemporaryMedia, getSignedStorageUrl } from '@/actions/media';
 import type { RoomSyncValue } from '@/hooks/useRoomSync';
 import { uploadFileWithProgress } from '@/lib/storage';
 import { createClient } from '@/utils/supabase/client';
@@ -92,9 +92,8 @@ export default function FilesTab({ roomId, currentUserRole, sync }: FilesTabProp
       });
 
       setUpload((current) => current ? { ...current, loaded: current.total, percent: 100, phase: 'saving' } : current);
-      const { data: { publicUrl } } = supabase.storage.from('room_attachments').getPublicUrl(filePath);
       const mediaType = file.type.startsWith('audio/') ? 'audio' : 'video';
-      const result = await logTemporaryMedia(roomId, file.name, publicUrl, mediaType);
+      const result = await logTemporaryMedia(roomId, file.name, filePath, mediaType);
       if (!result.success) throw new Error(result.error ?? 'Unable to save the uploaded media.');
       await loadMedia();
     } catch (uploadError) {
@@ -107,10 +106,23 @@ export default function FilesTab({ roomId, currentUserRole, sync }: FilesTabProp
     }
   };
 
-  const handleCast = (media: TemporaryMedia) => {
+  const handleCast = async (media: TemporaryMedia) => {
     if (!canCast) return;
+
+    // Check if this is a URL cast (external URL) or file path (needs signed URL)
+    let castUrl = media.file_url;
+    if (!media.file_url.startsWith('http')) {
+      // This is a file path, generate signed URL
+      const result = await getSignedStorageUrl(media.file_url, roomId);
+      if (!result.success || !result.url) {
+        setError(result.error ?? 'Unable to generate playback URL.');
+        return;
+      }
+      castUrl = result.url;
+    }
+
     broadcastEvent('cast', {
-      url: media.file_url,
+      url: castUrl,
       title: media.file_name,
       sourceType: 'upload',
       mediaId: media.id,
