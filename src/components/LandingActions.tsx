@@ -2,28 +2,72 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createLocalRoomCode, normalizeRoomId } from "@/lib/room";
+import Link from "next/link";
+import { processRoomJoin } from "@/actions/rooms";
 
 export function LandingActions() {
   const router = useRouter();
   const [joinCode, setJoinCode] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
+  const [isJoining, setIsJoining] = useState(false);
+  const [message, setMessage] = useState<{
+    text: string;
+    type: "info" | "error" | "success" | "pending";
+  } | null>(null);
 
   function handleCreateRoom() {
-    const code = createLocalRoomCode();
-    router.push(`/room/${code}`);
+    router.push("/create-room");
   }
 
-  function handleJoinRoom(event: FormEvent<HTMLFormElement>) {
+  async function handleJoinRoom(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const code = normalizeRoomId(joinCode);
+    const trimmed = joinCode.trim();
 
-    if (!code) {
-      setStatus("Enter a room code to continue.");
+    if (!trimmed) {
+      setMessage({ text: "Please enter a room code, username, or link.", type: "error" });
       return;
     }
 
-    router.push(`/room/${code}`);
+    setIsJoining(true);
+    setMessage(null);
+
+    try {
+      const result = await processRoomJoin(trimmed);
+
+      if (result.status === "approved") {
+        router.push(`/room/${result.roomId}`);
+      } else if (result.status === "pending") {
+        setMessage({
+          text: "Your request has been sent. You will be able to join once a room admin approves you.",
+          type: "pending",
+        });
+      } else {
+        setMessage({
+          text: `Unexpected status: ${result.status}. Please try again.`,
+          type: "error",
+        });
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+
+      if (msg === "Unauthorized" || msg.toLowerCase().includes("unauthorized")) {
+        setMessage({
+          text: "Please sign in to join a room.",
+          type: "info",
+        });
+      } else if (msg.toLowerCase().includes("not found")) {
+        setMessage({
+          text: "We could not find a room with that code or link. Please check and try again.",
+          type: "error",
+        });
+      } else {
+        setMessage({
+          text: msg || "Something went wrong. Please try again.",
+          type: "error",
+        });
+      }
+    } finally {
+      setIsJoining(false);
+    }
   }
 
   return (
@@ -50,29 +94,56 @@ export function LandingActions() {
               name="join-room"
               value={joinCode}
               onChange={(event) => {
-                setJoinCode(event.target.value.toUpperCase());
-                if (status) setStatus(null);
+                setJoinCode(event.target.value);
+                if (message) setMessage(null);
               }}
-              placeholder="Enter room code"
+              placeholder="Room code, username, or link"
               autoComplete="off"
               spellCheck={false}
-              className="h-12 min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/40 px-4 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-accent/50"
+              disabled={isJoining}
+              className="h-12 min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/40 px-4 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-accent/50 disabled:opacity-50"
             />
             <button
               type="submit"
-              className="h-12 shrink-0 rounded-2xl border border-white/10 bg-white/10 px-4 text-sm font-medium text-zinc-100 transition hover:bg-white/15"
+              disabled={isJoining}
+              className="h-12 shrink-0 rounded-2xl border border-white/10 bg-white/10 px-4 text-sm font-medium text-zinc-100 transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Join Room
+              {isJoining ? "Joining..." : "Join Room"}
             </button>
           </form>
         </div>
       </div>
 
-      {status ? (
-        <p className="mt-4 text-center text-sm text-zinc-400">{status}</p>
-      ) : (
+      {message && (
+        <p
+          className={`mt-4 text-center text-sm ${
+            message.type === "error"
+              ? "text-red-400"
+              : message.type === "pending"
+              ? "text-amber-400"
+              : message.type === "success"
+              ? "text-emerald-400"
+              : "text-zinc-400"
+          }`}
+        >
+          {message.text}
+          {message.type === "info" && (
+            <>
+              {" "}
+              <Link
+                href="/login"
+                className="underline hover:text-zinc-200"
+              >
+                Sign in
+              </Link>
+            </>
+          )}
+        </p>
+      )}
+
+      {!message && (
         <p className="mt-4 text-center text-sm text-zinc-500">
-          No account required for this preview.
+          Sign in to create or join a room.
         </p>
       )}
     </div>
