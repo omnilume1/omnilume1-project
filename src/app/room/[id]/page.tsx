@@ -11,6 +11,7 @@ import StudyStage, { StudyMiniTimer } from '@/components/room/StudyStage';
 import { getRoomAccess } from '@/actions/members';
 import { convertRoomToGroup } from '@/actions/rooms';
 import { useRoomSync } from '@/hooks/useRoomSync';
+import { clearFocusLock } from '@/lib/focus-lock';
 
 type AccessStatus = 'loading' | 'approved' | 'pending' | 'not_found' | 'unauthorized' | 'public_not_joined' | 'private_not_joined';
 
@@ -138,6 +139,12 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
     return () => clearInterval(interval);
   }, [roomData]);
+
+  useEffect(() => {
+    if (accessStatus === 'not_found' || accessStatus === 'pending' || accessStatus === 'unauthorized' || accessStatus === 'public_not_joined' || accessStatus === 'private_not_joined' || isExpired) {
+      clearFocusLock();
+    }
+  }, [accessStatus, isExpired]);
 
   const [mainActivity, setMainActivity] = useState<'watch' | 'study' | 'whiteboard'>('watch');
   const [activeTool, setActiveTool] = useState<'chat' | 'members' | 'files' | 'notes' | 'timer'>('chat');
