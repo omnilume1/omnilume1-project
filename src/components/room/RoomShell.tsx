@@ -6,7 +6,9 @@ import MediaStage from "@/components/room/MediaStage";
 import { RoomControls } from "@/components/room/RoomControls";
 import { RoomSidebar } from "@/components/room/RoomSidebar";
 import GlobalFocusTrap from "@/components/GlobalFocusTrap";
+import RoomRealtimeProvider from "@/components/room/RoomRealtimeProvider";
 import { useRoomSync } from "@/hooks/useRoomSync";
+import { useRoomPresence } from "@/hooks/useRoomPresence";
 
 // Added currentUserRole to the props
 export function RoomShell({
@@ -18,9 +20,11 @@ export function RoomShell({
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const roomSync = useRoomSync(roomId, currentUserRole === "owner" || currentUserRole === "admin");
+  const roomPresence = useRoomPresence(roomId);
 
   return (
-    <div className="flex h-dvh min-h-0 flex-col bg-background">
+    <RoomRealtimeProvider sync={roomSync} presence={roomPresence}>
+      <div className="flex h-dvh min-h-0 flex-col bg-background">
       <GlobalFocusTrap />
 
       <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
@@ -48,7 +52,7 @@ export function RoomShell({
 
       <div className="relative flex min-h-0 flex-1">
         {/* Passed the currentUserRole prop to MediaStage */}
-        <MediaStage roomId={roomId} currentUserRole={currentUserRole} sync={roomSync} />
+        <MediaStage roomId={roomId} currentUserRole={currentUserRole} />
 
         <div
           className={`${sidebarOpen ? "absolute inset-y-0 right-0 z-20 flex w-[min(100%,20rem)] shadow-2xl" : "hidden"} lg:relative lg:flex lg:w-80 lg:shadow-none`}
@@ -58,6 +62,7 @@ export function RoomShell({
       </div>
 
       <RoomControls />
-    </div>
+      </div>
+    </RoomRealtimeProvider>
   );
 }

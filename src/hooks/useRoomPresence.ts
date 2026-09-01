@@ -3,14 +3,23 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@/utils/supabase/client';
 
-export function useRoomPresence(roomId: string) {
+export type RoomPresenceUser = { user_id: string; online_at: string };
+
+export type RoomPresenceValue = {
+  onlineUsers: RoomPresenceUser[];
+  onlineUserIds: string[];
+};
+
+export function useRoomPresence(roomId: string): RoomPresenceValue {
   const supabase = createClient();
-  const [onlineUsers, setOnlineUsers] = useState<Array<{ user_id: string; online_at: string }>>([]);
+  const [onlineUsers, setOnlineUsers] = useState<RoomPresenceUser[]>([]);
   // FIX: Added onlineUserIds to prevent the MembersTab .length crash
   const [onlineUserIds, setOnlineUserIds] = useState<string[]>([]);
 
   useEffect(() => {
     let isMounted = true;
+    if (!roomId) return;
+
     const presenceChannel = supabase.channel(`presence:${roomId}`, {
       config: { presence: { key: roomId } },
     });
@@ -19,7 +28,7 @@ export function useRoomPresence(roomId: string) {
       .on('presence', { event: 'sync' }, () => {
         if (!isMounted) return;
         const state = presenceChannel.presenceState();
-        const users = Object.values(state).flat() as Array<{ user_id: string; online_at: string }>;
+        const users = Object.values(state).flat() as RoomPresenceUser[];
         setOnlineUsers(users);
         setOnlineUserIds(users.map((u) => u.user_id));
       })

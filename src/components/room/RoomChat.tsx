@@ -2,13 +2,12 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/utils/supabase/client';
-import type { RoomSyncValue } from '@/hooks/useRoomSync';
+import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { deleteMessageForEveryone } from '@/actions/chat';
 
 interface RoomChatProps {
   roomId: string;
   currentUserRole: string | null;
-  sync: RoomSyncValue;
 }
 
 interface RoomChatMessage {
@@ -19,7 +18,7 @@ interface RoomChatMessage {
   created_at: string;
 }
 
-export default function RoomChat({ roomId, currentUserRole, sync }: RoomChatProps) {
+export default function RoomChat({ roomId, currentUserRole }: RoomChatProps) {
   const [messages, setMessages] = useState<RoomChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -29,7 +28,7 @@ export default function RoomChat({ roomId, currentUserRole, sync }: RoomChatProp
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
-  const { typingUsers, broadcastEvent } = sync;
+  const { typingUsers, broadcastEvent } = useRoomRealtime();
 
   const isAdmin = currentUserRole === 'owner' || currentUserRole === 'admin';
 

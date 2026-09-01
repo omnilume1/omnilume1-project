@@ -9,7 +9,9 @@ import {
   type MouseEvent,
 } from 'react';
 import { deleteStudySubject, getStudyHistory, logStudySession, type StudyHistoryEntry } from '@/actions/study';
-import type { RoomSyncValue, TimerState } from '@/hooks/useRoomSync';
+import StudySubTimer from '@/components/room/StudySubTimer';
+import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
+import type { TimerState } from '@/hooks/useRoomSync';
 import {
   FOCUS_LOCK_EVENT,
   activateFocusLock,
@@ -24,7 +26,6 @@ type StudyTab = 'TIMER' | 'NOTES' | 'WHITEBOARD' | 'PDF';
 interface StudyStageProps {
   roomId: string;
   focusRoomPath: string;
-  sync: RoomSyncValue;
   timerNavigationRequest?: number;
 }
 
@@ -166,8 +167,8 @@ export function StudyMiniTimer({ timerState, roomId, focusLockExpiresAt, onOpen 
   );
 }
 
-export default function StudyStage({ roomId, focusRoomPath, sync, timerNavigationRequest = 0 }: StudyStageProps) {
-  const { timerState, broadcastEvent, currentUserId } = sync;
+export default function StudyStage({ roomId, focusRoomPath, timerNavigationRequest = 0 }: StudyStageProps) {
+  const { timerState, broadcastEvent, currentUserId } = useRoomRealtime();
   const [activeTab, setActiveTab] = useState<StudyTab>('TIMER');
   const [subject, setSubject] = useState('');
   const [inputHrs, setInputHrs] = useState(0);
@@ -541,9 +542,9 @@ export default function StudyStage({ roomId, focusRoomPath, sync, timerNavigatio
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col">
-        {activeTab === 'TIMER' && (
-          <div className="flex h-full w-full flex-col items-center justify-center overflow-y-auto py-4">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className={activeTab === 'TIMER' ? 'min-h-0 flex-1 overflow-y-auto px-1 py-4' : 'hidden'}>
+          <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col items-center">
             <div className="w-full max-w-md">
               <label htmlFor="study-subject" className="mb-2 block text-center text-[10px] font-bold uppercase tracking-widest text-neutral-500">Current subject</label>
               <input
@@ -602,8 +603,13 @@ export default function StudyStage({ roomId, focusRoomPath, sync, timerNavigatio
 
             {!canManageTimer && timerState.isRunning && <p className="mt-4 text-center text-[10px] text-neutral-500">This room timer is controlled by another student.</p>}
             {historyError && <p className="mt-4 max-w-md text-center text-xs text-amber-300">{historyError}</p>}
+
+            <div className="mt-8 grid w-full grid-cols-1 gap-3 pb-4 sm:grid-cols-2">
+              <StudySubTimer roomId={roomId} currentUserId={currentUserId} slot={1} />
+              <StudySubTimer roomId={roomId} currentUserId={currentUserId} slot={2} />
+            </div>
           </div>
-        )}
+        </div>
 
         {activeTab === 'NOTES' && <textarea value={notesContent} onChange={(event) => setNotesContent(event.target.value)} placeholder="Type your private study notes here..." className="min-h-0 flex-1 w-full resize-none rounded-xl border border-neutral-800 bg-[#121212] p-6 text-white shadow-inner outline-none focus:border-indigo-500" />}
         {activeTab === 'WHITEBOARD' && <div className="relative min-h-0 flex-1 w-full cursor-crosshair overflow-hidden rounded-xl border border-neutral-800 bg-[#121212]"><canvas ref={canvasRef} onMouseDown={startDraw} onMouseMove={draw} onMouseUp={stopDraw} onMouseLeave={stopDraw} className="block h-full w-full" /></div>}

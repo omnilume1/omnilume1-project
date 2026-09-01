@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { getRoomMembersList, manageMemberRequest } from '@/actions/members';
-// Phase 21: Import the presence hook
-import { useRoomPresence } from '@/hooks/useRoomPresence'; 
+import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 
 interface MembersTabProps {
   roomId: string;
@@ -21,8 +20,7 @@ export default function MembersTab({ roomId, currentUserRole }: MembersTabProps)
   const [members, setMembers] = useState<RoomMember[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Phase 21: Initialize the live WebSocket connection
-  const { onlineUserIds } = useRoomPresence(roomId);
+  const { onlineUserIds } = useRoomRealtime();
 
   const fetchMembers = async () => {
     try {

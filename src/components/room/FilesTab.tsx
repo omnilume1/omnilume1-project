@@ -2,14 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { getActiveTemporaryMedia, logTemporaryMedia, getSignedStorageUrl } from '@/actions/media';
-import type { RoomSyncValue } from '@/hooks/useRoomSync';
+import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { uploadFileWithProgress } from '@/lib/storage';
 import { createClient } from '@/utils/supabase/client';
 
 interface FilesTabProps {
   roomId: string;
   currentUserRole: string | null;
-  sync: RoomSyncValue;
 }
 
 interface TemporaryMedia {
@@ -38,8 +37,8 @@ function hoursUntil(expiresAt: string) {
   return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 3_600_000));
 }
 
-export default function FilesTab({ roomId, currentUserRole, sync }: FilesTabProps) {
-  const { broadcastEvent } = sync;
+export default function FilesTab({ roomId, currentUserRole }: FilesTabProps) {
+  const { broadcastEvent } = useRoomRealtime();
   const [mediaList, setMediaList] = useState<TemporaryMedia[]>([]);
   const [upload, setUpload] = useState<UploadState | null>(null);
   const [error, setError] = useState<string | null>(null);

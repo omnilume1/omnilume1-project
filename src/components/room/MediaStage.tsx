@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import dynamic from 'next/dynamic';
 import { getActiveTemporaryMedia, logCastHistory, logTemporaryMedia, getSignedStorageUrl } from '@/actions/media';
-import type { RoomSyncValue } from '@/hooks/useRoomSync';
+import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { uploadFileWithProgress } from '@/lib/storage';
 import { createClient } from '@/utils/supabase/client';
 
@@ -12,7 +12,6 @@ const Player = dynamic(() => import('react-player').then((module) => module.defa
 interface MediaStageProps {
   roomId: string;
   currentUserRole: string | null;
-  sync: RoomSyncValue;
 }
 
 interface AudioTrackLike {
@@ -77,13 +76,13 @@ function normalizeCastUrl(value: string) {
   };
 }
 
-export default function MediaStage({ roomId, currentUserRole, sync }: MediaStageProps) {
+export default function MediaStage({ roomId, currentUserRole }: MediaStageProps) {
   const {
     mediaState,
     broadcastEvent,
     connectionState,
     recordMediaTime,
-  } = sync;
+  } = useRoomRealtime();
 
   const playerRef = useRef<HTMLVideoElementWithAudioTracks>(null);
   const subtitleFileRef = useRef<HTMLInputElement>(null);

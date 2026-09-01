@@ -11,7 +11,9 @@ import StudyStage, { StudyMiniTimer } from '@/components/room/StudyStage';
 import { getRoomAccess } from '@/actions/members';
 import { convertRoomToGroup } from '@/actions/rooms';
 import { getRecoveryRequestStatus, requestRoomRecovery, type RecoveryRequestStatus } from '@/actions/recovery';
+import RoomRealtimeProvider from '@/components/room/RoomRealtimeProvider';
 import { useRoomSync } from '@/hooks/useRoomSync';
+import { useRoomPresence } from '@/hooks/useRoomPresence';
 import { clearFocusLock } from '@/lib/focus-lock';
 
 type AccessStatus = 'loading' | 'approved' | 'pending' | 'expired' | 'not_found' | 'unauthorized' | 'public_not_joined' | 'private_not_joined';
@@ -191,6 +193,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [timerNavigationRequest, setTimerNavigationRequest] = useState(0);
   const roomIsExpired = accessStatus === 'expired' || isExpired;
   const roomSync = useRoomSync(roomIsExpired ? '' : (roomData?.id ?? ''), userRole === 'owner' || userRole === 'admin');
+  const roomPresence = useRoomPresence(roomData?.id ?? '');
   const focusRoomPath = `/room/${encodeURIComponent(identifier)}`;
 
   if (accessStatus === 'loading') return <div className="h-screen bg-[#050505] text-neutral-500 flex items-center justify-center text-sm animate-pulse">Verifying secure access...</div>;
@@ -259,7 +262,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   }
 
   return (
-    <div className="h-screen bg-[#050505] text-neutral-200 flex flex-col font-sans overflow-hidden selection:bg-neutral-800">
+    <RoomRealtimeProvider sync={roomSync} presence={roomPresence}>
+      <div className="h-screen bg-[#050505] text-neutral-200 flex flex-col font-sans overflow-hidden selection:bg-neutral-800">
       <header className="h-14 shrink-0 flex items-center justify-between px-6 border-b border-neutral-800 bg-[#0a0a0a]">
         <div className="flex items-center gap-4">
           <span className="font-semibold text-white tracking-wide text-sm uppercase">{roomData?.is_group ? 'GROUP' : 'ROOM'} / {roomData?.name || identifier}</span>
@@ -294,7 +298,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             aria-hidden={mainActivity !== 'watch'}
             className={`absolute inset-0 flex min-h-0 ${mainActivity === 'watch' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
           >
-            <MediaStage roomId={roomData.id} currentUserRole={userRole} sync={roomSync} />
+            <MediaStage roomId={roomData.id} currentUserRole={userRole} />
           </div>
 
           {/* Keep the study timer mounted too, so it continues through room
@@ -306,7 +310,6 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             <StudyStage
               roomId={roomData.id}
               focusRoomPath={focusRoomPath}
-              sync={roomSync}
               timerNavigationRequest={timerNavigationRequest}
             />
           </div>
@@ -344,12 +347,13 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             <h3 className="font-medium text-sm text-white uppercase tracking-wider">{activeTool}</h3>
           </div>
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            {activeTool === 'chat' && roomData && <RoomChat roomId={roomData.id} currentUserRole={userRole} sync={roomSync} />}
+            {activeTool === 'chat' && roomData && <RoomChat roomId={roomData.id} currentUserRole={userRole} />}
             {activeTool === 'members' && roomData && <MembersTab roomId={roomData.id} currentUserRole={userRole} />}
-            {activeTool === 'files' && roomData && <FilesTab roomId={roomData.id} currentUserRole={userRole} sync={roomSync} />}
+            {activeTool === 'files' && roomData && <FilesTab roomId={roomData.id} currentUserRole={userRole} />}
           </div>
         </aside>
       </div>
-    </div>
+      </div>
+    </RoomRealtimeProvider>
   );
 }
