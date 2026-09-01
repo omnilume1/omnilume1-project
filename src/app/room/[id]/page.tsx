@@ -347,7 +347,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             <h3 className="font-medium text-sm text-white uppercase tracking-wider">{activeTool}</h3>
           </div>
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            {activeTool === 'chat' && roomData && <RoomChat roomId={roomData.id} currentUserRole={userRole} />}
+            {activeTool === 'chat' && roomData && <RoomChat roomId={roomData.id} />}
             {activeTool === 'members' && roomData && <MembersTab roomId={roomData.id} currentUserRole={userRole} />}
             {activeTool === 'files' && roomData && <FilesTab roomId={roomData.id} currentUserRole={userRole} />}
           </div>

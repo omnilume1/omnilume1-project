@@ -7,7 +7,6 @@ import { deleteMessageForEveryone } from '@/actions/chat';
 
 interface RoomChatProps {
   roomId: string;
-  currentUserRole: string | null;
 }
 
 interface RoomChatMessage {
@@ -18,19 +17,19 @@ interface RoomChatMessage {
   created_at: string;
 }
 
-export default function RoomChat({ roomId, currentUserRole }: RoomChatProps) {
+export default function RoomChat({ roomId }: RoomChatProps) {
   const [messages, setMessages] = useState<RoomChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  
+
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [hiddenMessages, setHiddenMessages] = useState<Set<string>>(new Set());
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
   const { typingUsers, broadcastEvent } = useRoomRealtime();
-
-  const isAdmin = currentUserRole === 'owner' || currentUserRole === 'admin';
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -95,9 +94,25 @@ export default function RoomChat({ roomId, currentUserRole }: RoomChatProps) {
   };
 
   const handleDeleteForEveryone = async (msgId: string) => {
+    if (deletingMessageId) return;
+
     setActiveMenuId(null);
-    setMessages(prev => prev.map(msg => msg.id === msgId ? { ...msg, is_deleted: true, content: '🚫 This message was deleted' } : msg));
-    await deleteMessageForEveryone(msgId, roomId);
+    setDeleteError(null);
+    setDeletingMessageId(msgId);
+
+    try {
+      const result = await deleteMessageForEveryone(msgId, roomId);
+      if (!result.success) {
+        setDeleteError(result.error ?? 'Unable to delete message.');
+        return;
+      }
+
+      setMessages(prev => prev.map(msg => msg.id === msgId ? { ...msg, is_deleted: true, content: '🚫 This message was deleted' } : msg));
+    } catch {
+      setDeleteError('Unable to delete message.');
+    } finally {
+      setDeletingMessageId(null);
+    }
   };
 
   return (
@@ -105,6 +120,8 @@ export default function RoomChat({ roomId, currentUserRole }: RoomChatProps) {
       <div className="p-4 border-b border-neutral-800 bg-[#0a0a0a] z-10 flex justify-between items-center shadow-md">
         <h3 className="text-white font-bold text-sm">Room Chat</h3>
       </div>
+
+      {deleteError && <p className="border-b border-red-500/20 bg-red-500/5 px-4 py-2 text-xs text-red-300" role="alert">{deleteError}</p>}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
         {messages.length === 0 ? (
@@ -125,7 +142,7 @@ export default function RoomChat({ roomId, currentUserRole }: RoomChatProps) {
                 {activeMenuId === msg.id && (
                   <div className={`absolute top-full mt-1 z-50 bg-[#1a1a1a] border border-neutral-700 rounded-lg shadow-2xl py-1 w-40 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 ${isMe ? 'right-0' : 'left-0'}`}>
                     <button onClick={(e) => { e.stopPropagation(); handleDeleteForMe(msg.id); }} className="px-4 py-2 text-left text-xs text-white hover:bg-neutral-800 font-semibold transition cursor-pointer">Delete for me</button>
-                    {(isMe || isAdmin) && <button onClick={(e) => { e.stopPropagation(); handleDeleteForEveryone(msg.id); }} className="px-4 py-2 text-left text-xs text-red-400 hover:bg-neutral-800 font-semibold transition cursor-pointer">Delete for everyone</button>}
+                    {isMe && <button onClick={(e) => { e.stopPropagation(); handleDeleteForEveryone(msg.id); }} disabled={deletingMessageId === msg.id} className="px-4 py-2 text-left text-xs text-red-400 hover:bg-neutral-800 font-semibold transition cursor-pointer disabled:cursor-wait disabled:opacity-50">{deletingMessageId === msg.id ? 'Deleting...' : 'Delete for everyone'}</button>}
                   </div>
                 )}
                 <span className="text-[9px] text-neutral-600 mt-1 px-1 font-bold">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>

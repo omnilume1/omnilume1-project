@@ -144,13 +144,27 @@ export async function sendEncryptedMessage({
 
 export async function deleteMessageForEveryone(messageId: string, roomId: string) {
   try {
+    assertUuid(messageId, 'message ID');
+    assertUuid(roomId, 'room ID');
+
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
     if (authError || !user) throw new Error("Unauthorized");
     await assertActiveRoom(supabase, roomId);
 
-    const { error } = await supabase
+    const { data: membership, error: membershipError } = await supabase
+      .from('room_members')
+      .select('room_id')
+      .eq('room_id', roomId)
+      .eq('user_id', user.id)
+      .eq('join_status', 'approved')
+      .maybeSingle();
+
+    if (membershipError) throw new Error(membershipError.message);
+    if (!membership) throw new Error('Unauthorized');
+
+    const { data, error } = await supabase
       .from('messages')
       .update({
         is_deleted: true,
@@ -159,11 +173,20 @@ export async function deleteMessageForEveryone(messageId: string, roomId: string
       })
       .eq('id', messageId)
       .eq('room_id', roomId)
-      .eq('sender_id', user.id); // Validates against the sender
+      .eq('sender_id', user.id)
+      .eq('is_deleted', false)
+      .select('id')
+      .maybeSingle();
 
     if (error) throw new Error(error.message);
+    if (!data) throw new Error('Message not found or you are not allowed to delete it.');
+
     return { success: true };
   } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unable to delete message.' };
+    const message = error instanceof Error ? error.message : '';
+    const safeError = message === 'This room has expired and is no longer active.'
+      ? message
+      : 'Unable to delete message.';
+    return { success: false, error: safeError };
   }
 }
