@@ -20,6 +20,12 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Private chat encryption limitations
+
+Private chat messages are encrypted in the browser before they are sent to the server. Decryption happens on the user’s device using its private key. The server cannot recover a message when that private key is unavailable.
+
+Older messages may become unavailable if a key is missing, changed, rotated, corrupted, or stored on another device. Adding another device does not automatically transfer older private keys. Re-keying or resending may be required, and the current implementation does not provide automatic multi-device key backup or recovery.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
