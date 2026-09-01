@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/utils/supabase/server';
+import { assertActiveRoom, isRoomExpired } from '@/lib/room-lifecycle';
 
 // 1. Create Room (Upgraded with Expiration & Anonymous Mode)
 export async function createRoom(formData: FormData) {
@@ -14,8 +15,22 @@ export async function createRoom(formData: FormData) {
   const isPrivate = formData.get('is_private') === 'true';
   const isAnonymous = formData.get('is_anonymous') === 'true';
   
-  const expirationType = formData.get('expiration_type') as string || 'permanent';
-  const hours = Number(formData.get('expires_in_hours')) || 0;
+  const requestedExpirationType = formData.get('expiration_type');
+  const expirationType = requestedExpirationType === 'recoverable' || requestedExpirationType === 'irreversible'
+    ? requestedExpirationType
+    : requestedExpirationType === 'permanent' || requestedExpirationType === null
+      ? 'permanent'
+      : null;
+  if (!expirationType) throw new Error('Invalid expiration type.');
+
+  const rawHours = formData.get('expires_in_hours');
+  const hours = rawHours === null || rawHours === '' ? null : Number(rawHours);
+  if (expirationType !== 'permanent' && (hours === null || !Number.isFinite(hours) || hours <= 0 || hours > 720)) {
+    throw new Error('Temporary rooms require an expiration between 1 and 720 hours.');
+  }
+  if (expirationType === 'permanent' && hours !== null && (!Number.isFinite(hours) || hours < 0)) {
+    throw new Error('Invalid expiration value.');
+  }
 
   // Clean username (lowercase, no spaces, only alphanumeric/underscores/dots)
   const rawUsername = formData.get('username') as string;
@@ -23,7 +38,7 @@ export async function createRoom(formData: FormData) {
 
   // Calculate the exact death timestamp if it's a temporary room
   let expiresAt = null;
-  if (expirationType !== 'permanent' && hours > 0) {
+  if (expirationType !== 'permanent' && hours !== null) {
     expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
   }
 
@@ -58,7 +73,6 @@ export async function createRoom(formData: FormData) {
 
   return room.id;
 }
-
 // 2. Fetch Public Rooms for Explore Page
 export async function getPublicRooms() {
   const supabase = await createClient();
@@ -74,6 +88,7 @@ export async function getPublicRooms() {
       room_members(count)
     `)
     .eq('is_private', false)
+    .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
     .order('created_at', { ascending: false });
 
   if (error) throw new Error(error.message);
@@ -102,6 +117,9 @@ export async function processRoomJoin(identifier: string) {
   }
 
   const room = data[0];
+  if (isRoomExpired(room)) {
+    throw new Error('This room has expired and is no longer accepting joins.');
+  }
 
   // Check if the user already requested or joined
   const { data: existing } = await supabase
@@ -150,6 +168,8 @@ export async function convertRoomToGroup(roomId: string, groupUsername: string) 
   if (!member || member.role !== 'owner') {
     throw new Error("Only the room owner can convert this space to a group.");
   }
+
+  await assertActiveRoom(supabase, roomId);
 
   // Verify the room is allowed to be converted (Not Irreversible)
   const { data: room } = await supabase

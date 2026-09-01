@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/utils/supabase/server';
+import { assertActiveRoom, isRoomExpired } from '@/lib/room-lifecycle';
 
 // 1. The Bouncer: Checks if the user is allowed inside the room
 export async function getRoomAccess(identifier: string) {
@@ -27,12 +28,16 @@ export async function getRoomAccess(identifier: string) {
     return { status: 'private_not_joined', role: null, room };
   }
 
+  if (member.join_status === 'approved' && isRoomExpired(room)) {
+    return { status: 'expired', role: member.role, room };
+  }
+
   return { status: member.join_status, role: member.role, room };
 }
-
 // 2. Fetch the clipboard: Gets all members for the sidebar
 export async function getRoomMembersList(roomId: string) {
   const supabase = await createClient();
+  await assertActiveRoom(supabase, roomId);
   
   const { data, error } = await supabase
     .from('room_members')
@@ -49,12 +54,15 @@ export async function manageMemberRequest(roomId: string, targetUserId: string, 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
+  if (!user) throw new Error('Unauthorized');
+  await assertActiveRoom(supabase, roomId);
+
   // Verify the person clicking the button is the Owner or Admin
   const { data: me } = await supabase
     .from('room_members')
     .select('role')
     .eq('room_id', roomId)
-    .eq('user_id', user?.id)
+    .eq('user_id', user.id)
     .single();
 
   if (!me || (me.role !== 'owner' && me.role !== 'admin')) {

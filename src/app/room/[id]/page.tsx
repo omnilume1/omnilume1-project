@@ -10,10 +10,11 @@ import MediaStage from '@/components/room/MediaStage';
 import StudyStage, { StudyMiniTimer } from '@/components/room/StudyStage';
 import { getRoomAccess } from '@/actions/members';
 import { convertRoomToGroup } from '@/actions/rooms';
+import { getRecoveryRequestStatus, requestRoomRecovery, type RecoveryRequestStatus } from '@/actions/recovery';
 import { useRoomSync } from '@/hooks/useRoomSync';
 import { clearFocusLock } from '@/lib/focus-lock';
 
-type AccessStatus = 'loading' | 'approved' | 'pending' | 'not_found' | 'unauthorized' | 'public_not_joined' | 'private_not_joined';
+type AccessStatus = 'loading' | 'approved' | 'pending' | 'expired' | 'not_found' | 'unauthorized' | 'public_not_joined' | 'private_not_joined';
 
 type RoomData = {
   id: string;
@@ -37,7 +38,9 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
   const [timeLeft, setTimeLeft] = useState<string>('');
   const [isExpired, setIsExpired] = useState(false);
-  const [recoveryRequested, setRecoveryRequested] = useState(false);
+  const [recoveryStatus, setRecoveryStatus] = useState<RecoveryRequestStatus | 'none'>('none');
+  const [recoverySubmitting, setRecoverySubmitting] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
 
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [groupUsername, setGroupUsername] = useState('');
@@ -107,7 +110,10 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         const { status, role, room } = await getRoomAccess(identifier);
         setAccessStatus(status as AccessStatus);
         setUserRole(role);
-        if (room) setRoomData(room);
+        if (room) {
+          setRoomData(room);
+          setIsExpired(Boolean(room.expires_at && new Date(room.expires_at).getTime() <= Date.now()));
+        }
       } catch {
         setAccessStatus('not_found');
       }
@@ -141,15 +147,50 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   }, [roomData]);
 
   useEffect(() => {
-    if (accessStatus === 'not_found' || accessStatus === 'pending' || accessStatus === 'unauthorized' || accessStatus === 'public_not_joined' || accessStatus === 'private_not_joined' || isExpired) {
+    if (accessStatus === 'not_found' || accessStatus === 'pending' || accessStatus === 'expired' || accessStatus === 'unauthorized' || accessStatus === 'public_not_joined' || accessStatus === 'private_not_joined' || isExpired) {
       clearFocusLock();
     }
   }, [accessStatus, isExpired]);
 
+  useEffect(() => {
+    if (!roomData || roomData.expiration_type !== 'recoverable' || (!isExpired && accessStatus !== 'expired')) return;
+
+    let cancelled = false;
+    void getRecoveryRequestStatus(roomData.id).then((result) => {
+      if (cancelled) return;
+      if (result.success) {
+        setRecoveryStatus(result.request?.status ?? 'none');
+        setRecoveryError(null);
+      } else {
+        setRecoveryStatus('none');
+        setRecoveryError(result.error ?? 'Unable to load recovery status.');
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accessStatus, isExpired, roomData]);
+
+  const handleRecoveryRequest = async () => {
+    if (!roomData || recoverySubmitting || recoveryStatus === 'pending') return;
+
+    setRecoverySubmitting(true);
+    setRecoveryError(null);
+    const result = await requestRoomRecovery(roomData.id);
+    if (result.success) {
+      setRecoveryStatus(result.request?.status ?? 'pending');
+    } else {
+      setRecoveryError(result.error ?? 'Unable to submit recovery request.');
+    }
+    setRecoverySubmitting(false);
+  };
+
   const [mainActivity, setMainActivity] = useState<'watch' | 'study' | 'whiteboard'>('watch');
   const [activeTool, setActiveTool] = useState<'chat' | 'members' | 'files' | 'notes' | 'timer'>('chat');
   const [timerNavigationRequest, setTimerNavigationRequest] = useState(0);
-  const roomSync = useRoomSync(roomData?.id ?? '', userRole === 'owner' || userRole === 'admin');
+  const roomIsExpired = accessStatus === 'expired' || isExpired;
+  const roomSync = useRoomSync(roomIsExpired ? '' : (roomData?.id ?? ''), userRole === 'owner' || userRole === 'admin');
   const focusRoomPath = `/room/${encodeURIComponent(identifier)}`;
 
   if (accessStatus === 'loading') return <div className="h-screen bg-[#050505] text-neutral-500 flex items-center justify-center text-sm animate-pulse">Verifying secure access...</div>;
@@ -194,15 +235,23 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     );
   }
 
-  if (isExpired && roomData) {
+  if ((accessStatus === 'expired' || isExpired) && roomData) {
     const isIrreversible = roomData.expiration_type === 'irreversible';
+    const recoveryCopy = recoveryStatus === 'pending'
+      ? 'Recovery request pending review.'
+      : recoveryStatus === 'approved'
+        ? 'Recovery request approved.'
+        : recoveryStatus === 'rejected'
+          ? 'Recovery request was rejected.'
+          : null;
     return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center">
         <div className="max-w-md w-full border border-neutral-800 bg-neutral-950 p-8 rounded-2xl shadow-2xl flex flex-col items-center">
           <div className="w-16 h-16 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center text-2xl mb-4">{isIrreversible ? '🔥' : '🔒'}</div>
-          <h1 className={`text-xl font-bold mb-2 ${isIrreversible ? 'text-red-500' : 'text-amber-500'}`}>{isIrreversible ? 'Space Permanently Destroyed' : 'Space Quarantined'}</h1>
-          <p className="text-sm text-neutral-400 mb-6">The timer hit zero. {isIrreversible ? 'All data has been permanently wiped and cannot be recovered.' : 'Data is preserved but the room is locked.'}</p>
-          {!isIrreversible && (recoveryRequested ? <div className="w-full py-3 bg-emerald-950/40 border border-emerald-800 text-emerald-400 text-xs rounded-lg mb-4">✓ Recovery request submitted.</div> : <button onClick={() => setRecoveryRequested(true)} className="w-full py-2.5 bg-neutral-100 text-black font-semibold text-sm rounded-lg hover:bg-white mb-4">Request Admin Recovery</button>)}
+          <h1 className={`text-xl font-bold mb-2 ${isIrreversible ? 'text-red-500' : 'text-amber-500'}`}>{isIrreversible ? 'Space Access Ended' : 'Space Quarantined'}</h1>
+          <p className="text-sm text-neutral-400 mb-6">The timer hit zero. {isIrreversible ? 'Access has been cut off and the server cleanup process will permanently destroy this room.' : 'Data is preserved but inaccessible while the room is quarantined.'}</p>
+          {!isIrreversible && (recoveryCopy ? <div className="w-full py-3 bg-emerald-950/40 border border-emerald-800 text-emerald-400 text-xs rounded-lg mb-4">{recoveryCopy}</div> : <button onClick={handleRecoveryRequest} disabled={recoverySubmitting} className="w-full py-2.5 bg-neutral-100 text-black font-semibold text-sm rounded-lg hover:bg-white disabled:cursor-wait disabled:opacity-60 mb-4">{recoverySubmitting ? 'Submitting...' : 'Request Admin Recovery'}</button>)}
+          {recoveryError && <p className="mb-4 w-full rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-300">{recoveryError}</p>}
           <Link href="/explore" className="text-xs text-neutral-500 hover:text-white underline">Return to Explore</Link>
         </div>
       </div>

@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/utils/supabase/server';
+import { assertActiveRoom, roomExpirySeconds } from '@/lib/room-lifecycle';
 
 type MediaType = 'audio' | 'video' | 'url';
 
@@ -10,7 +11,6 @@ async function getAuthenticatedUser() {
   if (error || !user) throw new Error('Unauthorized');
   return { supabase, user };
 }
-
 async function assertCanCast(supabase: Awaited<ReturnType<typeof createClient>>, roomId: string, userId: string) {
   const { data: member, error } = await supabase
     .from('room_members')
@@ -38,9 +38,15 @@ export async function logTemporaryMedia(
     if (!['audio', 'video', 'url'].includes(mediaType)) throw new Error('Invalid media type.');
 
     const { supabase, user } = await getAuthenticatedUser();
+    const room = await assertActiveRoom(supabase, roomId);
     await assertCanCast(supabase, roomId, user.id);
 
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const mediaLifetimeSeconds = Math.min(
+      24 * 60 * 60,
+      roomExpirySeconds(room) ?? 24 * 60 * 60,
+    );
+    if (mediaLifetimeSeconds <= 0) throw new Error('This room has expired and is no longer active.');
+    const expiresAt = new Date(Date.now() + mediaLifetimeSeconds * 1000).toISOString();
     // Store the file path instead of public URL for private storage compatibility
     const { error } = await supabase.from('temporary_media').insert({
       room_id: roomId,
@@ -63,6 +69,7 @@ export async function getActiveTemporaryMedia(roomId: string) {
     if (!roomId) throw new Error('Room is required.');
 
     const { supabase, user } = await getAuthenticatedUser();
+    await assertActiveRoom(supabase, roomId);
     const { data: member, error: memberError } = await supabase
       .from('room_members')
       .select('join_status')
@@ -98,6 +105,7 @@ export async function getSignedStorageUrl(filePath: string, roomId: string): Pro
     if (!filePath || !roomId) throw new Error('File path and room ID are required.');
 
     const { supabase, user } = await getAuthenticatedUser();
+    const room = await assertActiveRoom(supabase, roomId);
 
     // Verify user is an approved room member
     const { data: member, error: memberError } = await supabase
@@ -117,10 +125,14 @@ export async function getSignedStorageUrl(filePath: string, roomId: string): Pro
       throw new Error('Invalid file path.');
     }
 
-    // Generate signed URL (expires in 1 hour)
+    // Never let a signed URL outlive the room's server-side expiry.
+    const roomLifetimeSeconds = roomExpirySeconds(room);
+    const signedUrlLifetime = Math.min(60 * 60, roomLifetimeSeconds ?? 60 * 60);
+    if (signedUrlLifetime <= 0) throw new Error('This room has expired and is no longer active.');
+
     const { data, error } = await supabase.storage
       .from('room_attachments')
-      .createSignedUrl(filePath, 3600);
+      .createSignedUrl(filePath, signedUrlLifetime);
 
     if (error) throw new Error(error.message);
     if (!data?.signedUrl) throw new Error('Failed to generate signed URL.');

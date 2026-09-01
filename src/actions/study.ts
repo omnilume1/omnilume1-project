@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/utils/supabase/server';
+import { assertActiveRoom } from '@/lib/room-lifecycle';
 
 export type StudyHistoryEntry = {
   subject: string;
@@ -11,7 +12,6 @@ export type StudyHistoryEntry = {
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unable to update study history.';
 }
-
 export async function logStudySession(roomId: string, subject: string, durationMinutes: number) {
   try {
     const cleanSubject = subject.trim();
@@ -22,6 +22,7 @@ export async function logStudySession(roomId: string, subject: string, durationM
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) throw new Error('Unauthorized');
+    await assertActiveRoom(supabase, roomId);
 
     const { error } = await supabase.from('study_sessions').insert({
       user_id: user.id,
@@ -42,6 +43,7 @@ export async function getStudyHistory(roomId: string) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: 'Unauthorized' };
+    await assertActiveRoom(supabase, roomId);
 
     const { data, error } = await supabase
       .from('study_sessions')
@@ -86,6 +88,7 @@ export async function deleteStudySubject(roomId: string, subject: string) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: 'Unauthorized' };
+    await assertActiveRoom(supabase, roomId);
 
     const { error } = await supabase
       .from('study_sessions')

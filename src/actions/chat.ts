@@ -1,13 +1,13 @@
 'use server';
 
 import { createClient } from '@/utils/supabase/server';
+import { assertActiveRoom } from '@/lib/room-lifecycle';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function assertUuid(value: string, label: string) {
   if (!UUID_PATTERN.test(value)) throw new Error(`Invalid ${label}.`);
 }
-
 // The private key never leaves the browser. Only the public half is stored so
 // another user can derive the same shared key locally.
 export async function saveUserPublicKey(publicKey: string) {
@@ -148,6 +148,7 @@ export async function deleteMessageForEveryone(messageId: string, roomId: string
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
     if (authError || !user) throw new Error("Unauthorized");
+    await assertActiveRoom(supabase, roomId);
 
     const { error } = await supabase
       .from('messages')
