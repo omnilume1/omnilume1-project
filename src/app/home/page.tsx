@@ -2,9 +2,24 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { createClient } from '@/utils/supabase/client';
 
 export default function HomePage() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const router = useRouter();
+  const supabase = createClient();
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await supabase.auth.signOut();
+      router.replace('/login');
+    } catch {
+      setLoggingOut(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#0a0c16] text-white font-sans relative overflow-x-hidden">
@@ -88,12 +103,13 @@ export default function HomePage() {
         </div>
 
         <div className="pt-4 border-t border-white/10">
-          <Link
-            href="/"
-            className="block w-full text-center py-2.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 font-medium transition text-sm border border-red-500/30"
+          <button
+            onClick={handleLogout}
+            disabled={loggingOut}
+            className="block w-full text-center py-2.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 font-medium transition text-sm border border-red-500/30 disabled:opacity-50 cursor-pointer"
           >
-            Log Out
-          </Link>
+            {loggingOut ? 'Signing out...' : 'Log Out'}
+          </button>
         </div>
       </div>
 
