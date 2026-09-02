@@ -89,12 +89,21 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !currentUserId) return;
+    if (!newMessage.trim()) return;
+
+    const senderId = currentUserId ?? (await supabase.auth.getUser()).data.user?.id ?? null;
+    if (!senderId) {
+      setDeleteError('Unable to send message. Please sign in again.');
+      return;
+    }
+
+    if (!currentUserId) setCurrentUserId(senderId);
+
     const messageText = newMessage.trim();
     setNewMessage('');
     const { data, error } = await supabase
       .from('messages')
-      .insert({ room_id: roomId, sender_id: currentUserId, content: messageText })
+      .insert({ room_id: roomId, sender_id: senderId, content: messageText })
       .select('*')
       .single();
 
