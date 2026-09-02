@@ -109,7 +109,7 @@ export async function processRoomJoin(identifier: string) {
   if (cleanId.includes('/')) {
      cleanId = cleanId.split('/').pop() || cleanId;
   }
-  cleanId = cleanId.toLowerCase();
+  cleanId = cleanId.replace(/^@/, '').toLowerCase();
 
   // Securely find the room using our new Postgres function
   const { data, error: rpcError } = await supabase.rpc('get_room_for_join', { identifier: cleanId });
