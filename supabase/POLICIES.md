@@ -1,112 +1,52 @@
-﻿# RLS Policies Reference
+# OmniLume Supabase security policy reference
 
-Readable listing of all Row Level Security policies in the shared Supabase project (auto-generated from pg_policies).
+This file documents the effective policy model. The executable sources are
+`01_schema.sql` plus the ordered migrations in `migrations/`; the final
+canonical rebuild applies `003_room_lifecycle.sql` and
+`004_security_remediation.sql` after the base dump.
 
-> NOTE: This file is for human review only. The authoritative rebuild file is 01_schema.sql - run that single file on a fresh Supabase project to recreate everything.
+## Effective access rules
 
-> **SECURITY UPDATE (Action 2):** Policies have been locked down to prevent unauthorized access. See migration `002_rls_lockdown.sql` for details.
+| Resource | Effective rule |
+|---|---|
+| `rooms` | Public rooms are visible only while active. Private rooms require an approved member, owner, or authorized recovery manager. Expired irreversible rooms are hidden. |
+| `room_members` | Approved members can see active-room membership. Owners/admins manage other memberships only in active rooms. Users cannot change identity, room, or role to escalate access. |
+| `messages` | Private-chat rows are limited to participants. Room rows require approved membership and active/reopened room access. Updates require the current approved sender. |
+| `room_messages` | The legacy table remains protected for compatibility, but its application writer is removed. Reads/inserts require approved membership and active/reopened room access. |
+| `temporary_media` | Reads/inserts require approved membership, active room access, and an unexpired media row. |
+| `message_reactions` / `study_sessions` | Operations are limited to the authenticated user and an approved member of the active room where the record is room-scoped. |
+| `storage.objects` | Room attachment paths are scoped by the first path segment as the room UUID, the private bucket, approved membership, and active/reopened room access. |
+| `recovery_requests` | Only the current approved owner/admin may submit during the 24-hour recovery window. Requests are reviewed through the protected database function. |
+| `room_permanent_requests` | Any current approved member may request permanence during the seven-day reopened period. Only the current owner/admin may review it. |
+| `room_notifications` | Notifications are readable and markable only by their intended recipient. |
 
-```
-     tablename     |                  policyname                  |  cmd   |      roles      |                                                                             qual                                                                             |                                     with_check                                     
--------------------+----------------------------------------------+--------+-----------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------
- message_reactions | Anyone can view reactions                    | SELECT | {public}        | true                                                                                                                                                         | 
- message_reactions | Users can manage their own reactions         | ALL    | {public}        | (auth.uid() = user_id)                                                                                                                                       | 
- messages          | Participants read messages                   | SELECT | {authenticated} | ((auth.uid() = sender_id) OR (auth.uid() = receiver_id))                                                                                                     | 
- messages          | Room members read room messages              | SELECT | {authenticated} | ((room_id IS NOT NULL) AND (EXISTS ( SELECT 1                                                                                                               +| 
-                   |                                              |        |                 |    FROM room_members rm                                                                                                                                     +| 
-                   |                                              |        |                 |   WHERE ((rm.room_id = messages.room_id) AND (rm.user_id = auth.uid())))))                                                                                   | 
- messages          | Users can insert messages                    | INSERT | {authenticated} |                                                                                                                                                              | ((chat_id IS NOT NULL AND auth.uid() = sender_id AND (EXISTS ( SELECT 1            +| 
-                   |                                              |        |                 |                                                                                                                                                              |    FROM private_chats pc                                                           +| 
-                   |                                              |        |                 |                                                                                                                                                              |   WHERE ((pc.id = messages.chat_id) AND ((pc.user_one = auth.uid()) OR (pc.user_two+| 
-                   |                                              |        |                 |                                                                                                                                                              |  = auth.uid()))))) OR (room_id IS NOT NULL AND auth.uid() = sender_id AND (EXISTS  +| 
-                   |                                              |        |                 |                                                                                                                                                              |    FROM room_members rm                                                            +| 
-                   |                                              |        |                 |                                                                                                                                                              |   WHERE ((rm.room_id = messages.room_id) AND (rm.user_id = auth.uid()) AND (rm.joi+| 
-                   |                                              |        |                 |                                                                                                                                                              | n_status = 'approved'::text))))) 
- messages          | Users can update own messages                | UPDATE | {public}        | (auth.uid() = sender_id)                                                                                                                                     | 
- objects           | Room members can read attachments            | SELECT | {authenticated} | ((bucket_id = 'room_attachments'::text) AND (EXISTS ( SELECT 1                                                                                              +| 
-                   |                                              |        |                 |    FROM room_members rm                                                                                                                                     +| 
-                   |                                              |        |                 |   WHERE ((rm.room_id = ((storage.foldername(name))[1])::uuid) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text)))))                      | 
- objects           | Room members can upload attachments          | INSERT | {authenticated} |                                                                                                                                                              | ((bucket_id = 'room_attachments'::text) AND (EXISTS ( SELECT 1                     +| 
-                   |                                              |        |                 |                                                                                                                                                              |    FROM room_members rm                                                            +| 
-                   |                                              |        |                 |                                                                                                                                                              |   WHERE ((rm.room_id = ((storage.foldername(name))[1])::uuid) AND (rm.user_id = au+| 
-                   |                                              |        |                 |                                                                                                                                                              | th.uid()) AND (rm.join_status = 'approved'::text))))) 
- objects           | Room members can delete attachments          | DELETE | {authenticated} | ((bucket_id = 'room_attachments'::text) AND (EXISTS ( SELECT 1                                                                                              +| 
-                   |                                              |        |                 |    FROM room_members rm                                                                                                                                     +| 
-                   |                                              |        |                 |   WHERE ((rm.room_id = ((storage.foldername(name))[1])::uuid) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text)))))                      | 
- private_chats     | Participants view own chats                  | SELECT | {authenticated} | ((auth.uid() = user_one) OR (auth.uid() = user_two))                                                                                                         | 
- private_chats     | Users can create chats                       | INSERT | {authenticated} |                                                                                                                                                              | (auth.uid() = user_one) 
- profiles          | profiles are readable by authenticated users | SELECT | {authenticated} | true                                                                                                                                                         | 
- profiles          | users manage own profile                     | ALL    | {authenticated} | (auth.uid() = id)                                                                                                                                            | (auth.uid() = id) 
- room_members      | Members viewable by everyone                 | SELECT | {public}        | true                                                                                                                                                         | 
- room_members      | Owners can delete members                    | DELETE | {public}        | (EXISTS ( SELECT 1                                                                                                                                          +| 
-                   |                                              |        |                 |    FROM room_members my_status                                                                                                                              +| 
-                   |                                              |        |                 |   WHERE ((my_status.room_id = room_members.room_id) AND (my_status.user_id = auth.uid()) AND (my_status.role = ANY (ARRAY['owner'::text, 'admin'::text]))))) | 
- room_members      | Owners can update members                    | UPDATE | {public}        | (EXISTS ( SELECT 1                                                                                                                                          +| 
-                   |                                              |        |                 |    FROM room_members my_status                                                                                                                              +| 
-                   |                                              |        |                 |   WHERE ((my_status.room_id = room_members.room_id) AND (my_status.user_id = auth.uid()) AND (my_status.role = ANY (ARRAY['owner'::text, 'admin'::text]))))) | 
- room_members      | Users can request to join rooms              | INSERT | {authenticated} |                                                                                                                                                              | ((auth.uid() = user_id) AND (((role = 'member'::text) AND (join_status = 'pending'+| 
-                   |                                              |        |                 |                                                                                                                                                              | ::text)) OR ((role = 'owner'::text) AND (join_status = 'approved'::text) AND (EXIS+| 
-                   |                                              |        |                 |                                                                                                                                                              | TS (room creator check)) OR ((role = 'member'::text) AND (join_status = 'approved'+| 
-                   |                                              |        |                 |                                                                                                                                                              | ::text) AND (EXISTS (public room check)))) 
- room_members      | Users can update own membership status       | UPDATE | {authenticated} | (auth.uid() = user_id)                                                                                                                                       | ((auth.uid() = user_id) AND (role = ( SELECT room_members.role                                                             +| 
-                   |                                              |        |                 |                                                                                                                                                              |    FROM room_members                                                                                                                              +| 
-                   |                                              |        |                 |                                                                                                                                                              |   WHERE ((room_members.room_id = room_members.room_id) AND (room_members.user_id = +| 
-                   |                                              |        |                 |                                                                                                                                                              | auth.uid()))) AND (join_status = ANY (ARRAY['pending'::text, 'rejected'::text]))) 
- room_members      | members read room membership                 | SELECT | {authenticated} | true                                                                                                                                                         | 
- room_members      | users leave rooms                            | DELETE | {authenticated} | (auth.uid() = user_id)                                                                                                                                       | 
- room_messages     | Room members can read room messages          | SELECT | {authenticated} | (EXISTS ( SELECT 1                                                                                                                                          +| 
-                   |                                              |        |                 |    FROM room_members rm                                                                                                                                     +| 
-                   |                                              |        |                 |   WHERE ((rm.room_id = room_messages.room_id) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text))))                                       | 
- room_messages     | Room members can send room messages          | INSERT | {authenticated} |                                                                                                                                                              | ((auth.uid() = user_id) AND (EXISTS ( SELECT 1                                     +| 
-                   |                                              |        |                 |                                                                                                                                                              |    FROM room_members rm                                                            +| 
-                   |                                              |        |                 |                                                                                                                                                              |   WHERE ((rm.room_id = room_messages.room_id) AND (rm.user_id = auth.uid()) AND (r+| 
-                   |                                              |        |                 |                                                                                                                                                              | m.join_status = 'approved'::text)))) 
- rooms             | Authenticated users can create rooms         | INSERT | {authenticated} |                                                                                                                                                              | (auth.uid() = created_by) 
- rooms             | Creators can view their own rooms            | SELECT | {public}        | (auth.uid() = created_by)                                                                                                                                    | 
- rooms             | Members can view rooms they joined           | SELECT | {public}        | (EXISTS ( SELECT 1                                                                                                                                          +| 
-                   |                                              |        |                 |    FROM room_members                                                                                                                                        +| 
-                   |                                              |        |                 |   WHERE ((room_members.room_id = rooms.id) AND (room_members.user_id = auth.uid()))))                                                                        | 
- rooms             | Owners can update rooms                      | UPDATE | {public}        | (auth.uid() = created_by)                                                                                                                                    | 
- rooms             | Public rooms are viewable by everyone        | SELECT | {public}        | (NOT is_private)                                                                                                                                             | 
- study_sessions    | users manage own study sessions              | ALL    | {authenticated} | (auth.uid() = user_id)                                                                                                                                       | (auth.uid() = user_id) 
- temporary_media   | Approved room members can view temporary media| SELECT | {authenticated} | (EXISTS ( SELECT 1                                                                                                                                          +| 
-                   |                                              |        |                 |    FROM room_members rm                                                                                                                                     +| 
-                   |                                              |        |                 |   WHERE ((rm.room_id = temporary_media.room_id) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text))))                                     | 
- temporary_media   | Approved room members can upload temporary media| INSERT | {authenticated} |                                                                                                                                                              | ((auth.uid() = user_id) AND (EXISTS ( SELECT 1                                     +| 
-                   |                                              |        |                 |                                                                                                                                                              |    FROM room_members rm                                                            +| 
-                   |                                              |        |                 |                                                                                                                                                              |   WHERE ((rm.room_id = temporary_media.room_id) AND (rm.user_id = auth.uid()) AND (+| 
-                   |                                              |        |                 |                                                                                                                                                              | rm.join_status = 'approved'::text)))) 
- user_keys         | Allow read access to public keys             | SELECT | {authenticated} | true                                                                                                                                                         | 
- user_keys         | Users update own public key                  | ALL    | {authenticated} | (auth.uid() = user_id)                                                                                                                                       | 
+## Server-side helpers and lifecycle
 
-```
+The lifecycle migration uses database time (`now()`) for access decisions. The
+security migration provides restricted `SECURITY DEFINER` helpers with an
+explicit `public` search path and removes public execution from lifecycle and
+review functions.
 
-## Security Changes Summary
+Temporary-room lifecycle:
 
-### Removed Dangerous Policies
-- ~~`Enable read access for all users`~~ on `messages` - Allowed anonymous access to all messages
-- ~~`Users can add themselves on creation`~~ on `room_members` - Allowed self-promotion to owner
-- ~~`users join rooms`~~ on `room_members` - Allowed self-promotion to owner
-- ~~`users update own membership`~~ on `room_members` - Allowed self-promotion to owner
-- ~~`Anyone in room can view temporary media`~~ on `temporary_media` - Allowed any user to view
-- ~~`Anyone can read room messages`~~ on `room_messages` - Allowed anonymous access
-- ~~`authenticated read room messages`~~ on `room_messages` - Allowed any authenticated user
-- ~~Storage policies without room membership checks~~
+1. Original expiry starts a 24-hour recovery-request window.
+2. Approved recovery reopens preserved data for seven days.
+3. Approved members may request permanent conversion during that period.
+4. Only an owner/admin may approve conversion.
+5. Permanent conversion clears temporary expiry fields and remains available
+   indefinitely.
 
-### New Secure Policies
-- `Users can insert messages` - Requires room membership for room messages, participant for private chats
-- `Users can request to join rooms` - Forces role='member' and join_status='pending'
-- `Users can update own membership status` - Prevents self-promotion, only allows status changes
-- `Approved room members can view temporary media` - Requires approved membership
-- `Approved room members can upload temporary media` - Requires approved membership
-- `Room members can read/send room messages` - Requires approved membership
-- `Room members can read/upload/delete attachments` - Requires approved membership, scoped by room path
+Identity and scope protections prevent room-membership identity changes and
+message sender/room/chat reassignment. The cleanup endpoint is separately
+protected by its server-only secret and service-role configuration.
 
-### Storage Security
-- Storage bucket `room_attachments` should be set to **private** in Supabase dashboard
-- All storage access now requires room membership verification
-- File paths are scoped by room ID: `{room_id}/{filename}`
-- Client code uses signed URLs for playback (1-hour expiry)
+## Rebuild and deployment notes
 
-### Function Security
-- `get_room_by_identifier` - EXECUTE revoked from `anon` role
+- Do not run only the historical base object dump when rebuilding a project.
+- Use `01_schema.sql` with `psql`, which includes the lifecycle/security
+  overlays, or apply the ordered migrations through the Supabase migration
+  workflow.
+- Keep `SUPABASE_SERVICE_ROLE_KEY` and `CRON_SECRET` server-only.
+- The `room_messages` table is intentionally retained for database
+  compatibility; removing its application writer is separate from dropping
+  the table.

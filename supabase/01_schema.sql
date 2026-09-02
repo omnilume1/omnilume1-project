@@ -767,3 +767,13 @@ CREATE POLICY "users manage own study sessions" ON public.study_sessions TO auth
 
 \unrestrict Aye66g8knQmpNT0AZqzvwdKQi9tXoFIyCDNy8GCyNYXuFS8FYVuteuE2RQk32e1
 
+-- Canonical final-state overlays.
+--
+-- The base dump above is retained for the original object definitions. These
+-- overlays are part of this canonical rebuild and must run after the base
+-- objects so the final schema includes recovery lifecycle state, server-time
+-- access checks, current RLS, and controlled room conversion/notification
+-- behavior. Run this file with psql so the relative \ir includes are honored.
+\ir migrations/003_room_lifecycle.sql
+\ir migrations/004_security_remediation.sql
+
