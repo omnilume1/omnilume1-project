@@ -40,7 +40,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
-  const { typingUsers, broadcastEvent, roomMessageEvents } = useRoomRealtime();
+  const { currentUserId: roomCurrentUserId, typingUsers, broadcastEvent, roomMessageEvents } = useRoomRealtime();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -91,7 +91,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
     e.preventDefault();
     if (!newMessage.trim()) return;
 
-    const senderId = currentUserId ?? (await supabase.auth.getUser()).data.user?.id ?? null;
+    const senderId = currentUserId ?? roomCurrentUserId ?? (await supabase.auth.getUser()).data.user?.id ?? null;
     if (!senderId) {
       setDeleteError('Unable to send message. Please sign in again.');
       return;
@@ -169,7 +169,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
           <p className="text-xs text-neutral-500 text-center mt-10">No messages yet. Say hello!</p>
         ) : (
           messages.filter(msg => !hiddenMessages.has(msg.id)).map((msg) => {
-            const isMe = msg.sender_id === currentUserId;
+            const isMe = msg.sender_id === (currentUserId ?? roomCurrentUserId);
             return (
               <div key={msg.id} className={`flex flex-col relative group ${isMe ? 'items-end' : 'items-start'}`}>
                 <div className={`relative max-w-[85%] px-4 py-2.5 rounded-2xl flex items-center gap-3 ${msg.is_deleted ? 'bg-transparent border border-neutral-800 text-neutral-500 italic' : isMe ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-neutral-800 text-white rounded-bl-sm'}`}>
