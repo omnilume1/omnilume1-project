@@ -82,7 +82,10 @@ export default function RoomChat({ roomId }: RoomChatProps) {
   }, [messages, typingUsers]);
 
   useEffect(() => {
-    const handleClickOutside = () => setActiveMenuId(null);
+    const handleClickOutside = (event: MouseEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-message-menu-area]')) return;
+      setActiveMenuId(null);
+    };
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
@@ -172,7 +175,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
             const isMe = msg.sender_id === (currentUserId ?? roomCurrentUserId);
             return (
               <div key={msg.id} className={`flex flex-col relative group ${isMe ? 'items-end' : 'items-start'}`}>
-                <div className={`relative max-w-[85%] px-4 py-2.5 rounded-2xl flex items-center gap-3 ${msg.is_deleted ? 'bg-transparent border border-neutral-800 text-neutral-500 italic' : isMe ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-neutral-800 text-white rounded-bl-sm'}`}>
+                <div data-message-menu-area className={`relative max-w-[85%] px-4 py-2.5 rounded-2xl flex items-center gap-3 ${msg.is_deleted ? 'bg-transparent border border-neutral-800 text-neutral-500 italic' : isMe ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-neutral-800 text-white rounded-bl-sm'}`}>
                   <span className="text-sm leading-relaxed break-words">{msg.content}</span>
                   {!msg.is_deleted && (
                     <button onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === msg.id ? null : msg.id); }} className={`opacity-0 group-hover:opacity-100 transition p-1 hover:bg-black/20 rounded cursor-pointer ${isMe ? '-ml-2' : ''}`}>
@@ -181,7 +184,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
                   )}
                 </div>
                 {activeMenuId === msg.id && (
-                  <div className={`absolute top-full mt-1 z-50 bg-[#1a1a1a] border border-neutral-700 rounded-lg shadow-2xl py-1 w-40 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 ${isMe ? 'right-0' : 'left-0'}`}>
+                  <div data-message-menu-area className={`absolute top-full mt-1 z-50 bg-[#1a1a1a] border border-neutral-700 rounded-lg shadow-2xl py-1 w-40 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 ${isMe ? 'right-0' : 'left-0'}`}>
                     <button onClick={(e) => { e.stopPropagation(); handleDeleteForMe(msg.id); }} className="px-4 py-2 text-left text-xs text-white hover:bg-neutral-800 font-semibold transition cursor-pointer">Delete for me</button>
                     {isMe && <button onClick={(e) => { e.stopPropagation(); handleDeleteForEveryone(msg.id); }} disabled={deletingMessageId === msg.id} className="px-4 py-2 text-left text-xs text-red-400 hover:bg-neutral-800 font-semibold transition cursor-pointer disabled:cursor-wait disabled:opacity-50">{deletingMessageId === msg.id ? 'Deleting...' : 'Delete for everyone'}</button>}
                   </div>
