@@ -29,8 +29,8 @@ export default function LoginPage() {
         // Redirect to our secure messages page upon success
         router.push('/messages');
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Something went wrong');
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       setLoading(false);
     }

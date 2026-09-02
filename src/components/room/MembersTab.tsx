@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { getRoomMembersList, manageMemberRequest } from '@/actions/members';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 
@@ -22,7 +22,7 @@ export default function MembersTab({ roomId, currentUserRole }: MembersTabProps)
 
   const { onlineUserIds } = useRoomRealtime();
 
-  const fetchMembers = async () => {
+  const fetchMembers = useCallback(async () => {
     try {
       const data = await getRoomMembersList(roomId);
       setMembers((data as RoomMember[]) || []);
@@ -31,18 +31,21 @@ export default function MembersTab({ roomId, currentUserRole }: MembersTabProps)
     } finally {
       setLoading(false);
     }
-  };
+  }, [roomId]);
 
   useEffect(() => {
-    fetchMembers();
-  }, [roomId]);
+    const timer = setTimeout(() => {
+      void fetchMembers();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchMembers]);
 
   const handleManage = async (targetId: string, action: 'approve' | 'reject') => {
     try {
       await manageMemberRequest(roomId, targetId, action);
-      fetchMembers(); // Refresh the list
-    } catch (error: any) {
-      alert(error.message);
+      void fetchMembers(); // Refresh the list
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : 'Unable to update member.');
     }
   };
 

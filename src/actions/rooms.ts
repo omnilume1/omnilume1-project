@@ -1,5 +1,6 @@
 'use server';
 
+import { randomUUID } from 'node:crypto';
 import { createClient } from '@/utils/supabase/server';
 import { assertActiveRoom, isRoomExpired } from '@/lib/room-lifecycle';
 
@@ -42,9 +43,11 @@ export async function createRoom(formData: FormData) {
     expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
   }
 
-  const { data: room, error: roomError } = await supabase
+  const roomId = randomUUID();
+  const { error: roomError } = await supabase
     .from('rooms')
     .insert({
+      id: roomId,
       name,
       description,
       is_private: isPrivate,
@@ -53,9 +56,7 @@ export async function createRoom(formData: FormData) {
       expires_at: expiresAt,
       created_by: user.id,
       username: username || null // Pass null if empty to avoid unique constraint errors
-    })
-    .select('id')
-    .single();
+    });
 
   if (roomError) throw new Error(roomError.message);
 
@@ -63,7 +64,7 @@ export async function createRoom(formData: FormData) {
   const { error: memberError } = await supabase
     .from('room_members')
     .insert({
-      room_id: room.id,
+      room_id: roomId,
       user_id: user.id,
       role: 'owner',
       join_status: 'approved'
@@ -71,11 +72,12 @@ export async function createRoom(formData: FormData) {
 
   if (memberError) throw new Error(memberError.message);
 
-  return room.id;
+  return roomId;
 }
 // 2. Fetch Public Rooms for Explore Page
 export async function getPublicRooms() {
   const supabase = await createClient();
+  const now = new Date().toISOString();
 
   const { data, error } = await supabase
     .from('rooms')
@@ -88,7 +90,7 @@ export async function getPublicRooms() {
       room_members(count)
     `)
     .eq('is_private', false)
-    .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
+    .or(`expires_at.is.null,expires_at.gt.${now},reopened_until.gt.${now}`)
     .order('created_at', { ascending: false });
 
   if (error) throw new Error(error.message);
@@ -110,7 +112,7 @@ export async function processRoomJoin(identifier: string) {
   cleanId = cleanId.toLowerCase();
 
   // Securely find the room using our new Postgres function
-  const { data, error: rpcError } = await supabase.rpc('get_room_by_identifier', { identifier: cleanId });
+  const { data, error: rpcError } = await supabase.rpc('get_room_for_join', { identifier: cleanId });
 
   if (rpcError || !data || data.length === 0) {
     throw new Error("Room not found. Check your code, link, or username.");
@@ -185,18 +187,12 @@ export async function convertRoomToGroup(roomId: string, groupUsername: string) 
   // Clean the new username
   const cleanUsername = groupUsername.toLowerCase().replace(/[^a-z0-9_.]/g, '');
 
-  // Perform the conversion
-  const { error: updateError } = await supabase
-    .from('rooms')
-    .update({
-      is_group: true,
-      expiration_type: 'permanent',
-      expires_at: null, // Destroy the timer
-      username: cleanUsername || null
-    })
-    .eq('id', roomId);
+  const { error: conversionError } = await supabase.rpc('convert_active_room_to_permanent', {
+    p_room_id: roomId,
+    p_username: cleanUsername || null,
+  });
 
-  if (updateError) throw new Error(updateError.message);
+  if (conversionError) throw new Error(conversionError.message);
 
   return true;
 }

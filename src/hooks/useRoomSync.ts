@@ -8,6 +8,8 @@ type RoomChannel = ReturnType<BrowserSupabaseClient['channel']>;
 
 export type SyncEventType =
   | 'typing'
+  | 'room_message'
+  | 'room_message_update'
   | 'play'
   | 'pause'
   | 'seek'
@@ -66,8 +68,14 @@ export type RoomSyncValue = {
   activeSubtitleUrl: string | null;
   timerState: TimerState;
   syncRequestTrigger: number;
+  roomMessageEvents: RoomMessageEvent[];
   recordMediaTime: (time: number) => void;
   broadcastEvent: (eventType: SyncEventType, payload?: Record<string, unknown>) => void;
+};
+
+export type RoomMessageEvent = {
+  kind: 'insert' | 'update';
+  message: Record<string, unknown>;
 };
 
 const DEFAULT_TIMER: TimerState = {
@@ -212,6 +220,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   );
   const timerStateRef = useRef<TimerState>(timerState);
   const [syncRequestTrigger, setSyncRequestTrigger] = useState(0);
+  const [roomMessageEvents, setRoomMessageEvents] = useState<RoomMessageEvent[]>([]);
 
   const updateTimerState = useCallback((nextState: TimerState) => {
     const normalized = normalizeTimerState(nextState);
@@ -352,6 +361,20 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       return;
     }
 
+    if (event.event_type === 'room_message' || event.event_type === 'room_message_update') {
+      const message = (event.payload ?? {}).message;
+      if (message && typeof message === 'object' && !Array.isArray(message)) {
+        setRoomMessageEvents((current) => [
+          ...current.slice(-99),
+          {
+            kind: event.event_type === 'room_message' ? 'insert' : 'update',
+            message: message as Record<string, unknown>,
+          },
+        ]);
+      }
+      return;
+    }
+
     const payload = (event.payload ?? {}) as Record<string, unknown>;
     if (event.event_type === 'request_sync') {
       setSyncRequestTrigger((current) => current + 1);
@@ -451,6 +474,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       timerStateRef.current = restoredTimer;
       setTimerState(restoredTimer);
       setTypingUsers(new Map());
+      setRoomMessageEvents([]);
     }, 0);
 
     return () => {
@@ -548,6 +572,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     activeSubtitleUrl: mediaState?.subtitleUrl ?? null,
     timerState,
     syncRequestTrigger,
+    roomMessageEvents,
     recordMediaTime,
     broadcastEvent,
   };

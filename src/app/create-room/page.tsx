@@ -23,8 +23,8 @@ export default function CreateRoomPage() {
 
       const roomId = await createRoom(formData);
       router.push(`/room/${roomId}`);
-    } catch (error: any) {
-      alert(error.message || "Failed to create room.");
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : "Failed to create room.");
     } finally {
       setLoading(false);
     }

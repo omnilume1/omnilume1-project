@@ -5,8 +5,15 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getPublicRooms, processRoomJoin } from '@/actions/rooms';
 
+interface PublicRoom {
+  id: string;
+  name: string;
+  username: string | null;
+  room_members: Array<{ count: number }>;
+}
+
 export default function ExploreRoomsPage() {
-  const [rooms, setRooms] = useState<any[]>([]);
+  const [rooms, setRooms] = useState<PublicRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
   
@@ -21,8 +28,8 @@ export default function ExploreRoomsPage() {
       try {
         const data = await getPublicRooms();
         setRooms(data || []);
-      } catch (error) {
-        console.error("Failed to load rooms");
+      } catch (error: unknown) {
+        console.error("Failed to load rooms:", error instanceof Error ? error.message : "unknown error");
       } finally {
         setLoading(false);
       }
@@ -52,9 +59,10 @@ export default function ExploreRoomsPage() {
         // If approved (public room, or already approved private room), go straight in
         router.push(`/room/${result.roomId}`);
       }
-    } catch (error: any) {
-      if (isFromBox) setCodeStatus({ type: 'error', msg: error.message });
-      else alert(error.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Something went wrong. Please try again.";
+      if (isFromBox) setCodeStatus({ type: 'error', msg: message });
+      else alert(message);
     } finally {
       setProcessingId(null);
     }

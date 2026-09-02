@@ -1,4 +1,5 @@
 import { Navbar, NavLinks } from "@/components/Navbar";
+import { LandingActions } from "@/components/LandingActions";
 
 const features = [
   {
@@ -86,6 +87,8 @@ export default function Home() {
         <p className="mt-10 text-xs text-zinc-600">
           Explore rooms, join a session, or create your own.
         </p>
+
+        <LandingActions />
 
         <div className="mt-12 grid w-full max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3">
           {features.map((feature) => (

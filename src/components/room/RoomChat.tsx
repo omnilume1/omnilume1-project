@@ -17,6 +17,17 @@ interface RoomChatMessage {
   created_at: string;
 }
 
+function mergeMessage(messages: RoomChatMessage[], incoming: RoomChatMessage) {
+  const existingIndex = messages.findIndex((message) => message.id === incoming.id);
+  if (existingIndex === -1) {
+    return [...messages, incoming].sort((left, right) => left.created_at.localeCompare(right.created_at));
+  }
+
+  const next = [...messages];
+  next[existingIndex] = { ...next[existingIndex], ...incoming };
+  return next;
+}
+
 export default function RoomChat({ roomId }: RoomChatProps) {
   const [messages, setMessages] = useState<RoomChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -29,12 +40,15 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
-  const { typingUsers, broadcastEvent } = useRoomRealtime();
+  const { typingUsers, broadcastEvent, roomMessageEvents } = useRoomRealtime();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const savedHidden = localStorage.getItem(`hidden_msgs_${roomId}`);
-      if (savedHidden) setHiddenMessages(new Set(JSON.parse(savedHidden)));
+      if (savedHidden) {
+        const timer = window.setTimeout(() => setHiddenMessages(new Set(JSON.parse(savedHidden))), 0);
+        return () => window.clearTimeout(timer);
+      }
     }
   }, [roomId]);
 
@@ -49,18 +63,19 @@ export default function RoomChat({ roomId }: RoomChatProps) {
     };
     setupChat();
 
-    const chatChannel = supabase.channel(`chat_${roomId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload: unknown) => {
-        if (isMounted) setMessages(prev => [...prev, (payload as { new: RoomChatMessage }).new]);
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (payload: unknown) => {
-        const updatedMessage = (payload as { new: RoomChatMessage }).new;
-        if (isMounted) setMessages(prev => prev.map(msg => msg.id === updatedMessage.id ? updatedMessage : msg));
-      })
-      .subscribe();
-
-    return () => { isMounted = false; supabase.removeChannel(chatChannel); };
+    return () => { isMounted = false; };
   }, [roomId, supabase]);
+
+  useEffect(() => {
+    if (roomMessageEvents.length === 0) return;
+
+    const timer = window.setTimeout(() => {
+      setMessages((current) => roomMessageEvents.reduce((messagesForEvent, event) => {
+        return mergeMessage(messagesForEvent, event.message as unknown as RoomChatMessage);
+      }, current));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [roomMessageEvents]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -77,7 +92,21 @@ export default function RoomChat({ roomId }: RoomChatProps) {
     if (!newMessage.trim() || !currentUserId) return;
     const messageText = newMessage.trim();
     setNewMessage('');
-    await supabase.from('messages').insert({ room_id: roomId, sender_id: currentUserId, content: messageText });
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({ room_id: roomId, sender_id: currentUserId, content: messageText })
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      setNewMessage(messageText);
+      setDeleteError('Unable to send message.');
+      return;
+    }
+
+    const createdMessage = data as RoomChatMessage;
+    setMessages((current) => mergeMessage(current, createdMessage));
+    broadcastEvent('room_message', { message: createdMessage as unknown as Record<string, unknown> });
   };
 
   const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -108,6 +137,9 @@ export default function RoomChat({ roomId }: RoomChatProps) {
       }
 
       setMessages(prev => prev.map(msg => msg.id === msgId ? { ...msg, is_deleted: true, content: '🚫 This message was deleted' } : msg));
+      broadcastEvent('room_message_update', {
+        message: { id: msgId, is_deleted: true, content: 'This message was deleted', file_url: null },
+      });
     } catch {
       setDeleteError('Unable to delete message.');
     } finally {

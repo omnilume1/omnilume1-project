@@ -56,8 +56,8 @@ export default function MessagesPage() {
           await saveUserPublicKey(pubKeyBase64);
           setStatus('Ready.');
         }
-      } catch (err) {
-        console.error(err);
+      } catch {
+        console.error('Secure chat initialization failed.');
         setStatus('Error initializing cryptography.');
       }
     }
@@ -87,8 +87,8 @@ export default function MessagesPage() {
       setActiveChatId(chatId);
       setStatus('Secure tunnel established.');
       
-    } catch (err) {
-      console.error(err);
+    } catch {
+      console.error('Secure chat connection failed.');
       setStatus('Failed to connect to friend.');
     }
   };

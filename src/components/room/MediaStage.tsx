@@ -217,6 +217,10 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
     if (!isSyncing.current) broadcastPlayback('pause', safeGetTime(), false);
   };
 
+  const handleSeeked = () => {
+    if (!isSyncing.current) broadcastPlayback('seek', safeGetTime(), playing);
+  };
+
   const handleReady = () => {
     if (!activeCastId || readyCastIdRef.current === activeCastId) return;
     readyCastIdRef.current = activeCastId;
@@ -502,6 +506,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
                 onTimeUpdate={handleTimeUpdate}
                 onPlay={handlePlay}
                 onPause={handlePause}
+                onSeeked={handleSeeked}
                 onError={() => {
                   setErrorUrl(activeMediaUrl);
                   setPlayerError('This stream could not be loaded. Try again or choose another history item.');

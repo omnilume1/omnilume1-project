@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import GlobalFocusTrap from "@/components/GlobalFocusTrap";
@@ -18,7 +19,7 @@ export const metadata: Metadata = {
   description: "Shared digital spaces for watching, studying, and talking together.",
 };
 
-export default function RootLayout({ children }: any) {
+export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html
       lang="en"
