@@ -1,12 +1,16 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { processRoomJoin } from "@/actions/rooms";
+import { createClient } from "@/utils/supabase/client";
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 
 export function LandingActions() {
   const router = useRouter();
+  const supabase = createClient();
+  const [authState, setAuthState] = useState<"loading" | "authenticated" | "unauthenticated">("loading");
   const [joinCode, setJoinCode] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [message, setMessage] = useState<{
@@ -14,12 +18,38 @@ export function LandingActions() {
     type: "info" | "error" | "success" | "pending";
   } | null>(null);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadAuthState() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (active) setAuthState(user ? "authenticated" : "unauthenticated");
+    }
+
+    void loadAuthState();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
+      if (active) setAuthState(session?.user ? "authenticated" : "unauthenticated");
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
+
   function handleCreateRoom() {
     router.push("/create-room");
   }
 
   async function handleJoinRoom(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (authState !== "authenticated") {
+      router.push("/login");
+      return;
+    }
+
     const trimmed = joinCode.trim();
 
     if (!trimmed) {
@@ -68,6 +98,16 @@ export function LandingActions() {
     } finally {
       setIsJoining(false);
     }
+  }
+
+  if (authState !== "authenticated") {
+    return (
+      <div className="mx-auto mt-10 w-full max-w-xl">
+        <div className="glass-strong rounded-3xl p-4 text-center sm:p-5">
+          <p className="text-sm text-zinc-500">Sign in to create or join a room.</p>
+        </div>
+      </div>
+    );
   }
 
   return (

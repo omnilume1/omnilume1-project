@@ -61,6 +61,10 @@ export default function ExploreRoomsPage() {
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Something went wrong. Please try again.";
+      if (message.toLowerCase().includes('unauthorized')) {
+        router.push('/login?next=/explore');
+        return;
+      }
       if (isFromBox) setCodeStatus({ type: 'error', msg: message });
       else alert(message);
     } finally {

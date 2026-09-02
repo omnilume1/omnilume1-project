@@ -26,8 +26,11 @@ export default function LoginPage() {
       if (error) {
         setErrorMsg(error.message);
       } else {
-        // Redirect to our secure messages page upon success
-        router.push('/messages');
+        const nextPath = new URLSearchParams(window.location.search).get('next');
+        const safeNextPath = nextPath && nextPath.startsWith('/') && !nextPath.startsWith('//')
+          ? nextPath
+          : '/messages';
+        router.push(safeNextPath);
       }
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Something went wrong');
