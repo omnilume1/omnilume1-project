@@ -483,25 +483,21 @@ CREATE POLICY "Allow read access to public keys" ON public.user_keys FOR SELECT 
 -- Name: room_messages Room members can read room messages; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Room members can read room messages" ON public.room_messages FOR SELECT TO authenticated USING ((EXISTS ( SELECT 1
-   FROM public.room_members rm
-  WHERE ((rm.room_id = room_messages.room_id) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text)))));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: message_reactions Anyone can view reactions; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Anyone can view reactions" ON public.message_reactions FOR SELECT USING (true);
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: temporary_media Approved room members can view temporary media; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Approved room members can view temporary media" ON public.temporary_media FOR SELECT TO authenticated USING ((EXISTS ( SELECT 1
-   FROM public.room_members rm
-  WHERE ((rm.room_id = temporary_media.room_id) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text)))));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
@@ -515,75 +511,63 @@ CREATE POLICY "Authenticated users can create rooms" ON public.rooms FOR INSERT 
 -- Name: room_messages Room members can send room messages; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Room members can send room messages" ON public.room_messages FOR INSERT TO authenticated WITH CHECK (((auth.uid() = user_id) AND (EXISTS ( SELECT 1
-   FROM public.room_members rm
-  WHERE ((rm.room_id = room_messages.room_id) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text))))));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: rooms Creators can view their own rooms; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Creators can view their own rooms" ON public.rooms FOR SELECT USING ((auth.uid() = created_by));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: messages Users can insert messages; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Users can insert messages" ON public.messages FOR INSERT TO authenticated WITH CHECK ((((chat_id IS NOT NULL) AND (auth.uid() = sender_id) AND (EXISTS ( SELECT 1
-   FROM public.private_chats pc
-  WHERE ((pc.id = messages.chat_id) AND ((pc.user_one = auth.uid()) OR (pc.user_two = auth.uid())))))) OR ((room_id IS NOT NULL) AND (auth.uid() = sender_id) AND (EXISTS ( SELECT 1
-   FROM public.room_members rm
-  WHERE ((rm.room_id = messages.room_id) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text)))))));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: rooms Members can view rooms they joined; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Members can view rooms they joined" ON public.rooms FOR SELECT USING ((EXISTS ( SELECT 1
-   FROM public.room_members
-  WHERE ((room_members.room_id = rooms.id) AND (room_members.user_id = auth.uid())))));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: room_members Members viewable by everyone; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Members viewable by everyone" ON public.room_members FOR SELECT USING (true);
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: room_members Owners can delete members; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Owners can delete members" ON public.room_members FOR DELETE USING ((EXISTS ( SELECT 1
-   FROM public.room_members my_status
-  WHERE ((my_status.room_id = room_members.room_id) AND (my_status.user_id = auth.uid()) AND (my_status.role = ANY (ARRAY['owner'::text, 'admin'::text]))))));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: room_members Owners can update members; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Owners can update members" ON public.room_members FOR UPDATE USING ((EXISTS ( SELECT 1
-   FROM public.room_members my_status
-  WHERE ((my_status.room_id = room_members.room_id) AND (my_status.user_id = auth.uid()) AND (my_status.role = ANY (ARRAY['owner'::text, 'admin'::text]))))));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: rooms Owners can update rooms; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Owners can update rooms" ON public.rooms FOR UPDATE USING ((auth.uid() = created_by));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: messages Participants read messages; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Participants read messages" ON public.messages FOR SELECT TO authenticated USING (((auth.uid() = sender_id) OR (auth.uid() = receiver_id)));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
@@ -597,27 +581,21 @@ CREATE POLICY "Participants view own chats" ON public.private_chats FOR SELECT T
 -- Name: rooms Public rooms are viewable by everyone; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Public rooms are viewable by everyone" ON public.rooms FOR SELECT USING ((NOT is_private));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: messages Room members read room messages; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Room members read room messages" ON public.messages FOR SELECT TO authenticated USING (((room_id IS NOT NULL) AND (EXISTS ( SELECT 1
-   FROM public.room_members rm
-  WHERE ((rm.room_id = messages.room_id) AND (rm.user_id = auth.uid()))))));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: room_members Users can request to join rooms; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Users can request to join rooms" ON public.room_members FOR INSERT TO authenticated WITH CHECK (((auth.uid() = user_id) AND (((role = 'member'::text) AND (join_status = 'pending'::text)) OR ((role = 'owner'::text) AND (join_status = 'approved'::text) AND (EXISTS ( SELECT 1
-   FROM public.rooms r
-  WHERE ((r.id = room_members.room_id) AND (r.created_by = auth.uid()))))) OR ((role = 'member'::text) AND (join_status = 'approved'::text) AND (EXISTS ( SELECT 1
-   FROM public.rooms r
-  WHERE ((r.id = room_members.room_id) AND (r.is_private = false))))))));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
@@ -631,23 +609,21 @@ CREATE POLICY "Users can create chats" ON public.private_chats FOR INSERT TO aut
 -- Name: message_reactions Users can manage their own reactions; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Users can manage their own reactions" ON public.message_reactions USING ((auth.uid() = user_id));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: messages Users can update own messages; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Users can update own messages" ON public.messages FOR UPDATE USING ((auth.uid() = sender_id));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: temporary_media Approved room members can upload temporary media; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Approved room members can upload temporary media" ON public.temporary_media FOR INSERT TO authenticated WITH CHECK (((auth.uid() = user_id) AND (EXISTS ( SELECT 1
-   FROM public.room_members rm
-  WHERE ((rm.room_id = temporary_media.room_id) AND (rm.user_id = auth.uid()) AND (rm.join_status = 'approved'::text))))));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
@@ -661,16 +637,14 @@ CREATE POLICY "Users update own public key" ON public.user_keys TO authenticated
 -- Name: room_members Users can update own membership status; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "Users can update own membership status" ON public.room_members FOR UPDATE TO authenticated USING ((auth.uid() = user_id)) WITH CHECK (((auth.uid() = user_id) AND (role = ( SELECT room_members.role
-   FROM public.room_members
-  WHERE ((room_members.room_id = room_members.room_id) AND (room_members.user_id = auth.uid())))) AND (join_status = ANY (ARRAY['pending'::text, 'rejected'::text]))));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
 -- Name: room_members members read room membership; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "members read room membership" ON public.room_members FOR SELECT TO authenticated USING (true);
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
@@ -744,7 +718,7 @@ ALTER TABLE public.user_keys ENABLE ROW LEVEL SECURITY;
 -- Name: room_members users leave rooms; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "users leave rooms" ON public.room_members FOR DELETE TO authenticated USING ((auth.uid() = user_id));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
@@ -758,7 +732,7 @@ CREATE POLICY "users manage own profile" ON public.profiles TO authenticated USI
 -- Name: study_sessions users manage own study sessions; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY "users manage own study sessions" ON public.study_sessions TO authenticated USING ((auth.uid() = user_id)) WITH CHECK ((auth.uid() = user_id));
+-- Superseded by migrations/004_security_remediation.sql.
 
 
 --
