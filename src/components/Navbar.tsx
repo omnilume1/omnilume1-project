@@ -1,8 +1,16 @@
 import Link from "next/link";
 import OmniLogo from "@/components/ui/OmniLogo";
 import { OmniIcon } from "@/components/ui/OmniIcon";
+import type { CurrentAccount } from '@/lib/current-account';
 
-export function Navbar() {
+function initials(value: string) {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  return (parts.slice(0, 2).map((part) => part[0]).join('') || 'O').toUpperCase();
+}
+
+export function Navbar({ account }: { account: CurrentAccount | null }) {
+  const profileHref = account?.profileDetailsCompleted ? '/profile' : '/profile/setup';
+
   return (
     <header className="public-nav">
       <OmniLogo />
@@ -15,11 +23,15 @@ export function Navbar() {
         <Link href="/explore" className="icon-button" aria-label="Search rooms" title="Search rooms">
           <OmniIcon name="search" size={17} />
         </Link>
-        <Link href="/login" className="icon-button" aria-label="Notifications" title="Sign in to view notifications">
-          <OmniIcon name="bell" size={17} />
-        </Link>
-        <Link href="/login" className="avatar avatar-small" aria-label="Sign in to view your profile">OL</Link>
-        <Link href="/login" className="public-login">Sign in</Link>
+        {account ? <>
+          <Link href="/home#notifications" className="icon-button" aria-label="Notifications" title="Notifications">
+            <OmniIcon name="bell" size={17} />
+            <span className="notification-dot" />
+          </Link>
+          <Link href={profileHref} className="avatar avatar-small public-account-avatar" aria-label="Open your profile" title="Profile">
+            {account.avatarUrl ? <img src={account.avatarUrl} alt="" /> : initials(account.displayName)}
+          </Link>
+        </> : <Link href="/login" className="public-login">Sign in</Link>}
       </div>
     </header>
   );

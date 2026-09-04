@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { getSafeRedirectPath } from '@/lib/auth';
 import { createClient } from '@/utils/supabase/client';
 import OmniLogo from '@/components/ui/OmniLogo';
+import { OmniIcon } from '@/components/ui/OmniIcon';
 
 type PasswordAction = 'login' | 'signup';
 
@@ -13,6 +14,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
 
@@ -25,6 +27,27 @@ export default function LoginPage() {
       queueMicrotask(() => setErrorMessage('Google sign-in could not be completed. Please try again.'));
     }
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function redirectExistingSession() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!active) return;
+
+      if (user) {
+        router.replace(getSafeRedirectPath(new URLSearchParams(window.location.search).get('next')));
+        return;
+      }
+
+      setCheckingSession(false);
+    }
+
+    void redirectExistingSession();
+    return () => {
+      active = false;
+    };
+  }, [router, supabase]);
 
   function getNextPath() {
     return getSafeRedirectPath(new URLSearchParams(window.location.search).get('next'));
@@ -96,6 +119,10 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (checkingSession) {
+    return <main className="auth-shell"><div className="auth-session-check glass-card-ambient" role="status">Checking your session...</div></main>;
   }
 
   return (
@@ -186,21 +213,21 @@ export default function LoginPage() {
 
         <aside className="auth-community-pane" aria-label="The OmniLume community">
           <div className="auth-community-orb" aria-hidden="true" />
-          <div className="auth-avatar-stack" aria-hidden="true">
-            <span>R</span><span>A</span><span>M</span><span>S</span><span>K</span><span>J</span>
+          <div className="auth-avatar-stack auth-feature-stack" aria-hidden="true">
+            <span><OmniIcon name="study" size={17} /></span><span><OmniIcon name="message" size={17} /></span><span><OmniIcon name="music" size={17} /></span><span><OmniIcon name="file" size={17} /></span>
           </div>
           <p className="section-kicker">A shared space for momentum</p>
           <h2>Good things happen together.</h2>
           <p>Find a calm room, bring your people and make space for the work that matters.</p>
-          <div className="auth-stat-row">
-            <div><strong>2K+</strong><span>active rooms</span></div>
-            <div><strong>50K+</strong><span>learners</span></div>
-            <div><strong>24/7</strong><span>shared focus</span></div>
+          <div className="auth-stat-row auth-signal-row">
+            <div><strong>Study</strong><span>make progress</span></div>
+            <div><strong>Connect</strong><span>find your people</span></div>
+            <div><strong>Create</strong><span>share momentum</span></div>
           </div>
           <div className="auth-preview" aria-hidden="true">
             <span className="auth-preview-dot" />
-            <span className="auth-preview-title">Late Night Study</span>
-            <span className="auth-preview-meta">8 people · focused together</span>
+            <span className="auth-preview-title">Shared focus room</span>
+            <span className="auth-preview-meta">A calm visual preview of working together</span>
             <span className="auth-preview-progress"><span /></span>
           </div>
         </aside>

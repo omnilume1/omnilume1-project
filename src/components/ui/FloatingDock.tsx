@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useCallback, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import OmniLogo from '@/components/ui/OmniLogo';
 import { OmniIcon, type OmniIconName } from '@/components/ui/OmniIcon';
@@ -45,27 +46,58 @@ function playDockClick() {
 
 export function FloatingDock({ items = defaultItems }: { items?: FloatingDockItem[] }) {
   const pathname = usePathname();
+  const itemRefs = useRef<Array<HTMLAnchorElement | null>>([]);
+
+  const resetMagnification = useCallback(() => {
+    itemRefs.current.forEach((element) => {
+      element?.style.setProperty('--dock-scale', '1');
+      element?.style.setProperty('--dock-lift', '0px');
+    });
+  }, []);
+
+  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    if (event.pointerType !== 'mouse') return;
+
+    itemRefs.current.forEach((element) => {
+      if (!element) return;
+      const rect = element.getBoundingClientRect();
+      const distance = Math.abs(event.clientX - (rect.left + (rect.width / 2)));
+      const proximity = Math.max(0, 1 - (distance / 148));
+      element.style.setProperty('--dock-scale', (1 + (proximity * 0.42)).toFixed(3));
+      element.style.setProperty('--dock-lift', `${Math.round(proximity * -7)}px`);
+    });
+  }, []);
 
   return (
     <div className="floating-dock-wrap">
-      <nav className="floating-dock" aria-label="OmniLume navigation">
+      <nav className="floating-dock" aria-label="OmniLume navigation" onPointerMove={handlePointerMove} onPointerLeave={resetMagnification}>
         <div className="dock-brand"><OmniLogo compact /></div>
         <div className="dock-items">
           {items.map((item) => {
-            const active = item.href === '/home'
+            const active = item.href.includes('#')
+              ? false
+              : item.href === '/home'
               ? pathname === '/home'
               : pathname.startsWith(item.href.split('#')[0]);
             return (
               <Link
                 key={item.title}
+                ref={(element) => { itemRefs.current[items.indexOf(item)] = element; }}
                 href={item.href}
                 aria-label={item.title}
                 title={item.title}
                 onClick={playDockClick}
+                onFocus={(event) => {
+                  resetMagnification();
+                  event.currentTarget.style.setProperty('--dock-scale', '1.2');
+                  event.currentTarget.style.setProperty('--dock-lift', '-4px');
+                }}
+                onBlur={resetMagnification}
                 className={`dock-item ${active ? 'is-active' : ''} ${item.emphasis ? 'is-emphasis' : ''}`}
               >
-                <OmniIcon name={item.icon} size={item.emphasis ? 20 : 17} />
-                <span>{item.title}</span>
+                <OmniIcon name={item.icon} size={18} />
+                <span className="dock-tooltip" aria-hidden="true">{item.title}</span>
+                <span className="dock-sr-label">{item.title}</span>
               </Link>
             );
           })}

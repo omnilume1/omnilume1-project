@@ -77,9 +77,15 @@ export default function ProfileSetupPage() {
       <div className="profile-setup-shell">
         <div className="profile-setup-intro">
           <OmniLogo />
-          <p className="section-kicker mt-10 text-cyan-200">First step</p>
-          <h1>Set up your OmniLume identity</h1>
-          <p>Complete the details people can use to recognize and connect with you. Sensitive fields stay protected by the existing server and database rules.</p>
+          <div className="profile-setup-visual" aria-hidden="true">
+            <span className="profile-setup-orb"><span /></span>
+            <span className="profile-setup-orbit profile-setup-orbit-one" />
+            <span className="profile-setup-orbit profile-setup-orbit-two" />
+            <span className="profile-setup-visual-label">One profile<br />Many possibilities</span>
+          </div>
+          <p className="section-kicker text-cyan-200">Your OmniLume identity</p>
+          <h1>Make a space that feels like you.</h1>
+          <p>Join a community that learns, creates and grows together. Sensitive details remain protected by the existing server and database rules.</p>
           {email && <p className="settings-note"><span>Signed in as</span> <strong>{email}</strong></p>}
           {pageError && <p className="form-error" role="alert">{pageError}</p>}
         </div>

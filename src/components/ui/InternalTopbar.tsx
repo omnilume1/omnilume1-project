@@ -1,7 +1,8 @@
+'use client';
+
 import type { ReactNode } from 'react';
-import Link from 'next/link';
 import OmniLogo from '@/components/ui/OmniLogo';
-import { OmniIcon } from '@/components/ui/OmniIcon';
+import CurrentAccountControls from '@/components/ui/CurrentAccountControls';
 
 export default function InternalTopbar({
   eyebrow,
@@ -27,11 +28,7 @@ export default function InternalTopbar({
       </div>
       <div className="internal-topbar-actions">
         {actions}
-        <Link href="/home#notifications" className="icon-button" aria-label="Notifications" title="Notifications">
-          <OmniIcon name="bell" />
-          <span className="notification-dot" />
-        </Link>
-        <Link href="/profile" className="avatar avatar-small" aria-label="Profile">OL</Link>
+        <CurrentAccountControls />
       </div>
     </header>
   );
