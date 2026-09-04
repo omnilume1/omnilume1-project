@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getPublicRooms, processRoomJoin } from '@/actions/rooms';
+import { getLoginPath } from '@/lib/auth';
+import { createClient } from '@/utils/supabase/client';
 
 interface PublicRoom {
   id: string;
@@ -22,6 +24,7 @@ export default function ExploreRoomsPage() {
   const [codeStatus, setCodeStatus] = useState<{ type: 'error' | 'success', msg: string } | null>(null);
 
   const router = useRouter();
+  const supabase = createClient();
 
   useEffect(() => {
     async function fetchRooms() {
@@ -43,6 +46,17 @@ export default function ExploreRoomsPage() {
       setCodeStatus(null);
     }
     
+    try {
+      const { data: { user }, error: sessionError } = await supabase.auth.getUser();
+      if (sessionError || !user) {
+        router.push(getLoginPath('/explore'));
+        return;
+      }
+    } catch {
+      router.push(getLoginPath('/explore'));
+      return;
+    }
+
     setProcessingId(identifier);
 
     try {
@@ -61,8 +75,8 @@ export default function ExploreRoomsPage() {
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Something went wrong. Please try again.";
-      if (message.toLowerCase().includes('unauthorized')) {
-        router.push('/login?next=/explore');
+      if (message.toLowerCase().includes('unauthorized') || message.includes('React error #441')) {
+        router.push(getLoginPath('/explore'));
         return;
       }
       if (isFromBox) setCodeStatus({ type: 'error', msg: message });
