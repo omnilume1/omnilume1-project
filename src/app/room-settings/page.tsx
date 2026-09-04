@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import FloatingDock from '@/components/ui/FloatingDock';
+import { OmniIcon } from '@/components/ui/OmniIcon';
 
 export default function RoomSettingsPage() {
   const [activeTab, setActiveTab] = useState<'roles' | 'permissions' | 'owner'>('roles');
@@ -14,21 +16,21 @@ export default function RoomSettingsPage() {
   ];
 
   return (
-    <div className="h-screen bg-[#0a0c16] text-white flex flex-col font-sans overflow-hidden">
+    <div className="omni-internal settings-shell flex h-screen flex-col overflow-hidden font-sans">
       {/* Top Navbar */}
-      <header className="h-16 flex items-center justify-between px-6 border-b border-white/10 bg-white/5 backdrop-blur-md">
+      <header className="room-header shrink-0">
         <div className="flex items-center gap-4">
           <Link href="/home" className="text-gray-400 hover:text-white transition text-xl">←</Link>
           <span className="font-bold text-lg">Room Settings: Late Night Study</span>
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-400">
+        <div className="flex items-center gap-2 text-sm text-gray-400"><OmniIcon name="settings" size={15} />
           Role: <span className="text-indigo-400 font-bold">Owner</span>
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="room-content flex-1 overflow-hidden">
         {/* Left Sidebar (Settings Navigation) */}
-        <aside className="w-64 border-r border-white/10 bg-[#0e1122]/80 flex flex-col p-4 gap-2 backdrop-blur-xl">
+        <aside className="settings-sidebar flex flex-col gap-2">
           <button onClick={() => setActiveTab('roles')} className={`w-full text-left px-4 py-3 rounded-xl transition font-medium ${activeTab === 'roles' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
             👥 Members & Roles
           </button>
@@ -41,7 +43,7 @@ export default function RoomSettingsPage() {
         </aside>
 
         {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto p-8 bg-[#0a0c16] relative">
+        <main className="settings-main relative flex-1 overflow-y-auto p-8">
           <div className="max-w-4xl mx-auto">
             
             {/* TAB 1: MEMBERS & ROLES */}
@@ -52,7 +54,7 @@ export default function RoomSettingsPage() {
                   <p className="text-gray-400 text-sm">Manage who is in your room and assign their hierarchy level.</p>
                 </div>
                 
-                <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+                <div className="glass-panel overflow-hidden p-0">
                   {/* Mock Users */}
                   {[
                     { name: 'John Doe (You)', currentRole: 'Owner', color: 'bg-yellow-500' },
@@ -104,7 +106,7 @@ export default function RoomSettingsPage() {
                 </div>
 
                 {/* Role Selector */}
-                <div className="flex gap-2 p-1 bg-white/5 border border-white/10 rounded-xl w-fit">
+                <div className="glass-panel flex w-fit gap-2 p-1">
                   {['Admin', 'Moderator', 'Member', 'Guest'].map(role => (
                     <button 
                       key={role}
@@ -171,6 +173,7 @@ export default function RoomSettingsPage() {
           </div>
         </main>
       </div>
+      <FloatingDock />
     </div>
   );
 }

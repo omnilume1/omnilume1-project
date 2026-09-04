@@ -519,7 +519,7 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
   );
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col rounded-2xl border border-neutral-800 bg-[#0a0a0a] p-4 transition-all duration-300 sm:p-6">
+    <div className="glass-panel relative flex min-h-0 flex-1 flex-col p-4 transition-all duration-300 sm:p-6">
       {renderHistoryPanel}
       {focusWarning}
 

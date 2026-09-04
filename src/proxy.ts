@@ -52,10 +52,10 @@ export async function proxy(request: NextRequest) {
   if (requiresAuth && user) {
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('profile_completed')
+      .select('profile_completed, profile_details_completed')
       .eq('id', user.id)
       .maybeSingle();
-    const profileComplete = !profileError && profile?.profile_completed === true;
+    const profileComplete = !profileError && profile?.profile_completed === true && profile?.profile_details_completed === true;
 
     if (pathname === PROFILE_SETUP_PATH) {
       if (profileComplete) {

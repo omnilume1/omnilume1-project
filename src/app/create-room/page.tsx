@@ -1,8 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createRoom } from '@/actions/rooms';
+import FloatingDock from '@/components/ui/FloatingDock';
+import InternalTopbar from '@/components/ui/InternalTopbar';
+import { OmniIcon } from '@/components/ui/OmniIcon';
+import FlippingWords from '@/components/ui/FlippingWords';
 
 export default function CreateRoomPage() {
   const [loading, setLoading] = useState(false);
@@ -13,14 +18,10 @@ export default function CreateRoomPage() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
-
     try {
       const formData = new FormData(e.currentTarget);
-      
-      // Translate the friendly UI into strict database policies
       const policy = isTemp ? (allowRecovery ? 'recoverable' : 'irreversible') : 'permanent';
       formData.append('expiration_type', policy);
-
       const roomId = await createRoom(formData);
       router.push(`/room/${roomId}`);
     } catch (error: unknown) {
@@ -31,66 +32,35 @@ export default function CreateRoomPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center p-6">
-      <div className="w-full max-w-md bg-[#0a0a0a] border border-neutral-800 rounded-xl p-8 max-h-[90vh] overflow-y-auto custom-scrollbar">
-        <h1 className="text-xl font-semibold mb-6">Create a New Room</h1>
-        
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-          <div>
-            <label className="block text-[10px] uppercase tracking-wider text-neutral-500 mb-2">Room Name *</label>
-            <input name="name" type="text" required placeholder="e.g., Late Night Study" className="w-full bg-[#050505] border border-neutral-800 rounded-md px-4 py-2.5 text-sm focus:border-neutral-500 outline-none" />
+    <div className="omni-internal">
+      <InternalTopbar eyebrow="Make space for momentum" title="Create a room" description="Set up a focused space for watching, studying and connecting." actions={<Link href="/explore" className="omni-button omni-button-ghost">Back to explore</Link>} />
+      <main className="omni-main-content">
+        <form onSubmit={handleSubmit} className="glass-panel omni-form-card fade-up">
+          <p className="section-kicker">New shared space</p>
+          <h2>Bring people together.</h2>
+          <p className="section-copy mb-8">Choose a name, set the room rules and invite people when you are ready.</p>
+          <FlippingWords
+            prefix="CREATE A ROOM ·"
+            phrases={["WATCH TOGETHER", "LISTEN TOGETHER", "STUDY TOGETHER", "WORK TOGETHER", "CREATE TOGETHER"]}
+            className="create-room-flipping-words"
+          />
+
+          <div className="grid gap-5">
+            <div><label className="form-label" htmlFor="room-name">Room name <span className="text-cyan-200">*</span></label><input id="room-name" name="name" type="text" required placeholder="e.g. Late Night Study" className="omni-input" /></div>
+            <div><label className="form-label" htmlFor="room-username">Custom link <span className="text-neutral-500">(optional)</span></label><div className="flex overflow-hidden rounded-xl border border-white/10 bg-black/20 focus-within:border-cyan-200/50"><span className="flex items-center border-r border-white/10 px-3 text-xs text-neutral-500">omnilume.com/r/</span><input id="room-username" name="username" type="text" placeholder="my_custom_room" className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-white outline-none" /></div><p className="form-help">A memorable link people can use to find your room.</p></div>
+
+            <div><p className="form-label">Room lifespan</p><div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setIsTemp(false)} className={`omni-button ${!isTemp ? 'omni-button-primary' : 'omni-button-ghost'}`}>Permanent</button><button type="button" onClick={() => setIsTemp(true)} className={`omni-button ${isTemp ? 'omni-button-primary' : 'omni-button-ghost'}`}>Temporary</button></div></div>
+
+            {isTemp && <div className="rounded-2xl border border-amber-300/20 bg-amber-200/[0.04] p-4"><div><label className="form-label text-amber-100" htmlFor="expires-hours">Self-destruct timer (hours)</label><input id="expires-hours" name="expires_in_hours" type="number" min="1" max="720" required defaultValue="24" className="omni-input border-amber-300/20" /></div><label className="mt-4 flex cursor-pointer items-start gap-3 text-xs leading-relaxed text-neutral-300"><input type="checkbox" checked={allowRecovery} onChange={(e) => setAllowRecovery(e.target.checked)} className="mt-0.5 h-4 w-4 accent-amber-400" /><span><strong className="text-amber-100">Enable quarantine:</strong> If unchecked, files and chats are permanently burned when the timer ends.</span></label></div>}
+
+            <div className="h-px bg-white/10" />
+            <div className="grid gap-3"><label className="flex cursor-pointer items-center gap-3 text-sm text-neutral-300"><input type="checkbox" name="is_private" value="true" id="private-toggle" className="h-4 w-4 accent-neutral-300" /><span><strong className="text-white">Private space</strong> <span className="text-neutral-500">(requires approval)</span></span></label><label className="flex cursor-pointer items-center gap-3 text-sm text-neutral-300"><input type="checkbox" name="is_anonymous" value="true" id="anon-toggle" className="h-4 w-4 accent-cyan-300" /><span><strong className="text-white">Ghost mode</strong> <span className="text-neutral-500">(hide user identities)</span></span></label></div>
+
+            <button type="submit" disabled={loading} className="omni-button omni-button-primary mt-3 w-full">{loading ? 'Creating room...' : 'Launch room'} <OmniIcon name="arrow" size={15} /></button>
           </div>
-
-          <div>
-            <label className="block text-[10px] uppercase tracking-wider text-neutral-500 mb-2">Custom Link (Optional)</label>
-            <div className="flex border border-neutral-800 rounded-md bg-[#050505] overflow-hidden focus-within:border-neutral-500 transition">
-              <span className="bg-neutral-900 px-3 py-2.5 text-sm text-neutral-500 border-r border-neutral-800">omnilume.com/r/</span>
-              <input name="username" type="text" placeholder="my_custom_room" className="w-full bg-transparent px-3 py-2.5 text-sm text-white outline-none" />
-            </div>
-          </div>
-
-          {/* Crisp Expiration UI */}
-          <div>
-            <label className="block text-[10px] uppercase tracking-wider text-neutral-500 mb-2">Room Lifespan</label>
-            <div className="flex gap-2 mb-3">
-              <button type="button" onClick={() => setIsTemp(false)} className={`flex-1 py-2 rounded-md text-xs font-semibold transition ${!isTemp ? 'bg-neutral-200 text-black' : 'bg-neutral-900 text-neutral-400 border border-neutral-800'}`}>Permanent</button>
-              <button type="button" onClick={() => setIsTemp(true)} className={`flex-1 py-2 rounded-md text-xs font-semibold transition ${isTemp ? 'bg-neutral-200 text-black' : 'bg-neutral-900 text-neutral-400 border border-neutral-800'}`}>Temporary</button>
-            </div>
-
-            {isTemp && (
-              <div className="bg-neutral-900/50 p-4 rounded-lg border border-neutral-800 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div>
-                  <label className="block text-[10px] uppercase tracking-wider text-amber-500 mb-2">Self-Destruct Timer (Hours)</label>
-                  <input name="expires_in_hours" type="number" min="1" max="720" required defaultValue="24" className="w-full bg-[#050505] border border-amber-900/30 rounded-md px-4 py-2.5 text-sm focus:border-amber-500 outline-none" />
-                </div>
-                <div className="flex items-start gap-3 mt-1">
-                  <input type="checkbox" checked={allowRecovery} onChange={(e) => setAllowRecovery(e.target.checked)} className="w-4 h-4 mt-0.5 accent-amber-500 cursor-pointer" />
-                  <label onClick={() => setAllowRecovery(!allowRecovery)} className="text-xs text-neutral-300 cursor-pointer leading-relaxed">
-                    <strong>Enable Quarantine:</strong> If unchecked, all files and chats are permanently burned when the timer ends.
-                  </label>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="w-full h-px bg-neutral-800 my-1" />
-
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-3">
-              <input type="checkbox" name="is_private" value="true" id="private-toggle" className="w-4 h-4 accent-neutral-500 cursor-pointer" />
-              <label htmlFor="private-toggle" className="text-sm text-neutral-300 cursor-pointer"><strong>Private Space</strong> (Requires approval)</label>
-            </div>
-            <div className="flex items-center gap-3">
-              <input type="checkbox" name="is_anonymous" value="true" id="anon-toggle" className="w-4 h-4 accent-indigo-500 cursor-pointer" />
-              <label htmlFor="anon-toggle" className="text-sm text-neutral-300 cursor-pointer"><strong>Ghost Mode</strong> (Hide user identities)</label>
-            </div>
-          </div>
-
-          <button type="submit" disabled={loading} className="w-full mt-4 py-3 bg-white text-black font-semibold rounded-md text-sm hover:bg-neutral-200 transition disabled:opacity-50">
-            {loading ? 'Creating...' : 'Launch Room'}
-          </button>
         </form>
-      </div>
+      </main>
+      <FloatingDock />
     </div>
   );
 }

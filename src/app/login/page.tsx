@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getSafeRedirectPath } from '@/lib/auth';
 import { createClient } from '@/utils/supabase/client';
+import OmniLogo from '@/components/ui/OmniLogo';
 
 type PasswordAction = 'login' | 'signup';
 
@@ -98,86 +99,111 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-black px-6 text-white">
-      <section className="w-full max-w-sm rounded-2xl border border-neutral-800 bg-[#0a0a0a] p-8 shadow-2xl">
-        <h1 className="text-2xl font-bold">Omnilume Auth</h1>
-        <p className="mb-6 mt-2 text-sm text-neutral-400">Sign in to access secure features.</p>
+    <main className="auth-shell">
+      <section className="auth-card">
+        <div className="auth-form-pane">
+          <OmniLogo />
+          <p className="section-kicker mt-10">Welcome back</p>
+          <h1 className="text-3xl font-bold tracking-tight text-white">Sign in to OmniLume</h1>
+          <p className="section-copy mb-6">Enter your shared spaces, conversations and next focus session.</p>
 
-        {errorMessage && (
-          <p className="mb-4 rounded border border-red-900 bg-red-950/50 p-3 text-xs text-red-300" role="alert">
-            {errorMessage}
-          </p>
-        )}
-        {noticeMessage && (
-          <p className="mb-4 rounded border border-emerald-900 bg-emerald-950/40 p-3 text-xs text-emerald-300" role="status">
-            {noticeMessage}
-          </p>
-        )}
+          {errorMessage && (
+            <p className="form-error mb-4" role="alert">
+              {errorMessage}
+            </p>
+          )}
+          {noticeMessage && (
+            <p className="form-success mb-4" role="status">
+              {noticeMessage}
+            </p>
+          )}
 
-        <button
-          type="button"
-          onClick={() => void handleGoogleSignIn()}
-          disabled={loading}
-          className="w-full rounded-lg border border-neutral-700 bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-neutral-200 disabled:cursor-wait disabled:opacity-60"
-        >
-          {loading ? 'Please wait...' : 'Continue with Google'}
-        </button>
+          <button
+            type="button"
+            onClick={() => void handleGoogleSignIn()}
+            disabled={loading}
+            className="omni-button omni-button-primary w-full"
+          >
+            {loading ? 'Please wait...' : <><span className="flex h-5 w-5 items-center justify-center rounded-full border border-black/20 text-xs font-bold">G</span> Continue with Google</>}
+          </button>
 
-        <div className="my-6 flex items-center gap-3 text-[10px] uppercase tracking-[0.2em] text-neutral-600">
-          <span className="h-px flex-1 bg-neutral-800" />
-          <span>Existing account</span>
-          <span className="h-px flex-1 bg-neutral-800" />
+          <div className="my-6 flex items-center gap-3 text-[10px] uppercase tracking-[0.2em] text-neutral-600">
+            <span className="h-px flex-1 bg-neutral-800" />
+            <span>Existing account</span>
+            <span className="h-px flex-1 bg-neutral-800" />
+          </div>
+
+          <form onSubmit={(event) => { event.preventDefault(); void handlePasswordAuth('login'); }} className="flex flex-col gap-4">
+            <div>
+              <label htmlFor="email" className="form-label">Email</label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoComplete="email"
+                className="omni-input"
+                placeholder="you@example.com"
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="password" className="form-label">Password</label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                className="omni-input"
+                required
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="submit"
+                disabled={loading || !email || !password}
+                className="omni-button omni-button-ghost flex-1"
+              >
+                {loading ? 'Signing in...' : 'Log In'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handlePasswordAuth('signup')}
+                disabled={loading || !email || !password}
+                className="omni-button omni-button-primary flex-1"
+              >
+                Create Account
+              </button>
+            </div>
+          </form>
+
+          <Link href="/forgot-password" className="mt-5 block text-center text-sm text-neutral-400 underline hover:text-white">
+            Forgot password?
+          </Link>
         </div>
 
-        <form onSubmit={(event) => { event.preventDefault(); void handlePasswordAuth('login'); }} className="flex flex-col gap-4">
-          <div>
-            <label htmlFor="email" className="mb-1 block text-xs uppercase text-neutral-500">Email</label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              autoComplete="email"
-              className="w-full rounded border border-neutral-800 bg-[#050505] px-3 py-2 text-sm text-white outline-none focus:border-neutral-500"
-              placeholder="you@example.com"
-              required
-            />
+        <aside className="auth-community-pane" aria-label="The OmniLume community">
+          <div className="auth-community-orb" aria-hidden="true" />
+          <div className="auth-avatar-stack" aria-hidden="true">
+            <span>R</span><span>A</span><span>M</span><span>S</span><span>K</span><span>J</span>
           </div>
-          <div>
-            <label htmlFor="password" className="mb-1 block text-xs uppercase text-neutral-500">Password</label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="current-password"
-              className="w-full rounded border border-neutral-800 bg-[#050505] px-3 py-2 text-sm text-white outline-none focus:border-neutral-500"
-              required
-            />
+          <p className="section-kicker">A shared space for momentum</p>
+          <h2>Good things happen together.</h2>
+          <p>Find a calm room, bring your people and make space for the work that matters.</p>
+          <div className="auth-stat-row">
+            <div><strong>2K+</strong><span>active rooms</span></div>
+            <div><strong>50K+</strong><span>learners</span></div>
+            <div><strong>24/7</strong><span>shared focus</span></div>
           </div>
-
-          <div className="flex gap-3 pt-2">
-            <button
-              type="submit"
-              disabled={loading || !email || !password}
-              className="flex-1 rounded bg-neutral-800 py-2 text-sm text-white transition hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading ? 'Signing in...' : 'Log In'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handlePasswordAuth('signup')}
-              disabled={loading || !email || !password}
-              className="flex-1 rounded bg-white py-2 text-sm font-semibold text-black transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Create Account
-            </button>
+          <div className="auth-preview" aria-hidden="true">
+            <span className="auth-preview-dot" />
+            <span className="auth-preview-title">Late Night Study</span>
+            <span className="auth-preview-meta">8 people · focused together</span>
+            <span className="auth-preview-progress"><span /></span>
           </div>
-        </form>
-
-        <Link href="/forgot-password" className="mt-5 block text-center text-sm text-neutral-400 underline hover:text-white">
-          Forgot password?
-        </Link>
+        </aside>
       </section>
     </main>
   );

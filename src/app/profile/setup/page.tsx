@@ -3,15 +3,28 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { completeIdentitySetup } from '@/actions/auth';
+import { getMyProfile } from '@/actions/profiles';
 import { getLoginPath, getSafeRedirectPath } from '@/lib/auth';
 import { createClient } from '@/utils/supabase/client';
+import ProfileForm from '@/components/profile/ProfileForm';
+import OmniLogo from '@/components/ui/OmniLogo';
+
+interface ProfileRecord {
+  display_name: string | null;
+  username: string | null;
+  date_of_birth: string | null;
+  gender: 'female' | 'male' | 'non_binary' | 'prefer_not_to_say' | 'other' | null;
+  avatar_url: string | null;
+  bio: string | null;
+  is_private: boolean;
+}
 
 export default function ProfileSetupPage() {
   const [email, setEmail] = useState<string | null>(null);
+  const [profile, setProfile] = useState<ProfileRecord | null>(null);
   const [nextPath, setNextPath] = useState('/home');
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
 
@@ -33,7 +46,14 @@ export default function ProfileSetupPage() {
       }
 
       setEmail(user.email ?? null);
-      setLoading(false);
+      try {
+        const currentProfile = await getMyProfile();
+        if (active) setProfile(currentProfile as ProfileRecord | null);
+      } catch {
+        // A profile row may not exist yet; ProfileForm can create it safely.
+      } finally {
+        if (active) setLoading(false);
+      }
     }
 
     void loadIdentity();
@@ -42,63 +62,40 @@ export default function ProfileSetupPage() {
     };
   }, [router, supabase]);
 
-  async function handleContinue() {
-    setSaving(true);
-    setErrorMessage(null);
-
-    try {
-      const result = await completeIdentitySetup();
-      if (!result.success) {
-        setErrorMessage(result.error);
-        return;
-      }
-
-      router.replace(nextPath);
-    } catch {
-      setErrorMessage('We could not finish account setup. Please try again.');
-    } finally {
-      setSaving(false);
-    }
+  async function handleSaved() {
+    const result = await completeIdentitySetup();
+    if (!result.success) throw new Error(result.error);
+    router.replace(nextPath);
   }
 
   if (loading) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-black px-6 text-sm text-zinc-400">
-        Checking your account...
-      </main>
-    );
+    return <main className="omni-state-screen text-sm text-zinc-400">Checking your account...</main>;
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-black px-6 text-white">
-      <section className="w-full max-w-md rounded-2xl border border-neutral-800 bg-[#0a0a0a] p-8 shadow-2xl">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">First step</p>
-        <h1 className="mt-3 text-2xl font-bold">Set up your OmniLume identity</h1>
-        <p className="mt-3 text-sm leading-6 text-neutral-400">
-          Confirm this account before entering the app. Your full profile details can be added in the profile setup stage.
-        </p>
-
-        {email && (
-          <p className="mt-5 rounded-lg border border-neutral-800 bg-black/40 px-3 py-2 text-sm text-neutral-300">
-            Signed in as <span className="font-medium text-white">{email}</span>
-          </p>
-        )}
-
-        {errorMessage && (
-          <p className="mt-4 rounded-lg border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-300" role="alert">
-            {errorMessage}
-          </p>
-        )}
-
-        <button
-          type="button"
-          onClick={() => void handleContinue()}
-          disabled={saving}
-          className="mt-6 w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-neutral-200 disabled:cursor-wait disabled:opacity-60"
-        >
-          {saving ? 'Saving...' : 'Continue to OmniLume'}
-        </button>
-      </section>
+    <main className="omni-state-screen profile-setup-screen">
+      <div className="profile-setup-shell">
+        <div className="profile-setup-intro">
+          <OmniLogo />
+          <p className="section-kicker mt-10 text-cyan-200">First step</p>
+          <h1>Set up your OmniLume identity</h1>
+          <p>Complete the details people can use to recognize and connect with you. Sensitive fields stay protected by the existing server and database rules.</p>
+          {email && <p className="settings-note"><span>Signed in as</span> <strong>{email}</strong></p>}
+          {pageError && <p className="form-error" role="alert">{pageError}</p>}
+        </div>
+        <ProfileForm
+          initialProfile={profile}
+          setup
+          onSaved={async () => {
+            try {
+              await handleSaved();
+            } catch {
+              setPageError('We could not finish account setup. Please try again.');
+              throw new Error('Profile setup could not be completed.');
+            }
+          }}
+        />
+      </div>
     </main>
   );
 }

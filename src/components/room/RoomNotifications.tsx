@@ -27,7 +27,7 @@ export default function RoomNotifications({ roomId }: RoomNotificationsProps) {
   if (notifications.length === 0) return null;
 
   return (
-    <div className="border-b border-indigo-900/40 bg-indigo-950/20 px-6 py-2 text-xs text-indigo-100" aria-label="Room notifications">
+    <div className="room-state-bar rounded-none border-x-0 border-t-0" aria-label="Room notifications">
       {notifications.map((notification) => (
         <div key={notification.id} className="flex items-start justify-between gap-3 py-1">
           <span>{notification.message}</span>

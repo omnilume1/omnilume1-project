@@ -24,6 +24,8 @@ import {
 } from '@/actions/recovery';
 import RoomRealtimeProvider from '@/components/room/RoomRealtimeProvider';
 import RoomNotifications from '@/components/room/RoomNotifications';
+import FloatingDock from '@/components/ui/FloatingDock';
+import { OmniIcon } from '@/components/ui/OmniIcon';
 import { useRoomSync } from '@/hooks/useRoomSync';
 import { useRoomPresence } from '@/hooks/useRoomPresence';
 import { clearFocusLock } from '@/lib/focus-lock';
@@ -268,12 +270,12 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const roomPresence = useRoomPresence(roomData?.id ?? '');
   const focusRoomPath = `/room/${encodeURIComponent(identifier)}`;
 
-  if (accessStatus === 'loading') return <div className="h-screen bg-[#050505] text-neutral-500 flex items-center justify-center text-sm animate-pulse">Verifying secure access...</div>;
+  if (accessStatus === 'loading') return <div className="omni-state-screen text-sm text-neutral-500">Verifying secure access...</div>;
   if (accessStatus === 'not_found') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl">❌ Space Not Found</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Explore</Link></div>;
   if (accessStatus === 'pending') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-amber-500">⏳ Waiting for Approval</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
   if (accessStatus === 'unauthorized' || accessStatus === 'public_not_joined' || accessStatus === 'private_not_joined') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-red-500">🔒 Access Restricted</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Go to Explore to Join</Link></div>;
 
-  if (!roomData) return <div className="h-screen bg-[#050505] text-neutral-500 flex items-center justify-center text-sm">Loading room...</div>;
+  if (!roomData) return <div className="omni-state-screen text-sm text-neutral-500">Loading room...</div>;
 
   if (showConvertModal) {
     return (
@@ -341,16 +343,16 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
   return (
     <RoomRealtimeProvider sync={roomSync} presence={roomPresence}>
-      <div className="h-screen bg-[#050505] text-neutral-200 flex flex-col font-sans overflow-hidden selection:bg-neutral-800">
-      <header className="h-14 shrink-0 flex items-center justify-between px-6 border-b border-neutral-800 bg-[#0a0a0a]">
-        <div className="flex items-center gap-4">
+      <div className="room-shell flex h-screen flex-col overflow-hidden font-sans selection:bg-neutral-800">
+      <header className="room-header shrink-0">
+        <div className="room-header-title flex items-center gap-4">
           <span className="font-semibold text-white tracking-wide text-sm uppercase">{roomData?.is_group ? 'GROUP' : 'ROOM'} / {roomData?.name || identifier}</span>
           <div className={`px-2.5 py-1 text-[10px] font-bold rounded-md tracking-wider flex items-center gap-2 border ${roomData?.expiration_type === 'permanent' ? 'bg-neutral-900/50 text-neutral-400 border-neutral-800' : 'bg-amber-950/20 text-amber-500 border-amber-900/30'}`}>
             {roomData?.expiration_type === 'permanent' ? 'PERMANENT' : `TEMP / ${timeLeft}`}
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          {userRole === 'owner' && roomData?.expiration_type === 'recoverable' && !roomData.reopened_until && <button onClick={() => setShowConvertModal(true)} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition">🚀 Upgrade to Group</button>}
+        <div className="room-actions flex items-center gap-4">
+          {userRole === 'owner' && roomData?.expiration_type === 'recoverable' && !roomData.reopened_until && <button onClick={() => setShowConvertModal(true)} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition">Upgrade to Group</button>}
           {roomData.reopened_until && <button onClick={handlePermanentRequest} disabled={permanentSubmitting || permanentRequests.some((request) => request.status === 'pending')} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition disabled:cursor-wait disabled:opacity-50">{permanentSubmitting ? 'Requesting...' : 'Request Permanent Room'}</button>}
           <Link href="/explore" data-room-leave className="px-4 py-1.5 bg-neutral-100 hover:bg-white text-black rounded text-xs font-semibold transition">Leave</Link>
         </div>
@@ -359,7 +361,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
       <RoomNotifications roomId={roomData.id} />
 
       {roomData.reopened_until && permanentRequests.length > 0 && (
-        <div className="border-b border-indigo-900/40 bg-indigo-950/20 px-6 py-2 text-xs text-indigo-200">
+        <div className="room-state-bar rounded-none border-x-0 border-t-0">
           {permanentRequests.map((request) => (
             <div key={request.id} className="flex flex-wrap items-center justify-between gap-2">
               <span>Permanent-room request from User {request.requester_id}: {request.status}.</span>
@@ -375,21 +377,21 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
       )}
       {lifecycleActionError && <p className="border-b border-red-900/50 bg-red-950/30 px-6 py-2 text-xs text-red-300" role="alert">{lifecycleActionError}</p>}
 
-      <div className="flex-1 flex overflow-hidden">
-        <nav className="w-16 shrink-0 border-r border-neutral-800 bg-[#0a0a0a] flex flex-col items-center py-4 gap-6 z-10">
-          <div className="flex flex-col gap-3 w-full px-2">
-            <button onClick={() => setMainActivity('watch')} className={`p-3 rounded-lg flex items-center justify-center transition ${mainActivity === 'watch' ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}>▶️</button>
-            <button onClick={() => setMainActivity('study')} className={`p-3 rounded-lg flex items-center justify-center transition ${mainActivity === 'study' ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}>📚</button>
+      <div className="room-content flex-1 overflow-hidden">
+        <nav className="workspace-rail z-10">
+          <div className="workspace-rail-group w-full">
+            <button type="button" aria-label="Watch" title="Watch" onClick={() => setMainActivity('watch')} className={`workspace-tool ${mainActivity === 'watch' ? 'is-active' : ''}`}><OmniIcon name="play" size={17} /></button>
+            <button type="button" aria-label="Study" title="Study" onClick={() => setMainActivity('study')} className={`workspace-tool ${mainActivity === 'study' ? 'is-active' : ''}`}><OmniIcon name="study" size={18} /></button>
           </div>
-          <div className="w-8 h-px bg-neutral-800 my-2" />
-          <div className="flex flex-col gap-3 w-full px-2">
-            <button onClick={() => setActiveTool('chat')} className={`p-3 rounded-lg flex items-center justify-center transition ${activeTool === 'chat' ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}>💬</button>
-            <button onClick={() => setActiveTool('members')} className={`p-3 rounded-lg flex items-center justify-center transition ${activeTool === 'members' ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}>👥</button>
-            <button onClick={() => setActiveTool('files')} className={`p-3 rounded-lg flex items-center justify-center transition ${activeTool === 'files' ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}>📁</button>
+          <div className="my-2 h-px w-8 bg-neutral-800" />
+          <div className="workspace-rail-group w-full">
+            <button type="button" aria-label="Chat" title="Chat" onClick={() => setActiveTool('chat')} className={`workspace-tool ${activeTool === 'chat' ? 'is-active' : ''}`}><OmniIcon name="message" size={17} /></button>
+            <button type="button" aria-label="Members" title="Members" onClick={() => setActiveTool('members')} className={`workspace-tool ${activeTool === 'members' ? 'is-active' : ''}`}><OmniIcon name="users" size={17} /></button>
+            <button type="button" aria-label="Files" title="Files" onClick={() => setActiveTool('files')} className={`workspace-tool ${activeTool === 'files' ? 'is-active' : ''}`}><OmniIcon name="file" size={17} /></button>
           </div>
         </nav>
 
-        <main className="relative flex min-w-0 flex-1 flex-col bg-[#050505] p-0">
+        <main className="workspace-main relative flex min-w-0 flex-1 flex-col p-0">
           {/* Keep the media element mounted while another room section is open.
               Hiding this layer visually preserves playback and audio position. */}
           <div
@@ -435,13 +437,13 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         {/* DRAGGABLE RESIZER HANDLE */}
         <div 
           onMouseDown={() => setIsDragging(true)}
-          className={`w-1 cursor-col-resize hover:bg-neutral-500 transition-colors z-20 ${isDragging ? 'bg-indigo-500' : 'bg-transparent'}`}
+          className={`workspace-resizer z-20 ${isDragging ? 'bg-indigo-500' : 'bg-transparent'}`}
           title="Drag to resize sidebar"
         />
 
         {/* DYNAMIC WIDTH SIDEBAR */}
-        <aside style={{ width: `${sidebarWidth}px` }} className="border-l border-neutral-800 bg-[#0a0a0a] flex flex-col z-10 shrink-0">
-          <div className="p-4 border-b border-neutral-800 flex justify-between items-center shrink-0">
+        <aside style={{ width: `${sidebarWidth}px` }} className="workspace-side z-10 shrink-0">
+          <div className="chat-topbar shrink-0">
             <h3 className="font-medium text-sm text-white uppercase tracking-wider">{activeTool}</h3>
           </div>
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
@@ -452,6 +454,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         </aside>
       </div>
       </div>
+      <FloatingDock />
     </RoomRealtimeProvider>
   );
 }
