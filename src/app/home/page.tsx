@@ -8,6 +8,7 @@ import { createClient } from '@/utils/supabase/client';
 export default function HomePage() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [switchingAccount, setSwitchingAccount] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -19,6 +20,16 @@ export default function HomePage() {
     } catch {
       setLoggingOut(false);
     }
+  };
+
+  const handleSwitchAccount = async () => {
+    setSwitchingAccount(true);
+    const { error } = await supabase.auth.signOut({ scope: 'local' });
+    if (error) {
+      setSwitchingAccount(false);
+      return;
+    }
+    router.replace('/login?next=%2Fhome&switch=1');
   };
 
   return (
@@ -103,6 +114,13 @@ export default function HomePage() {
         </div>
 
         <div className="pt-4 border-t border-white/10">
+          <button
+            onClick={() => void handleSwitchAccount()}
+            disabled={loggingOut || switchingAccount}
+            className="mb-3 block w-full rounded-lg border border-white/10 bg-white/5 py-2.5 text-center text-sm font-medium text-gray-200 transition hover:bg-white/10 disabled:cursor-wait disabled:opacity-50"
+          >
+            {switchingAccount ? 'Switching account...' : 'Switch account'}
+          </button>
           <button
             onClick={handleLogout}
             disabled={loggingOut}
