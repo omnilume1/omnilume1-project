@@ -69,12 +69,17 @@ export default function ProfileSetupPage() {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const result = await completeIdentitySetup();
-        if (result.success) return;
+        if (result.success) break;
       } catch {
         // Transport-level failure (e.g. a flaky mobile connection); retry below.
       }
     }
-    router.replace(nextPath);
+    // A hard navigation is intentional here: it is a one-time first-run gate
+    // and it cannot be swallowed by a wedged client-side router transition
+    // (verified: router.replace silently no-ops after this page's server
+    // action chain). The route gate passes because the save persisted both
+    // identity flags.
+    window.location.replace(nextPath);
   }
 
   if (loading) {
