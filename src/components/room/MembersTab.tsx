@@ -49,17 +49,17 @@ export default function MembersTab({ roomId, currentUserRole }: MembersTabProps)
     }
   };
 
-  if (loading) return <div className="p-4 text-xs text-neutral-500 animate-pulse">Loading members...</div>;
+  if (loading) return <div className="omni-state-screen min-h-0 p-4 text-xs text-neutral-500">Loading members...</div>;
 
   const approvedMembers = members.filter(m => m.join_status === 'approved');
   const pendingMembers = members.filter(m => m.join_status === 'pending');
   const canManage = currentUserRole === 'owner' || currentUserRole === 'admin';
 
   return (
-    <div className="flex flex-col h-full bg-[#050505]">
+    <div className="chat-panel flex h-full flex-col">
       
       {/* PHASE 21: Live Status Header */}
-      <div className="p-4 border-b border-neutral-900 bg-[#0a0a0a] shrink-0 flex items-center justify-between">
+      <div className="chat-topbar shrink-0">
         <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Room Roster</span>
         <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
@@ -67,7 +67,7 @@ export default function MembersTab({ roomId, currentUserRole }: MembersTabProps)
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6 custom-scrollbar">
+      <div className="chat-scroller flex flex-col gap-6 custom-scrollbar">
         
         {/* Pending Requests (Only visible to Owners/Admins) */}
         {canManage && pendingMembers.length > 0 && (

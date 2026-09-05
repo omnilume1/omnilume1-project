@@ -1,51 +1,66 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getPublicRooms, processRoomJoin } from '@/actions/rooms';
 import { getLoginPath } from '@/lib/auth';
 import { createClient } from '@/utils/supabase/client';
+import FloatingDock from '@/components/ui/FloatingDock';
+import InternalTopbar from '@/components/ui/InternalTopbar';
+import { OmniIcon } from '@/components/ui/OmniIcon';
 
 interface PublicRoom {
   id: string;
   name: string;
+  description: string | null;
   username: string | null;
   room_members: Array<{ count: number }>;
+}
+
+function safeJoinMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (message.includes('Room not found')) return 'Room not found. Check the code or link and try again.';
+  if (message.includes('expired')) return 'This room has expired and is no longer accepting joins.';
+  if (message.includes('Unauthorized')) return 'Please sign in before joining a room.';
+  return 'We could not join this room. Please try again.';
 }
 
 export default function ExploreRoomsPage() {
   const [rooms, setRooms] = useState<PublicRoom[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
-  
   const [searchQuery, setSearchQuery] = useState('');
   const [roomCode, setRoomCode] = useState('');
-  const [codeStatus, setCodeStatus] = useState<{ type: 'error' | 'success', msg: string } | null>(null);
-
+  const [status, setStatus] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   const router = useRouter();
   const supabase = createClient();
 
   useEffect(() => {
+    let active = true;
+
     async function fetchRooms() {
       try {
         const data = await getPublicRooms();
-        setRooms(data || []);
-      } catch (error: unknown) {
-        console.error("Failed to load rooms:", error instanceof Error ? error.message : "unknown error");
+        if (active) setRooms((data ?? []) as PublicRoom[]);
+      } catch {
+        if (active) setLoadError('Public rooms could not be loaded right now. Please refresh to try again.');
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     }
-    fetchRooms();
+
+    void fetchRooms();
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const handleJoin = async (identifier: string, isFromBox: boolean = false) => {
-    if (isFromBox) {
-      if (!identifier.trim()) return;
-      setCodeStatus(null);
-    }
-    
+  const handleJoin = async (identifier: string) => {
+    if (!identifier.trim()) return;
+    setStatus(null);
+
     try {
       const { data: { user }, error: sessionError } = await supabase.auth.getUser();
       if (sessionError || !user) {
@@ -61,103 +76,70 @@ export default function ExploreRoomsPage() {
 
     try {
       const result = await processRoomJoin(identifier);
-      
       if (result.status === 'pending') {
-        // UX FIX: Do NOT route them to the room. Just show a message.
-        if (isFromBox) {
-          setCodeStatus({ type: 'success', msg: "Request Sent! You can keep browsing until approved." });
-        } else {
-          alert("Request Sent! You can keep browsing until the owner approves you.");
-        }
+        setStatus({ type: 'success', message: 'Request sent. You can keep browsing until the owner approves you.' });
       } else {
-        // If approved (public room, or already approved private room), go straight in
         router.push(`/room/${result.roomId}`);
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Something went wrong. Please try again.";
-      if (message.toLowerCase().includes('unauthorized') || message.includes('React error #441')) {
+      const message = safeJoinMessage(error);
+      if (message.startsWith('Please sign in')) {
         router.push(getLoginPath('/explore'));
         return;
       }
-      if (isFromBox) setCodeStatus({ type: 'error', msg: message });
-      else alert(message);
+      setStatus({ type: 'error', message });
     } finally {
       setProcessingId(null);
     }
   };
 
-  const filteredRooms = rooms.filter(room => 
-    room.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    (room.username && room.username.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const filteredRooms = useMemo(() => rooms.filter((room) => (
+    room.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (room.username?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
+  )), [rooms, searchQuery]);
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white p-8 font-sans selection:bg-neutral-800">
-      <div className="max-w-5xl mx-auto flex flex-col gap-8">
-        
-        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-800 pb-6">
+    <div className="omni-internal">
+      <InternalTopbar eyebrow="Discover together" title="Explore" description="Find public spaces or use an invite from someone you know." actions={<Link href="/create-room" className="omni-button omni-button-primary"><OmniIcon name="plus" size={15} /> Create room</Link>} />
+      <main className="omni-main-content explore-main">
+        <section className="explore-intro glass-card-ambient fade-up">
           <div>
-            <h1 className="text-2xl font-semibold">Explore Spaces</h1>
-            <p className="text-neutral-500 text-sm mt-1">Discover public rooms or enter a private invite link.</p>
+            <p className="section-kicker">Public spaces</p>
+            <h2 className="section-title">Find your next room</h2>
+            <p className="section-copy">Search by room name or username, then join when the space feels right.</p>
           </div>
-          <Link href="/create-room" className="px-4 py-2 bg-white text-black text-sm font-semibold rounded-md hover:bg-neutral-200 transition text-center">
-            + Create Room
-          </Link>
-        </header>
+          <span className="explore-room-count"><OmniIcon name="rooms" size={14} /> {loading ? 'Loading rooms' : `${rooms.length} public rooms`}</span>
+        </section>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-[#0a0a0a] border border-neutral-800 rounded-xl p-5">
-            <h2 className="text-sm font-semibold text-neutral-300 mb-3">Search Public Rooms</h2>
-            <input type="text" placeholder="Search by name or @username..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#050505] border border-neutral-800 rounded-md px-4 py-2.5 text-sm text-white focus:outline-none focus:border-neutral-500 transition" />
+        <section className="explore-controls">
+          <div className="glass-card-ambient explore-control-card">
+            <label htmlFor="room-search" className="explore-control-label"><OmniIcon name="search" size={16} /> Search public rooms</label>
+            <input id="room-search" type="search" placeholder="Search by name or @username..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="omni-input" />
           </div>
-
-          <div className="bg-[#0a0a0a] border border-neutral-800 rounded-xl p-5">
-            <h2 className="text-sm font-semibold text-neutral-300 mb-3">Have a Secret Link or Code?</h2>
-            <form onSubmit={(e) => { e.preventDefault(); handleJoin(roomCode, true); }} className="flex gap-2">
-              <input type="text" placeholder="Paste link, username, or UUID..." value={roomCode} onChange={(e) => setRoomCode(e.target.value)} className="flex-1 bg-[#050505] border border-neutral-800 rounded-md px-4 py-2.5 text-sm text-white focus:outline-none focus:border-neutral-500 transition" />
-              <button type="submit" disabled={!roomCode.trim() || processingId === roomCode} className="px-4 py-2.5 bg-neutral-200 text-black font-semibold text-sm rounded-md disabled:opacity-50 hover:bg-white transition">
-                {processingId === roomCode ? '...' : 'Join'}
-              </button>
+          <div className="glass-card-ambient explore-control-card">
+            <label htmlFor="room-code" className="explore-control-label"><OmniIcon name="lock" size={16} /> Join with a link or code</label>
+            <form onSubmit={(event) => { event.preventDefault(); void handleJoin(roomCode); }} className="explore-code-form">
+              <input id="room-code" type="text" placeholder="Paste a link, username, or UUID..." value={roomCode} onChange={(event) => setRoomCode(event.target.value)} className="omni-input" />
+              <button type="submit" disabled={!roomCode.trim() || processingId === roomCode} className="omni-button omni-button-primary shrink-0">{processingId === roomCode ? 'Joining...' : 'Join'}</button>
             </form>
-            {codeStatus && (
-              <p className={`text-xs mt-2 font-medium ${codeStatus.type === 'success' ? 'text-emerald-500' : 'text-red-500'}`}>
-                {codeStatus.msg}
-              </p>
-            )}
           </div>
-        </div>
+        </section>
 
-        <div>
-          <h2 className="text-[10px] text-neutral-500 mb-4 uppercase tracking-wider">Public Spaces</h2>
-          {loading ? (
-            <div className="text-neutral-500 text-sm animate-pulse">Loading public spaces...</div>
-          ) : filteredRooms.length === 0 ? (
-            <div className="border border-neutral-800 border-dashed rounded-xl p-12 text-center text-neutral-500 text-sm">No public rooms found.</div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredRooms.map((room) => {
-                const memberCount = room.room_members[0]?.count || 0;
-                return (
-                  <div key={room.id} className="bg-[#0a0a0a] border border-neutral-800 rounded-xl p-5 flex flex-col gap-4 hover:border-neutral-700 transition">
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded tracking-wider">PUBLIC</span>
-                        <span className="text-xs text-neutral-500">👥 {memberCount} joined</span>
-                      </div>
-                      <h3 className="font-semibold text-lg text-neutral-200 truncate">{room.name}</h3>
-                      {room.username && <p className="text-xs text-emerald-500 mt-1 font-medium">@{room.username}</p>}
-                    </div>
+        {status && <p className={status.type === 'success' ? 'form-success explore-status' : 'form-error explore-status'} role={status.type === 'error' ? 'alert' : 'status'}>{status.message}</p>}
 
-                    <button onClick={() => handleJoin(room.id)} disabled={processingId === room.id} className="w-full mt-auto py-2.5 bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 text-white rounded-md text-sm font-medium transition disabled:opacity-50">
-                      {processingId === room.id ? 'Joining...' : 'Join Room'}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
+        <section className="explore-list-section">
+          <div className="explore-list-heading"><div><p className="section-kicker !mb-0">Rooms open to everyone</p><p className="mt-2 text-sm text-neutral-500">Showing real public rooms currently available to join.</p></div><span className="text-xs text-neutral-500">{filteredRooms.length} found</span></div>
+          {loading ? <div className="glass-card-ambient empty-state">Loading public spaces...</div> : loadError ? <div className="form-error">{loadError}</div> : filteredRooms.length === 0 ? <div className="glass-card-ambient empty-state">No public rooms match your search.</div> : <div className="explore-room-grid">{filteredRooms.map((room) => {
+            const memberCount = room.room_members[0]?.count ?? 0;
+            return <article key={room.id} className="glass-card-ambient explore-room-card">
+              <div className="explore-room-card-top"><span className="room-chip text-violet-200">Public</span><span className="explore-room-members"><OmniIcon name="users" size={14} /> {memberCount} joined</span></div>
+              <div className="min-w-0"><h3 className="truncate text-lg font-semibold text-neutral-100">{room.name}</h3>{room.username && <p className="mt-1 text-xs text-violet-300">@{room.username}</p>}{room.description && <p className="explore-room-description">{room.description}</p>}</div>
+              <button onClick={() => void handleJoin(room.id)} disabled={processingId === room.id} className="omni-button omni-button-ghost mt-auto w-full">{processingId === room.id ? 'Joining...' : 'Join room'} <OmniIcon name="arrow" size={14} /></button>
+            </article>;
+          })}</div>}
+        </section>
+      </main>
+      <FloatingDock />
     </div>
   );
 }

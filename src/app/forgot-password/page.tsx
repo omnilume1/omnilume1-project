@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { FormEvent, useState } from 'react';
 import { createClient } from '@/utils/supabase/client';
+import OmniLogo from '@/components/ui/OmniLogo';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -36,25 +37,27 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-black px-6 text-white">
-      <section className="w-full max-w-sm rounded-2xl border border-neutral-800 bg-[#0a0a0a] p-8 shadow-2xl">
-        <h1 className="text-2xl font-bold">Reset your password</h1>
-        <p className="mt-2 text-sm text-neutral-400">We will send recovery instructions if this email can recover an account.</p>
+    <main className="omni-state-screen">
+      <section className="glass-panel omni-form-card !max-w-md">
+        <OmniLogo />
+        <p className="section-kicker mt-10">Account recovery</p>
+        <h1 className="text-3xl font-bold tracking-tight text-white">Reset your password</h1>
+        <p className="section-copy">We will send recovery instructions if this email can recover an account.</p>
 
         {sent && (
-          <p className="mt-4 rounded-lg border border-emerald-900/70 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-300" role="status">
+          <p className="form-success mt-4" role="status">
             Check your email for a secure password reset link.
           </p>
         )}
         {errorMessage && (
-          <p className="mt-4 rounded-lg border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-300" role="alert">
+          <p className="form-error mt-4" role="alert">
             {errorMessage}
           </p>
         )}
 
         <form onSubmit={(event) => void handleSubmit(event)} className="mt-6 space-y-4">
           <div>
-            <label htmlFor="recovery-email" className="mb-1 block text-xs uppercase tracking-wide text-neutral-500">Email</label>
+            <label htmlFor="recovery-email" className="form-label">Email</label>
             <input
               id="recovery-email"
               type="email"
@@ -62,13 +65,13 @@ export default function ForgotPasswordPage() {
               onChange={(event) => setEmail(event.target.value)}
               autoComplete="email"
               required
-              className="w-full rounded-lg border border-neutral-800 bg-[#050505] px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
+              className="omni-input"
             />
           </div>
           <button
             type="submit"
             disabled={loading || !email.trim()}
-            className="w-full rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:opacity-60"
+            className="omni-button omni-button-primary w-full"
           >
             {loading ? 'Sending...' : 'Send reset link'}
           </button>

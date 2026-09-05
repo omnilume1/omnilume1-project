@@ -44,6 +44,9 @@ export function isAuthRequiredPath(pathname: string) {
     pathname === '/room' ||
     pathname.startsWith('/room/') ||
     pathname === '/room-settings' ||
+    pathname === '/profile' ||
+    pathname.startsWith('/profile/') ||
+    pathname === '/settings' ||
     pathname === PROFILE_SETUP_PATH
   );
 }

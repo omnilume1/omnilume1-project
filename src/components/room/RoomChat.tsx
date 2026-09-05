@@ -160,14 +160,14 @@ export default function RoomChat({ roomId }: RoomChatProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0a0a] border-l border-neutral-800 relative">
-      <div className="p-4 border-b border-neutral-800 bg-[#0a0a0a] z-10 flex justify-between items-center shadow-md">
+    <div className="chat-panel relative h-full border-l border-white/10">
+      <div className="chat-topbar z-10 shadow-md">
         <h3 className="text-white font-bold text-sm">Room Chat</h3>
       </div>
 
       {deleteError && <p className="border-b border-red-500/20 bg-red-500/5 px-4 py-2 text-xs text-red-300" role="alert">{deleteError}</p>}
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+      <div ref={scrollRef} className="chat-scroller flex flex-col gap-4">
         {messages.length === 0 ? (
           <p className="text-xs text-neutral-500 text-center mt-10">No messages yet. Say hello!</p>
         ) : (
@@ -175,16 +175,16 @@ export default function RoomChat({ roomId }: RoomChatProps) {
             const isMe = msg.sender_id === (currentUserId ?? roomCurrentUserId);
             return (
               <div key={msg.id} className={`flex flex-col relative group ${isMe ? 'items-end' : 'items-start'}`}>
-                <div data-message-menu-area className={`relative max-w-[85%] px-4 py-2.5 rounded-2xl flex items-center gap-3 ${msg.is_deleted ? 'bg-transparent border border-neutral-800 text-neutral-500 italic' : isMe ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-neutral-800 text-white rounded-bl-sm'}`}>
+                <div data-message-menu-area className={`message-bubble relative flex max-w-[85%] items-center gap-3 px-4 py-2.5 ${msg.is_deleted ? 'bg-transparent text-neutral-500 italic' : isMe ? 'is-own rounded-br-sm text-white' : 'rounded-bl-sm text-white'}`}>
                   <span className="text-sm leading-relaxed break-words">{msg.content}</span>
                   {!msg.is_deleted && (
-                    <button onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === msg.id ? null : msg.id); }} className={`opacity-0 group-hover:opacity-100 transition p-1 hover:bg-black/20 rounded cursor-pointer ${isMe ? '-ml-2' : ''}`}>
+                    <button aria-label="Message actions" title="Message actions" onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === msg.id ? null : msg.id); }} className={`message-more rounded p-1 transition hover:bg-black/20 ${isMe ? '-ml-2' : ''}`}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
                     </button>
                   )}
                 </div>
                 {activeMenuId === msg.id && (
-                  <div data-message-menu-area className={`absolute top-full mt-1 z-50 bg-[#1a1a1a] border border-neutral-700 rounded-lg shadow-2xl py-1 w-40 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 ${isMe ? 'right-0' : 'left-0'}`}>
+                  <div data-message-menu-area className={`chat-menu absolute top-full z-50 mt-1 flex w-40 flex-col overflow-hidden rounded-xl py-1 shadow-2xl ${isMe ? 'right-0' : 'left-0'}`}>
                     <button onClick={(e) => { e.stopPropagation(); handleDeleteForMe(msg.id); }} className="px-4 py-2 text-left text-xs text-white hover:bg-neutral-800 font-semibold transition cursor-pointer">Delete for me</button>
                     {isMe && <button onClick={(e) => { e.stopPropagation(); handleDeleteForEveryone(msg.id); }} disabled={deletingMessageId === msg.id} className="px-4 py-2 text-left text-xs text-red-400 hover:bg-neutral-800 font-semibold transition cursor-pointer disabled:cursor-wait disabled:opacity-50">{deletingMessageId === msg.id ? 'Deleting...' : 'Delete for everyone'}</button>}
                   </div>
@@ -196,10 +196,10 @@ export default function RoomChat({ roomId }: RoomChatProps) {
         )}
       </div>
 
-      <div className="p-4 border-t border-neutral-800 bg-[#111]">
+      <div className="message-composer">
         <form onSubmit={handleSendMessage} className="flex gap-2">
-          <input type="text" value={newMessage} onChange={handleTyping} placeholder="Message the room..." className="flex-1 bg-[#1a1a1a] border border-neutral-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none transition shadow-inner" />
-          <button type="submit" disabled={!newMessage.trim()} className="p-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-neutral-800 text-white rounded-xl transition cursor-pointer disabled:cursor-not-allowed">
+          <input type="text" value={newMessage} onChange={handleTyping} placeholder="Message the room..." className="omni-input" />
+          <button type="submit" disabled={!newMessage.trim()} className="omni-button omni-button-primary !min-h-0 !rounded-xl !px-3">
             {/* The corrected SVG is below without the extra </path> */}
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" /></svg>
           </button>

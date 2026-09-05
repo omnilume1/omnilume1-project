@@ -1,111 +1,97 @@
-import { Navbar, NavLinks } from "@/components/Navbar";
+import Link from 'next/link';
+import { Navbar } from '@/components/Navbar';
+import { OmniIcon, type OmniIconName } from '@/components/ui/OmniIcon';
+import OmniFooter from '@/components/ui/OmniFooter';
+import FlippingWords from '@/components/ui/FlippingWords';
+import { getCurrentAccount } from '@/lib/current-account';
 
-const features = [
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-5 w-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
-      </svg>
-    ),
-    title: "Watch Together",
-    description: "Stream videos in sync with your room. Cast YouTube, Twitch, or upload files.",
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-5 w-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.438 60.438 0 0 0-.491 6.347A48.62 48.62 0 0 1 12 20.904a48.62 48.62 0 0 1 8.232-4.41 60.46 60.46 0 0 0-.491-6.347m-15.482 0a50.636 50.636 0 0 0-2.658-.813A59.906 59.906 0 0 1 12 3.493a59.903 59.903 0 0 1 10.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.717 50.717 0 0 1 12 13.489a50.702 50.702 0 0 1 7.74-3.342M6.75 15a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm0 0v-3.675A55.378 55.378 0 0 1 12 8.443m-7.007 11.55A5.981 5.981 0 0 0 6.75 15.75v-1.5" />
-      </svg>
-    ),
-    title: "Study Together",
-    description: "Focus timers, shared sessions, and accountability with your group.",
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-5 w-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
-      </svg>
-    ),
-    title: "Chat Together",
-    description: "Real-time messaging with end-to-end encrypted private chats.",
-  },
+type MarketingFeature = 'study' | 'watch' | 'music' | 'files' | 'assistant';
+
+const floatingFeatures: Array<{ icon: OmniIconName; title: string; meta: string; kind: MarketingFeature }> = [
+  { icon: 'study', title: 'Study Together', meta: 'Shared focus spaces', kind: 'study' },
+  { icon: 'play', title: 'Watch Together', meta: 'Stay in sync', kind: 'watch' },
+  { icon: 'music', title: 'Music', meta: 'Make it yours', kind: 'music' },
+  { icon: 'file', title: 'Shared Files', meta: 'One calm workspace', kind: 'files' },
+  { icon: 'spark', title: 'AI Assistant', meta: 'Planned room companion', kind: 'assistant' },
 ];
 
-export default function Home() {
+const platformFeatures: Array<{ icon: OmniIconName; title: string; description: string; kind: MarketingFeature }> = [
+  { icon: 'play', title: 'Watch Together', description: 'Shared media, gentle synchronization and a room that keeps everyone on the same page.', kind: 'watch' },
+  { icon: 'study', title: 'Study Together', description: 'Focus sessions, timers and useful tools for making progress alongside other people.', kind: 'study' },
+  { icon: 'message', title: 'Chat Together', description: 'Room conversation and private encrypted messaging, designed to stay calm and connected.', kind: 'assistant' },
+];
+
+function MarketingPreview({ kind }: { kind: MarketingFeature }) {
+  if (kind === 'study') {
+    return <span className="feature-preview-visual preview-study" aria-hidden="true"><span className="preview-focus-ring"><span /></span><span><strong>Focus room</strong><small>25:00</small></span></span>;
+  }
+  if (kind === 'watch') {
+    return <span className="feature-preview-visual preview-watch" aria-hidden="true"><span className="preview-play"><OmniIcon name="play" size={12} /></span><span className="preview-progress"><span /></span><small>Shared playback</small></span>;
+  }
+  if (kind === 'music') {
+    return <span className="feature-preview-visual preview-music" aria-hidden="true"><span className="preview-wave"><i /><i /><i /><i /><i /><i /><i /></span><small>Room soundtrack</small></span>;
+  }
+  if (kind === 'files') {
+    return <span className="feature-preview-visual preview-files" aria-hidden="true"><span className="preview-file-page"><i /><i /><i /></span><small>Shared workspace</small></span>;
+  }
+  return <span className="feature-preview-visual preview-assistant" aria-hidden="true"><span className="preview-orb" /><span><strong>Room companion</strong><small>Ideas in context</small></span></span>;
+}
+
+export default async function Home() {
+  const account = await getCurrentAccount();
+  const startHref = account ? (account.profileDetailsCompleted ? '/home' : '/profile/setup') : '/login';
+
   return (
-    <div className="ambient flex min-h-full flex-col">
-      <Navbar />
-      <NavLinks />
+    <div className="omni-public omni-home">
+      <Navbar account={account} />
 
-      <main className="relative mx-auto flex w-full max-w-4xl flex-1 flex-col items-center px-6 pb-24 pt-20 text-center sm:pt-28">
-        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-xs text-zinc-400">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
-          Shared digital spaces
-        </div>
-
-        <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-white sm:text-6xl sm:leading-[1.08]">
-          Watch, study, and talk{" "}
-          <span className="text-zinc-400">in one calm room.</span>
-        </h1>
-
-        <p className="mt-6 max-w-lg text-base leading-7 text-zinc-500 sm:text-lg">
-          Create a room, invite people, and keep chat, media, and tools together — all in one place.
-        </p>
-
-        {/* 3D Wireframe Cube — represents rooms/spaces */}
-        <div className="mt-16 flex items-center justify-center" style={{ perspective: "600px" }}>
-          <div
-            className="relative h-28 w-28 sm:h-36 sm:w-36"
-            style={{ transformStyle: "preserve-3d" }}
-          >
-            <div className="absolute inset-0 animate-[spin_18s_linear_infinite]" style={{ transformStyle: "preserve-3d" }}>
-              {/* Front */}
-              <div className="absolute inset-0 border border-white/15 bg-white/[0.02]" style={{ transform: "translateZ(56px)" }} />
-              {/* Back */}
-              <div className="absolute inset-0 border border-white/15 bg-white/[0.02]" style={{ transform: "rotateY(180deg) translateZ(56px)" }} />
-              {/* Right */}
-              <div className="absolute inset-0 border border-white/15 bg-white/[0.02]" style={{ transform: "rotateY(90deg) translateZ(56px)" }} />
-              {/* Left */}
-              <div className="absolute inset-0 border border-white/15 bg-white/[0.02]" style={{ transform: "rotateY(-90deg) translateZ(56px)" }} />
-              {/* Top */}
-              <div className="absolute inset-0 border border-white/15 bg-white/[0.02]" style={{ transform: "rotateX(90deg) translateZ(56px)" }} />
-              {/* Bottom */}
-              <div className="absolute inset-0 border border-white/15 bg-white/[0.02]" style={{ transform: "rotateX(-90deg) translateZ(56px)" }} />
+      <main className="public-main">
+        <section className="hero-grid">
+          <div className="hero-copy fade-up">
+            <p className="hero-eyebrow">Study · Connect · Create · Together</p>
+            <h1 className="hero-title">A Brighter Space to{" "}<span className="hero-title-accent">Grow</span></h1>
+            <p className="hero-subtitle">Study together, share ideas, build hobbies and grow together.</p>
+            <div className="hero-actions">
+              <Link href={startHref} className="omni-button omni-button-primary">{account ? 'Go to your space' : 'Get started'} <OmniIcon name="arrow" size={16} /></Link>
+              <Link href="/explore" className="omni-button omni-button-ghost">Explore rooms</Link>
             </div>
-            {/* Inner cube for depth */}
-            <div className="absolute inset-4 animate-[spin_12s_linear_infinite_reverse]" style={{ transformStyle: "preserve-3d" }}>
-              <div className="absolute inset-0 border border-white/10" style={{ transform: "translateZ(28px)" }} />
-              <div className="absolute inset-0 border border-white/10" style={{ transform: "rotateY(180deg) translateZ(28px)" }} />
-              <div className="absolute inset-0 border border-white/10" style={{ transform: "rotateY(90deg) translateZ(28px)" }} />
-              <div className="absolute inset-0 border border-white/10" style={{ transform: "rotateY(-90deg) translateZ(28px)" }} />
-              <div className="absolute inset-0 border border-white/10" style={{ transform: "rotateX(90deg) translateZ(28px)" }} />
-              <div className="absolute inset-0 border border-white/10" style={{ transform: "rotateX(-90deg) translateZ(28px)" }} />
+            <FlippingWords
+              prefix="Create together ·"
+              phrases={['GROW TOGETHER', 'STUDY TOGETHER', 'WATCH TOGETHER']}
+              className="hero-flipping-words"
+            />
+            <div className="stat-row" aria-label="OmniLume highlights">
+              <div className="stat-item"><span className="stat-value">50K+</span><span className="stat-label">Active learners</span></div>
+              <div className="stat-item"><span className="stat-value">1M+</span><span className="stat-label">Study hours</span></div>
+              <div className="stat-item"><span className="stat-value">2K+</span><span className="stat-label">Active rooms</span></div>
+              <div className="stat-item"><span className="stat-value">4.9/5</span><span className="stat-label">Community rating</span></div>
             </div>
           </div>
-        </div>
 
-        <p className="mt-10 text-xs text-zinc-600">
-          Explore rooms, join a session, or create your own.
-        </p>
+          <div className="hero-stage" aria-label="Illustrated OmniLume feature previews">
+            {floatingFeatures.map((feature) => (
+              <article key={feature.title} className={`feature-float feature-float--${feature.kind}`} tabIndex={0}>
+                <span className="feature-float-icon"><OmniIcon name={feature.icon} size={16} /></span>
+                <span><span className="feature-float-title">{feature.title}</span><span className="feature-float-meta">{feature.meta}</span></span>
+                <MarketingPreview kind={feature.kind} />
+              </article>
+            ))}
+          </div>
+        </section>
 
-        <div className="mt-12 grid w-full max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3">
-          {features.map((feature) => (
-            <div
-              key={feature.title}
-              className="group rounded-2xl border border-white/5 bg-white/[0.02] p-5 text-left transition-colors hover:border-white/10 hover:bg-white/[0.04]"
-            >
-              <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/5 text-zinc-400 transition-colors group-hover:text-white">
-                {feature.icon}
-              </div>
-              <h3 className="mb-1 text-sm font-semibold text-white">
-                {feature.title}
-              </h3>
-              <p className="text-xs leading-relaxed text-zinc-500">
-                {feature.description}
-              </p>
-            </div>
+        <section id="about" className="public-feature-strip" aria-label="OmniLume features">
+          {platformFeatures.map((feature) => (
+            <article key={feature.title} className="public-feature-card" tabIndex={0}>
+              <span className="feature-float-icon"><OmniIcon name={feature.icon} size={17} /></span>
+              <h2>{feature.title}</h2>
+              <p>{feature.description}</p>
+              <MarketingPreview kind={feature.kind} />
+            </article>
           ))}
-        </div>
+        </section>
       </main>
+
+      <OmniFooter />
     </div>
   );
 }
