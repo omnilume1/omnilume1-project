@@ -97,7 +97,13 @@ export default function ProfileForm({
         return;
       }
       setSuccessMessage(setup ? 'Your OmniLume identity is ready.' : 'Profile saved.');
-      await onSaved?.(result.profile as ProfileRecord);
+      try {
+        await onSaved?.(result.profile as ProfileRecord);
+      } catch {
+        // The profile itself is persisted at this point; a post-save step
+        // failed, so keep the success state instead of claiming the save
+        // failed.
+      }
     } catch {
       setErrorMessage('We could not save your profile. Please review the fields and try again.');
     } finally {

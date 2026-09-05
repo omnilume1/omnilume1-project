@@ -17,6 +17,7 @@ import {
   updatePost,
 } from '@/actions/profiles';
 import ProfileForm from '@/components/profile/ProfileForm';
+import AccountControlActions from '@/components/profile/AccountControlActions';
 import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
 import type { AccountView } from '@/components/ui/CurrentAccountControls';
@@ -255,6 +256,7 @@ export default function ProfileSurface({ profileId }: { profileId?: string }) {
             <section className="glass-panel profile-privacy-card"><p className="section-kicker">Privacy</p><h2 className="text-lg font-semibold">{profile.is_private ? 'Private by choice.' : 'Open to discovery.'}</h2><p>{isOwn ? 'You can change who sees your profile from the editor above.' : profile.is_private ? 'Follow requests and friendship are separate. Accepted relationships unlock the content this profile allows.' : 'Public profile details and public posts are available to signed-in members.'}</p></section>
           </aside>
         </section>
+        {isOwn && <AccountControlActions className="profile-mobile-account-controls" />}
       </main>
       <FloatingDock />
     </div>

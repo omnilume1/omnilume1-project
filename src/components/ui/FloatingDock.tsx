@@ -15,11 +15,10 @@ export interface FloatingDockItem {
 
 const defaultItems: FloatingDockItem[] = [
   { title: 'Home', href: '/home', icon: 'home' },
-  { title: 'Explore', href: '/explore', icon: 'search' },
-  { title: 'Rooms', href: '/room', icon: 'rooms' },
+  { title: 'Search', href: '/search', icon: 'search' },
+  { title: 'Rooms', href: '/explore', icon: 'rooms' },
   { title: 'Create', href: '/create-room', icon: 'plus', emphasis: true },
   { title: 'Messages', href: '/messages', icon: 'message' },
-  { title: 'Notifications', href: '/home#notifications', icon: 'bell' },
   { title: 'Profile', href: '/profile', icon: 'user' },
 ];
 
@@ -73,7 +72,7 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
       // distance-based scale and lift. The create control only keeps the top
       // stack level, so magnified neighbours slide beneath it instead of
       // clipping over it.
-      element.style.setProperty('--dock-scale', (1 + (proximity * 0.42)).toFixed(3));
+      element.style.setProperty('--dock-scale', (1 + (proximity * 0.25)).toFixed(3));
       element.style.setProperty('--dock-lift', `${Math.round(proximity * -7)}px`);
       element.style.setProperty('--dock-z-index', isCreate ? '5' : proximity > 0.04 ? '2' : '1');
     });
@@ -108,7 +107,7 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
                 onBlur={resetMagnification}
                 className={`dock-item ${active ? 'is-active' : ''} ${item.emphasis ? 'is-emphasis' : ''}`}
               >
-                <OmniIcon name={item.icon} size={18} />
+                <OmniIcon name={item.icon} size={22} />
                 <span className="dock-tooltip" aria-hidden="true">{item.title}</span>
                 <span className="dock-sr-label">{item.title}</span>
               </Link>

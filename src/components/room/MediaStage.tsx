@@ -419,7 +419,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
         }
       ` }} />
 
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b] shadow-2xl">
+      <div data-stage-card className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b] shadow-2xl">
         <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/90 to-transparent p-4 pointer-events-auto">
           <div className="flex min-w-0 flex-col">
             <span className="truncate text-sm font-bold text-white drop-shadow-md">{activeMediaUrl ? mediaTitle : 'Watch Party Stage'}</span>
@@ -475,7 +475,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
         </div>
 
         {showHistory && (
-          <div className="absolute right-4 top-16 z-40 flex max-h-[70%] w-[min(22rem,calc(100%-2rem))] flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-[#111]/95 shadow-2xl backdrop-blur-md">
+          <div data-media-history className="absolute right-4 top-16 z-40 flex max-h-[70%] w-[min(22rem,calc(100%-2rem))] flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-[#111]/95 shadow-2xl backdrop-blur-md">
             <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3"><div><h3 className="text-sm font-bold text-white">Cast history</h3><p className="text-[10px] text-neutral-500">Uploaded files and URLs from the last 24 hours</p></div><button type="button" onClick={() => setShowHistory(false)} className="cursor-pointer text-neutral-500 hover:text-white" aria-label="Close cast history">x</button></div>
             <div className="overflow-y-auto p-3">
               {historyLoading && <p className="px-2 py-3 text-xs text-neutral-500">Loading history...</p>}
@@ -489,7 +489,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
           </div>
         )}
 
-        <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center bg-black p-4">
+        <div data-media-area className="relative flex min-h-0 flex-1 flex-col items-center justify-center bg-black p-4">
           {activeMediaUrl ? (
             <div className="relative h-full w-full overflow-hidden rounded-xl border border-neutral-800">
               <Player

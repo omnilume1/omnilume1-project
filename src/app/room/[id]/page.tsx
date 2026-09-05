@@ -410,6 +410,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           {/* Keep the media element mounted while another room section is open.
               Hiding this layer visually preserves playback and audio position. */}
           <div
+            data-stage-layer
             aria-hidden={mainActivity !== 'watch'}
             className={`absolute inset-0 flex min-h-0 ${mainActivity === 'watch' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
           >
@@ -419,6 +420,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           {/* Keep the study timer mounted too, so it continues through room
               navigation and can finish/log a session outside the Study view. */}
           <div
+            data-stage-layer
             aria-hidden={mainActivity !== 'study'}
             className={`absolute inset-0 flex min-h-0 ${mainActivity === 'study' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
           >

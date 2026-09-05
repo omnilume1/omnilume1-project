@@ -12,24 +12,27 @@ async function requireUser() {
 }
 
 async function removePersonalStorage(admin: ReturnType<typeof createAdminClient>, userId: string) {
-  const { data: objects, error } = await admin
-    .schema('storage')
-    .from('objects')
-    .select('bucket_id, name')
-    .eq('owner_id', userId)
-    .neq('bucket_id', 'room_attachments')
-    .limit(1000);
+  // `storage` is intentionally not exposed through PostgREST in this project,
+  // so querying storage.objects makes every deletion fail before cleanup. The
+  // privileged Storage API is the supported server-side interface instead.
+  const { data: buckets, error: bucketError } = await admin.storage.listBuckets();
+  if (bucketError) throw new Error('Unable to prepare personal file deletion.');
 
-  if (error) throw new Error('Unable to prepare personal file deletion.');
+  for (const { id: bucket } of buckets ?? []) {
+    // Room attachments belong to the room lifecycle, never an individual
+    // account deletion. Dedicated personal buckets scope uploads by account
+    // UUID, which lets cleanup remain ownership-safe without reading the
+    // non-exposed storage database schema.
+    if (bucket === 'room_attachments') continue;
 
-  const byBucket = new Map<string, string[]>();
-  for (const object of objects ?? []) {
-    const paths = byBucket.get(object.bucket_id) ?? [];
-    paths.push(object.name);
-    byBucket.set(object.bucket_id, paths);
-  }
+    const { data: objects, error: listError } = await admin.storage.from(bucket).list(userId, { limit: 1000 });
+    if (listError) throw new Error('Unable to prepare personal file deletion.');
 
-  for (const [bucket, paths] of byBucket) {
+    const paths = (objects ?? [])
+      .filter((object) => object.id !== null)
+      .map((object) => `${userId}/${object.name}`);
+    if (paths.length === 0) continue;
+
     const { error: removeError } = await admin.storage.from(bucket).remove(paths);
     if (removeError) throw new Error('Unable to delete personal files.');
   }

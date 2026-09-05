@@ -470,7 +470,7 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
   };
 
   const renderHistoryPanel = showHistory && (
-    <div className="absolute right-6 top-20 z-30 w-[min(25rem,calc(100%-3rem))] overflow-hidden rounded-2xl border border-neutral-700 bg-[#111]/95 shadow-2xl backdrop-blur-md">
+            <div data-study-history className="absolute right-6 top-20 z-30 w-[min(25rem,calc(100%-3rem))] overflow-hidden rounded-2xl border border-neutral-700 bg-[#111]/95 shadow-2xl backdrop-blur-md">
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
         <div>
           <h3 className="text-sm font-bold text-white">Study history</h3>
