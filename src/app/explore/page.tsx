@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getPublicRooms, processRoomJoin } from '@/actions/rooms';
-import { joinRoomWithInvite, validateRoomInvite } from '@/actions/room-controls';
+import { getMyRoomJoinEligibility, joinRoomWithInvite, validateRoomInvite } from '@/actions/room-controls';
 import { getLoginPath } from '@/lib/auth';
 import { createClient } from '@/utils/supabase/client';
 import FloatingDock from '@/components/ui/FloatingDock';
@@ -27,6 +27,17 @@ function safeJoinMessage(error: unknown) {
   if (message.includes('expired')) return 'This room has expired and is no longer accepting joins.';
   if (message.includes('Unauthorized')) return 'Please sign in before joining a room.';
   return 'We could not join this room. Please try again.';
+}
+
+function eligibilityMessage(state: string) {
+  if (state === 'banned') return 'You cannot rejoin this room because you have been banned.';
+  if (state === 'blocked') return 'You cannot rejoin this room because you have been blocked.';
+  if (state === 'restricted') return 'You cannot join this room while its current restrictions apply.';
+  if (state === 'guest_expired') return 'Your temporary guest access has expired. Ask a room controller for a new invite.';
+  if (state === 'pending') return 'Your request is still awaiting room approval.';
+  if (state === 'rejected') return 'Your previous request was not approved. Ask a room controller for access.';
+  if (state === 'unavailable') return 'This room is unavailable or no longer accepting joins.';
+  return 'You are not currently eligible to join this room.';
 }
 
 export default function ExploreRoomsPage() {
@@ -87,6 +98,17 @@ export default function ExploreRoomsPage() {
         setStatus({ type: 'success', message: result.role === 'guest' ? 'Temporary guest access granted.' : 'Invite accepted. Opening the room…' });
         router.push(`/room/${result.room_id}`);
         return;
+      }
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(identifier.trim())) {
+        const eligibility = await getMyRoomJoinEligibility(identifier.trim());
+        if (eligibility.state === 'already_joined') {
+          router.push(`/room/${identifier.trim()}`);
+          return;
+        }
+        if (!eligibility.can_join) {
+          setStatus({ type: 'error', message: eligibilityMessage(eligibility.state) });
+          return;
+        }
       }
       const result = await processRoomJoin(identifier);
       if (result.status === 'pending') {
