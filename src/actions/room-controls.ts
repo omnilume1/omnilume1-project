@@ -78,6 +78,41 @@ export async function revokeRoomInvite(inviteId: string) {
   if (error) throw new Error(error.message);
 }
 
+// Historical invite reads intentionally omit the reusable token. A token is
+// returned only once to the controller who creates it.
+export async function listRoomInviteHistory(roomId: string) {
+  assertUuid(roomId, 'room ID');
+  const supabase = await authenticatedClient();
+  const { data, error } = await supabase.rpc('list_room_invite_history', { p_room_id: roomId });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getMyRoomJoinEligibility(roomId: string) {
+  assertUuid(roomId, 'room ID');
+  const supabase = await authenticatedClient();
+  const { data, error } = await supabase.rpc('get_my_room_join_eligibility', { p_room_id: roomId });
+  if (error) throw new Error(error.message);
+  return data?.[0] ?? {
+    state: 'unavailable',
+    can_join: false,
+    join_status: null,
+    role: null,
+    guest_expires_at: null,
+    restriction_types: [],
+  };
+}
+
+// Controllers receive room-wide guest/restriction state; ordinary members get
+// only their own state. The RPC never returns moderation reasons.
+export async function getRoomMemberControlStates(roomId: string) {
+  assertUuid(roomId, 'room ID');
+  const supabase = await authenticatedClient();
+  const { data, error } = await supabase.rpc('get_room_member_control_states', { p_room_id: roomId });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
 export async function leaveRoom(roomId: string) {
   assertUuid(roomId, 'room ID');
   const supabase = await authenticatedClient();
@@ -163,6 +198,22 @@ export async function updateRoomSpecificProfile(roomId: string, input: { display
   return data;
 }
 
+export async function getRoomSpecificProfile(roomId: string, userId?: string) {
+  assertUuid(roomId, 'room ID');
+  if (userId !== undefined) assertUuid(userId, 'user ID');
+  const supabase = await authenticatedClient();
+  const { data, error } = await supabase.rpc('get_room_member_profile', {
+    p_room_id: roomId,
+    p_user_id: userId ?? null,
+  });
+  if (error) throw new Error(error.message);
+  return data?.[0] ?? null;
+}
+
+export async function getMyRoomSpecificProfile(roomId: string) {
+  return getRoomSpecificProfile(roomId);
+}
+
 export async function createRoomAnnouncement(roomId: string, body: string, isPinned = false) {
   assertUuid(roomId, 'room ID');
   assertString(body, 'announcement', 2_000);
@@ -187,11 +238,19 @@ export async function updateRoomAnnouncement(announcementId: string, body: strin
 export async function getRoomControlState(roomId: string) {
   assertUuid(roomId, 'room ID');
   const supabase = await authenticatedClient();
-  const [settings, permissions, announcements] = await Promise.all([
+  const [settings, permissions, announcements, membership, profile] = await Promise.all([
     supabase.from('room_control_settings').select('rules, welcome_message, is_locked, feature_flags, updated_at').eq('room_id', roomId).maybeSingle(),
     supabase.from('room_role_permissions').select('role, capability, allowed').eq('room_id', roomId),
     supabase.from('room_announcements').select('id, author_id, body, is_pinned, created_at, updated_at').eq('room_id', roomId).order('is_pinned', { ascending: false }).order('created_at', { ascending: false }),
+    supabase.rpc('get_room_member_control_states', { p_room_id: roomId }),
+    supabase.rpc('get_room_member_profile', { p_room_id: roomId, p_user_id: null }),
   ]);
-  if (settings.error || permissions.error || announcements.error) throw new Error(settings.error?.message || permissions.error?.message || announcements.error?.message || 'Unable to load room controls.');
-  return { settings: settings.data, permissions: permissions.data ?? [], announcements: announcements.data ?? [] };
+  if (settings.error || permissions.error || announcements.error || membership.error || profile.error) throw new Error(settings.error?.message || permissions.error?.message || announcements.error?.message || membership.error?.message || profile.error?.message || 'Unable to load room controls.');
+  return {
+    settings: settings.data,
+    permissions: permissions.data ?? [],
+    announcements: announcements.data ?? [],
+    memberStates: membership.data ?? [],
+    myRoomProfile: profile.data?.[0] ?? null,
+  };
 }
