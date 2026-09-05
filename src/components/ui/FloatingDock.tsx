@@ -16,10 +16,9 @@ export interface FloatingDockItem {
 const defaultItems: FloatingDockItem[] = [
   { title: 'Home', href: '/home', icon: 'home' },
   { title: 'Explore', href: '/explore', icon: 'search' },
-  { title: 'Rooms', href: '/room', icon: 'rooms' },
+  { title: 'Rooms', href: '/explore', icon: 'rooms' },
   { title: 'Create', href: '/create-room', icon: 'plus', emphasis: true },
   { title: 'Messages', href: '/messages', icon: 'message' },
-  { title: 'Notifications', href: '/home#notifications', icon: 'bell' },
   { title: 'Profile', href: '/profile', icon: 'user' },
 ];
 
