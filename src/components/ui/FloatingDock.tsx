@@ -52,7 +52,7 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
     itemRefs.current.forEach((element) => {
       element?.style.setProperty('--dock-scale', '1');
       element?.style.setProperty('--dock-lift', '0px');
-      element?.style.setProperty('--dock-z-index', '1');
+      element?.style.setProperty('--dock-z-index', element?.dataset.dockEmphasis === 'true' ? '5' : '1');
     });
   }, []);
 
@@ -67,14 +67,14 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
       const isCreate = element.dataset.dockEmphasis === 'true';
       const center = element.offsetLeft + (element.offsetWidth / 2);
       const distance = Math.abs(pointerX - center);
-      const proximity = Math.max(0, 1 - (distance / 138));
+      const proximity = Math.max(0, 1 - (distance / 165));
 
-      // Keep the central create control anchored. Neighbouring items can still
-      // magnify, but their stable layout measurements and lower stack level
-      // prevent them from appearing over the create control.
-      const scale = isCreate ? 1 : 1 + (proximity * 0.27);
-      element.style.setProperty('--dock-scale', scale.toFixed(3));
-      element.style.setProperty('--dock-lift', isCreate ? '0px' : `${Math.round(proximity * -5)}px`);
+      // Every item — including the central create control — shares the same
+      // distance-based scale and lift. The create control only keeps the top
+      // stack level, so magnified neighbours slide beneath it instead of
+      // clipping over it.
+      element.style.setProperty('--dock-scale', (1 + (proximity * 0.42)).toFixed(3));
+      element.style.setProperty('--dock-lift', `${Math.round(proximity * -7)}px`);
       element.style.setProperty('--dock-z-index', isCreate ? '5' : proximity > 0.04 ? '2' : '1');
     });
   }, []);
@@ -101,11 +101,9 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
                 onClick={playDockClick}
                 onFocus={(event) => {
                   resetMagnification();
-                  if (!item.emphasis) {
-                    event.currentTarget.style.setProperty('--dock-scale', '1.16');
-                    event.currentTarget.style.setProperty('--dock-lift', '-3px');
-                    event.currentTarget.style.setProperty('--dock-z-index', '2');
-                  }
+                  event.currentTarget.style.setProperty('--dock-scale', '1.16');
+                  event.currentTarget.style.setProperty('--dock-lift', '-3px');
+                  event.currentTarget.style.setProperty('--dock-z-index', item.emphasis ? '5' : '2');
                 }}
                 onBlur={resetMagnification}
                 className={`dock-item ${active ? 'is-active' : ''} ${item.emphasis ? 'is-emphasis' : ''}`}

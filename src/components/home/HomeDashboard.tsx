@@ -150,10 +150,10 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
             </section>
 
             <section className="glass-panel glass-card-ambient">
-              <div className="section-header"><div><p className="section-kicker">Discover</p><h2 className="section-title">Public rooms to explore</h2></div><Link href="/explore" className="text-xs text-cyan-200 hover:text-white">View all</Link></div>
+              <div className="section-header"><div><p className="section-kicker">Discover</p><h2 className="section-title">Public rooms to explore</h2></div><Link href="/explore" className="text-xs text-violet-300 hover:text-violet-200">View all</Link></div>
               {dashboardLoading ? <p className="text-sm text-neutral-500">Loading public rooms...</p> : publicRooms.length === 0 ? <p className="text-sm text-neutral-500">There are no public rooms to show right now.</p> : <div className="grid gap-3 md:grid-cols-3">{publicRooms.slice(0, 3).map((room) => {
                 const memberCount = room.room_members[0]?.count ?? 0;
-                return <article key={room.id} className="glass-card-ambient dashboard-room-card"><div><span className="room-chip">Public</span><h3 className="mt-3 truncate font-semibold text-white">{room.name}</h3>{room.username && <p className="mt-1 text-xs text-cyan-200">@{room.username}</p>}</div><div className="mt-5 flex items-center justify-between"><span className="inline-flex items-center gap-1 text-xs text-neutral-500"><OmniIcon name="users" size={13} /> {memberCount} joined</span><Link href="/explore" className="text-xs text-cyan-200 hover:text-white">Explore</Link></div></article>;
+                return <article key={room.id} className="glass-card-ambient dashboard-room-card"><div><span className="room-chip">Public</span><h3 className="mt-3 truncate font-semibold text-white">{room.name}</h3>{room.username && <p className="mt-1 text-xs text-violet-300">@{room.username}</p>}</div><div className="mt-5 flex items-center justify-between"><span className="inline-flex items-center gap-1 text-xs text-neutral-500"><OmniIcon name="users" size={13} /> {memberCount} joined</span><Link href="/explore" className="text-xs text-violet-300 hover:text-violet-200">Explore</Link></div></article>;
               })}</div>}
             </section>
 

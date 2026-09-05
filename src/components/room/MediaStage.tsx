@@ -470,7 +470,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
             )}
 
             {activeMediaUrl && canCast && <button type="button" onClick={stopCasting} className="rounded border border-red-500/30 bg-red-500/20 px-3 py-1 text-xs font-bold text-red-400 transition hover:bg-red-500/30">Stop</button>}
-            {activeMediaUrl && <button type="button" onClick={canCast ? forceSyncToRoom : () => broadcastEvent('request_sync')} className="hidden rounded border border-emerald-500/30 bg-emerald-500/20 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-400 transition hover:bg-emerald-500/30 sm:block">{canCast ? 'Force sync' : 'Sync to host'}</button>}
+            {activeMediaUrl && <button type="button" onClick={canCast ? forceSyncToRoom : () => broadcastEvent('request_sync')} className="hidden rounded border border-violet-500/30 bg-violet-500/20 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-violet-300 transition hover:bg-violet-500/30 sm:block">{canCast ? 'Force sync' : 'Sync to host'}</button>}
           </div>
         </div>
 

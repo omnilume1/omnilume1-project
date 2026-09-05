@@ -2,18 +2,20 @@
 
 import type { ReactNode } from 'react';
 import OmniLogo from '@/components/ui/OmniLogo';
-import CurrentAccountControls from '@/components/ui/CurrentAccountControls';
+import CurrentAccountControls, { type AccountView } from '@/components/ui/CurrentAccountControls';
 
 export default function InternalTopbar({
   eyebrow,
   title,
   description,
   actions,
+  account,
 }: {
   eyebrow?: string;
   title: string;
   description?: string;
   actions?: ReactNode;
+  account?: AccountView;
 }) {
   return (
     <header className="internal-topbar">
@@ -28,7 +30,7 @@ export default function InternalTopbar({
       </div>
       <div className="internal-topbar-actions">
         {actions}
-        <CurrentAccountControls />
+        <CurrentAccountControls account={account} />
       </div>
     </header>
   );

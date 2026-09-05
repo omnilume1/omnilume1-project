@@ -7,14 +7,8 @@ import {
   cancelFriendRequest,
   createPost,
   deletePost,
-  getMyProfile,
-  getMyFriendRequests,
-  getMyFriends,
-  getMyRelationshipState,
-  getPostsForProfile,
-  getProfileFollowers,
-  getProfileFollowing,
-  getPublicProfile,
+  getMyProfileBundle,
+  getPublicProfileBundle,
   removeFriend,
   requestFollow,
   requestFriend,
@@ -25,6 +19,7 @@ import {
 import ProfileForm from '@/components/profile/ProfileForm';
 import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
+import type { AccountView } from '@/components/ui/CurrentAccountControls';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import type { ProfileGender, PostVisibility } from '@/lib/profile-validation';
 
@@ -122,26 +117,21 @@ export default function ProfileSurface({ profileId }: { profileId?: string }) {
     setLoading(true);
     setErrorMessage(null);
     try {
-      const loadedProfile = (isOwn ? await getMyProfile() : await getPublicProfile(profileId!)) as ProfileRecord | null;
+      // One server-action round trip resolves profile + every secondary list
+      // in parallel on the server (single auth check instead of six).
+      const bundle = isOwn ? await getMyProfileBundle() : await getPublicProfileBundle(profileId!);
+      const loadedProfile = bundle.profile as ProfileRecord | null;
       if (!loadedProfile) {
         setProfile(null);
         return;
       }
       setProfile(loadedProfile);
-      const [loadedPosts, loadedFollowers, loadedFollowing, loadedRelationship, loadedFriends, loadedFriendRequests] = await Promise.all([
-        getPostsForProfile(loadedProfile.id),
-        getProfileFollowers(loadedProfile.id),
-        getProfileFollowing(loadedProfile.id),
-        isOwn ? Promise.resolve(null) : getMyRelationshipState(loadedProfile.id),
-        isOwn ? getMyFriends() : Promise.resolve([]),
-        isOwn ? getMyFriendRequests() : Promise.resolve([]),
-      ]);
-      setPosts((loadedPosts ?? []) as PostRecord[]);
-      setFollowers((loadedFollowers ?? []) as PersonRecord[]);
-      setFollowing((loadedFollowing ?? []) as PersonRecord[]);
-      setRelationship(loadedRelationship as RelationshipState | null);
-      setFriends((loadedFriends ?? []) as PersonRecord[]);
-      setFriendRequests((loadedFriendRequests ?? []) as FriendRequestRecord[]);
+      setPosts((bundle.posts ?? []) as PostRecord[]);
+      setFollowers((bundle.followers ?? []) as PersonRecord[]);
+      setFollowing((bundle.following ?? []) as PersonRecord[]);
+      setRelationship(isOwn ? null : (bundle.relationship as RelationshipState | null));
+      setFriends((bundle.friends ?? []) as PersonRecord[]);
+      setFriendRequests((bundle.friendRequests ?? []) as FriendRequestRecord[]);
     } catch {
       setErrorMessage('Unable to load this profile right now. Please try again.');
     } finally {
@@ -158,6 +148,18 @@ export default function ProfileSurface({ profileId }: { profileId?: string }) {
     relationship?.outgoingFollow?.status === 'accepted' ||
     relationship?.incomingFollow?.status === 'accepted',
   );
+
+  // Reuse the already-resolved bundle profile for the topbar account chip so
+  // it never re-runs its own auth/profile fetch on this page.
+  const topbarAccount = useMemo<AccountView | undefined>(() => {
+    if (!isOwn || !profile) return undefined;
+    return {
+      displayName: profile.display_name?.trim() || profile.username || 'OmniLume member',
+      username: profile.username ?? null,
+      avatarUrl: profile.avatar_url ?? null,
+      profileDetailsCompleted: profile.profile_details_completed === true,
+    };
+  }, [isOwn, profile]);
 
   const visiblePeople = useMemo(() => peopleTab === 'following' ? following : followers, [followers, following, peopleTab]);
 
@@ -224,7 +226,7 @@ export default function ProfileSurface({ profileId }: { profileId?: string }) {
 
   return (
     <div className="omni-internal profile-page">
-      <InternalTopbar eyebrow={isOwn ? 'Your identity' : 'Community profile'} title={isOwn ? 'Profile' : profile.display_name || `@${profile.username}`} description={isOwn ? 'Shape how people discover and connect with you.' : 'A closer look at this OmniLume profile.'} actions={isOwn ? <Link href="/settings" className="omni-button omni-button-ghost"><OmniIcon name="settings" size={15} /> Account settings</Link> : <Link href="/messages" className="omni-button omni-button-ghost">Messages</Link>} />
+      <InternalTopbar eyebrow={isOwn ? 'Your identity' : 'Community profile'} title={isOwn ? 'Profile' : profile.display_name || `@${profile.username}`} description={isOwn ? 'Shape how people discover and connect with you.' : 'A closer look at this OmniLume profile.'} actions={isOwn ? <Link href="/settings" className="omni-button omni-button-ghost"><OmniIcon name="settings" size={15} /> Account settings</Link> : <Link href="/messages" className="omni-button omni-button-ghost">Messages</Link>} account={topbarAccount} />
       <main className="omni-main-content profile-content">
         <section className="profile-hero glass-panel fade-up">
           <div className="profile-avatar-large">{profile.avatar_url ? <img src={profile.avatar_url} alt="" /> : initials(profile)}</div>

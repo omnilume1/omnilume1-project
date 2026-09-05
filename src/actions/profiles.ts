@@ -35,6 +35,137 @@ export async function getMyProfile() {
   return data;
 }
 
+/**
+ * Loads everything the own-profile surface needs in a single authenticated
+ * round trip: one auth check, all queries executed in parallel on the server.
+ * Same tables/RPCs and privacy behavior as the individual actions below.
+ */
+export async function getMyProfileBundle() {
+  const { supabase, user } = await requireUser();
+  const [profile, posts, followers, following, friendships, requests] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, display_name, username, date_of_birth, gender, avatar_url, bio, is_private, profile_completed, profile_details_completed, created_at, updated_at')
+      .eq('id', user.id)
+      .maybeSingle(),
+    supabase
+      .from('posts')
+      .select('id, author_id, content, media_url, visibility, created_at, updated_at')
+      .eq('author_id', user.id)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false }),
+    supabase.rpc('get_profile_followers', { p_profile_id: user.id }),
+    supabase.rpc('get_profile_following', { p_profile_id: user.id }),
+    supabase
+      .from('friendships')
+      .select('user_one, user_two, created_at')
+      .or(`user_one.eq.${user.id},user_two.eq.${user.id}`)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('friend_requests')
+      .select('id, requester_id, recipient_id, status, created_at')
+      .or(`requester_id.eq.${user.id},recipient_id.eq.${user.id}`)
+      .order('created_at', { ascending: false }),
+  ]);
+
+  const errors = [profile, posts, followers, following, friendships, requests].map((result) => result.error);
+  if (errors.some(Boolean)) throw new Error('Unable to load your profile.');
+
+  // Friends and requests resolve profile details from the same public view
+  // used by getMyFriends()/getMyFriendRequests().
+  const friendIds = (friendships.data ?? []).map((friendship) =>
+    friendship.user_one === user.id ? friendship.user_two : friendship.user_one,
+  );
+  const requestOthers = Array.from(new Set((requests.data ?? []).map((request) =>
+    request.requester_id === user.id ? request.recipient_id : request.requester_id,
+  )));
+  const detailIds = Array.from(new Set([...friendIds, ...requestOthers]));
+
+  const { data: details, error: detailsError } = detailIds.length === 0
+    ? { data: [], error: null }
+    : await supabase
+        .from('public_profiles')
+        .select('id, username, display_name, avatar_url, bio, is_private')
+        .in('id', detailIds);
+  if (detailsError) throw new Error('Unable to load your profile.');
+
+  const byId = new Map((details ?? []).map((profile) => [profile.id, profile]));
+  const friends = friendIds
+    .map((id) => {
+      const profile = byId.get(id);
+      return profile ? { user_id: profile.id, ...profile } : null;
+    })
+    .filter((profile): profile is NonNullable<typeof profile> => profile !== null);
+  const friendRequests = (requests.data ?? []).map((request) => {
+    const otherId = request.requester_id === user.id ? request.recipient_id : request.requester_id;
+    const profile = byId.get(otherId) ?? null;
+    return {
+      ...request,
+      direction: request.recipient_id === user.id ? 'incoming' as const : 'outgoing' as const,
+      profile: profile ? { user_id: profile.id, ...profile } : null,
+    };
+  });
+
+  return {
+    profile: profile.data,
+    posts: posts.data ?? [],
+    followers: followers.data ?? [],
+    following: following.data ?? [],
+    friends,
+    friendRequests,
+    relationship: null,
+  };
+}
+
+/**
+ * Same single-round-trip consolidation for viewing another member's profile.
+ * Privacy stays identical: public_profiles view + RLS-gated posts query and
+ * the same follower/following RPCs used by the individual actions.
+ */
+export async function getPublicProfileBundle(profileId: string) {
+  assertUuid(profileId, 'profile ID');
+  const { supabase, user } = await requireUser();
+  const [profile, posts, followers, following, outgoingFollow, incomingFollow, friendship, outgoingFriendRequest, incomingFriendRequest] = await Promise.all([
+    supabase
+      .from('public_profiles')
+      .select('id, username, display_name, avatar_url, bio, is_private, created_at, updated_at')
+      .eq('id', profileId)
+      .maybeSingle(),
+    supabase
+      .from('posts')
+      .select('id, author_id, content, media_url, visibility, created_at, updated_at')
+      .eq('author_id', profileId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false }),
+    supabase.rpc('get_profile_followers', { p_profile_id: profileId }),
+    supabase.rpc('get_profile_following', { p_profile_id: profileId }),
+    supabase.from('follows').select('id, status').eq('follower_id', user.id).eq('following_id', profileId).maybeSingle(),
+    supabase.from('follows').select('id, status').eq('follower_id', profileId).eq('following_id', user.id).maybeSingle(),
+    supabase.from('friendships').select('user_one, user_two').or(`and(user_one.eq.${user.id},user_two.eq.${profileId}),and(user_one.eq.${profileId},user_two.eq.${user.id})`).maybeSingle(),
+    supabase.from('friend_requests').select('id, status').eq('requester_id', user.id).eq('recipient_id', profileId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+    supabase.from('friend_requests').select('id, status').eq('requester_id', profileId).eq('recipient_id', user.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+  ]);
+
+  const errors = [profile, posts, followers, following, outgoingFollow, incomingFollow, friendship, outgoingFriendRequest, incomingFriendRequest].map((result) => result.error);
+  if (errors.some(Boolean)) throw new Error('Unable to load this profile.');
+
+  return {
+    profile: profile.data,
+    posts: posts.data ?? [],
+    followers: followers.data ?? [],
+    following: following.data ?? [],
+    friends: [],
+    friendRequests: [],
+    relationship: {
+      outgoingFollow: outgoingFollow.data,
+      incomingFollow: incomingFollow.data,
+      friendship: friendship.data,
+      outgoingFriendRequest: outgoingFriendRequest.data,
+      incomingFriendRequest: incomingFriendRequest.data,
+    },
+  };
+}
+
 export async function updateMyProfile(input: ProfileInput) {
   const parsed = validateProfileInput(input);
   if (!parsed.success) return parsed;

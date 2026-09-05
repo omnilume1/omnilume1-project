@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, use, useEffect } from 'react';
+import { useState, use, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import RoomChat from '@/components/room/RoomChat';
@@ -68,6 +68,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [groupUsername, setGroupUsername] = useState('');
   const [converting, setConverting] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [conversionTarget, setConversionTarget] = useState<string | null>(null);
+  const conversionNavigating = useRef(false);
 
   // ==========================================
   // DRAGGABLE SIDEBAR STATE
@@ -103,28 +105,41 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const handleConvert = async () => {
     if (!groupUsername.trim()) return alert("Please provide a group username.");
     if (!roomData) return;
+    // Mirror the server-side cleaning in convertRoomToGroup so navigation
+    // lands on the exact handle that gets claimed.
+    const target = groupUsername.toLowerCase().replace(/[^a-z0-9_.]/g, '');
+    if (!target) return alert("Please provide a group username.");
     setConverting(true);
     try {
       await convertRoomToGroup(roomData.id, groupUsername);
       setConverting(false);
       setShowConvertModal(false);
+      setConversionTarget(target);
       setCountdown(5);
-
-      const timer = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev === null || prev <= 1) {
-            clearInterval(timer);
-            router.push(`/room/${groupUsername.toLowerCase()}`);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
     } catch (error: unknown) {
       alert(error instanceof Error ? error.message : 'Unable to upgrade this room.');
       setConverting(false);
     }
   };
+
+  // Pure countdown ticker. The updater only computes the next value; side
+  // effects (navigation) live in the dedicated effect below.
+  useEffect(() => {
+    if (countdown === null || countdown <= 0) return;
+    const timer = setInterval(() => {
+      setCountdown((prev) => (prev === null ? null : Math.max(0, prev - 1)));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [countdown]);
+
+  // Navigation runs in the effect phase once the countdown reaches zero and
+  // the claimed group handle is known. The ref guards against repeated pushes.
+  useEffect(() => {
+    if (countdown !== 0 || !conversionTarget) return;
+    if (conversionNavigating.current) return;
+    conversionNavigating.current = true;
+    router.push(`/room/${conversionTarget}`);
+  }, [countdown, conversionTarget, router]);
 
   useEffect(() => {
     async function checkAccess() {

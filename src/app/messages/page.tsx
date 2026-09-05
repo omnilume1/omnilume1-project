@@ -80,7 +80,7 @@ export default function MessagesPage() {
       <main className="omni-main-content">
         <div className="grid min-h-[70vh] gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
           <aside className="glass-panel flex flex-col gap-6">
-            <div><p className="section-kicker">Your secure space</p><h2 className="text-xl font-semibold text-white">E2EE messaging</h2><p className="mt-2 text-xs text-cyan-200">{status}</p></div>
+            <div><p className="section-kicker">Your secure space</p><h2 className="text-xl font-semibold text-white">E2EE messaging</h2><p className="mt-2 text-xs text-violet-300">{status}</p></div>
             <div className="rounded-xl border border-white/10 bg-black/25 p-4"><div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-neutral-500"><OmniIcon name="shield" size={13} /> Local identity</div><code className="block break-all text-xs text-neutral-300 select-all">{currentUserId}</code></div>
             <form onSubmit={handleStartChat} className="mt-auto grid gap-3"><label className="form-label" htmlFor="friend-id">Connect to a friend</label><input id="friend-id" type="text" placeholder="Paste friend's user ID..." value={friendIdInput} onChange={(e) => setFriendIdInput(e.target.value)} className="omni-input" required /><button type="submit" className="omni-button omni-button-primary w-full" disabled={!myPrivateKey || !friendIdInput.trim()}><OmniIcon name="message" size={15} /> Start secure chat</button></form>
           </aside>

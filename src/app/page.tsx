@@ -49,7 +49,7 @@ export default async function Home() {
         <section className="hero-grid">
           <div className="hero-copy fade-up">
             <p className="hero-eyebrow">Study · Connect · Create · Together</p>
-            <h1 className="hero-title">A Brighter Space to Grow</h1>
+            <h1 className="hero-title">A Brighter Space to{" "}<span className="hero-title-accent">Grow</span></h1>
             <p className="hero-subtitle">Study together, share ideas, build hobbies and grow together.</p>
             <div className="hero-actions">
               <Link href={startHref} className="omni-button omni-button-primary">{account ? 'Go to your space' : 'Get started'} <OmniIcon name="arrow" size={16} /></Link>

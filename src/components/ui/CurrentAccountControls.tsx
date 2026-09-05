@@ -8,7 +8,7 @@ import { getLoginPath } from '@/lib/auth';
 import { createClient } from '@/utils/supabase/client';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 
-interface AccountView {
+export interface AccountView {
   displayName: string;
   username: string | null;
   avatarUrl: string | null;
@@ -27,13 +27,27 @@ function fallbackDisplayName(email: string | null, metadata: Record<string, unkn
 }
 
 /** Shared internal-topbar account view using the existing browser session and own-profile action. */
-export default function CurrentAccountControls() {
-  const [account, setAccount] = useState<AccountView | null>(null);
-  const [resolved, setResolved] = useState(false);
+export default function CurrentAccountControls({ account: preloadedAccount }: { account?: AccountView } = {}) {
+  const [account, setAccount] = useState<AccountView | null>(preloadedAccount ?? null);
+  const [resolved, setResolved] = useState(Boolean(preloadedAccount));
+  const [lastPreloaded, setLastPreloaded] = useState<AccountView | undefined>(preloadedAccount);
   const pathname = usePathname();
   const supabase = createClient();
 
+  // When the host page already resolved the account (e.g. the profile page's
+  // own bundle), skip the duplicate auth/profile round trips entirely. Props
+  // are reconciled during render (React's documented state-adjustment pattern)
+  // so a refreshed bundle profile updates the chip without extra fetches.
+  if (preloadedAccount !== lastPreloaded) {
+    setLastPreloaded(preloadedAccount);
+    if (preloadedAccount) {
+      setAccount(preloadedAccount);
+      setResolved(true);
+    }
+  }
+
   useEffect(() => {
+    if (preloadedAccount) return;
     let active = true;
 
     async function loadAccount() {
@@ -75,7 +89,7 @@ export default function CurrentAccountControls() {
     return () => {
       active = false;
     };
-  }, [supabase]);
+  }, [supabase, preloadedAccount]);
 
   if (!resolved) {
     return <span className="avatar avatar-small account-avatar-loading" aria-label="Checking account" />;
