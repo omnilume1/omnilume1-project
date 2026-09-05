@@ -153,6 +153,14 @@ export async function deleteMessageForEveryone(messageId: string, roomId: string
     if (authError || !user) throw new Error("Unauthorized");
     await assertActiveRoom(supabase, roomId);
 
+    const { data: canChat, error: capabilityError } = await supabase.rpc('room_has_capability', {
+      p_room_id: roomId,
+      p_user_id: user.id,
+      p_capability: 'chat',
+    });
+    if (capabilityError) throw new Error(capabilityError.message);
+    if (!canChat) throw new Error('You do not have permission to use chat in this room.');
+
     const { data: membership, error: membershipError } = await supabase
       .from('room_members')
       .select('room_id')

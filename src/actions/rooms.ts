@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@/utils/supabase/server';
-import { assertActiveRoom, isRoomExpired } from '@/lib/room-lifecycle';
+import { assertActiveRoom } from '@/lib/room-lifecycle';
 
 // 1. Create Room (Upgraded with Expiration & Anonymous Mode)
 export async function createRoom(formData: FormData) {
@@ -111,45 +111,13 @@ export async function processRoomJoin(identifier: string) {
   }
   cleanId = cleanId.replace(/^@/, '').toLowerCase();
 
-  // Securely find the room using our new Postgres function
-  const { data, error: rpcError } = await supabase.rpc('get_room_for_join', { identifier: cleanId });
-
-  if (rpcError || !data || data.length === 0) {
-    throw new Error("Room not found. Check your code, link, or username.");
+  // Action 05 keeps joins inside the database transaction so restrictions and
+  // locks cannot be bypassed through a direct table insert.
+  const { data, error } = await supabase.rpc('request_room_join', { p_identifier: cleanId });
+  if (error || !data || data.length === 0) {
+    throw new Error(error?.message || 'Room not found. Check your code, link, or username.');
   }
-
-  const room = data[0];
-  if (isRoomExpired(room)) {
-    throw new Error('This room has expired and is no longer accepting joins.');
-  }
-
-  // Check if the user already requested or joined
-  const { data: existing } = await supabase
-    .from('room_members')
-    .select('join_status')
-    .eq('room_id', room.id)
-    .eq('user_id', user.id)
-    .single();
-
-  if (existing) {
-    return { roomId: room.id, status: existing.join_status };
-  }
-
-  // If private, send to 'pending'. If public, instantly 'approved'.
-  const statusToSet = room.is_private ? 'pending' : 'approved';
-
-  const { error: insertError } = await supabase
-    .from('room_members')
-    .insert({
-      room_id: room.id,
-      user_id: user.id,
-      role: 'member',
-      join_status: statusToSet
-    });
-
-  if (insertError) throw new Error(insertError.message);
-
-  return { roomId: room.id, status: statusToSet };
+  return { roomId: data[0].room_id, status: data[0].status };
 }
 
 // 4. Phase 16: Convert a Temporary Room into a Permanent Group

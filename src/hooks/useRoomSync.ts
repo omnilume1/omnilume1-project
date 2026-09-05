@@ -69,6 +69,8 @@ export type RoomSyncValue = {
   timerState: TimerState;
   syncRequestTrigger: number;
   roomMessageEvents: RoomMessageEvent[];
+  roomControlEvents: RoomControlEvent[];
+  roomControlVersion: number;
   recordMediaTime: (time: number) => void;
   broadcastEvent: (eventType: SyncEventType, payload?: Record<string, unknown>) => void;
 };
@@ -76,6 +78,17 @@ export type RoomSyncValue = {
 export type RoomMessageEvent = {
   kind: 'insert' | 'update';
   message: Record<string, unknown>;
+};
+
+// Action 05 changes are persisted server-side. This event contract lets room
+// surfaces refresh their own data from the existing shared channel without
+// trusting a client broadcast as the source of truth.
+export type RoomControlEvent = {
+  id: number;
+  roomId: string;
+  eventType: 'membership_changed' | 'role_changed' | 'invite_changed' | 'restriction_changed' | 'ownership_changed' | 'settings_changed' | 'lock_changed' | 'announcement_changed' | 'guest_changed' | 'feature_changed';
+  subjectUserId: string | null;
+  createdAt: string;
 };
 
 const DEFAULT_TIMER: TimerState = {
@@ -221,6 +234,8 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   const timerStateRef = useRef<TimerState>(timerState);
   const [syncRequestTrigger, setSyncRequestTrigger] = useState(0);
   const [roomMessageEvents, setRoomMessageEvents] = useState<RoomMessageEvent[]>([]);
+  const [roomControlEvents, setRoomControlEvents] = useState<RoomControlEvent[]>([]);
+  const [roomControlVersion, setRoomControlVersion] = useState(0);
 
   const updateTimerState = useCallback((nextState: TimerState) => {
     const normalized = normalizeTimerState(nextState);
@@ -394,6 +409,23 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     applyTimerEvent(event.event_type, adjustedPayload);
   }, [applyMediaEvent, applyTimerEvent, roomId]);
 
+  const handleRoomControlEvent = useCallback((payload: { new?: Record<string, unknown> }) => {
+    const event = payload.new;
+    if (!event || event.room_id !== roomId || typeof event.id !== 'number' || typeof event.event_type !== 'string' || typeof event.created_at !== 'string') return;
+
+    const controlEvent: RoomControlEvent = {
+      id: event.id,
+      roomId,
+      eventType: event.event_type as RoomControlEvent['eventType'],
+      subjectUserId: typeof event.subject_user_id === 'string' ? event.subject_user_id : null,
+      createdAt: event.created_at,
+    };
+    setRoomControlEvents((current) => current.some((item) => item.id === controlEvent.id)
+      ? current
+      : [...current.slice(-99), controlEvent]);
+    setRoomControlVersion((current) => current + 1);
+  }, [roomId]);
+
   const sendEvent = useCallback((eventType: SyncEventType, payload: Record<string, unknown>) => {
     const channel = channelRef.current;
     const senderId = currentUserIdRef.current;
@@ -475,6 +507,8 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       setTimerState(restoredTimer);
       setTypingUsers(new Map());
       setRoomMessageEvents([]);
+      setRoomControlEvents([]);
+      setRoomControlVersion(0);
     }, 0);
 
     return () => {
@@ -515,6 +549,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
 
     syncChannel
       .on('broadcast', { event: 'room_action' }, handleIncomingEvent)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_control_events', filter: `room_id=eq.${roomId}` }, handleRoomControlEvent)
       .subscribe((status: string) => {
         if (!isMounted) return;
         if (status === 'SUBSCRIBED') {
@@ -543,7 +578,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       void syncChannel.unsubscribe();
       void supabase.removeChannel(syncChannel);
     };
-  }, [flushPendingEvents, handleIncomingEvent, roomId, supabase]);
+  }, [flushPendingEvents, handleIncomingEvent, handleRoomControlEvent, roomId, supabase]);
 
   useEffect(() => {
     const typingInterval = window.setInterval(() => {
@@ -573,6 +608,8 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     timerState,
     syncRequestTrigger,
     roomMessageEvents,
+    roomControlEvents,
+    roomControlVersion,
     recordMediaTime,
     broadcastEvent,
   };

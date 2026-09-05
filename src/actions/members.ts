@@ -69,9 +69,10 @@ export async function manageMemberRequest(roomId: string, targetUserId: string, 
     throw new Error("Only owners and admins can manage requests.");
   }
 
-  if (action === 'reject') {
-    await supabase.from('room_members').delete().eq('room_id', roomId).eq('user_id', targetUserId);
-  } else {
-    await supabase.from('room_members').update({ join_status: 'approved' }).eq('room_id', roomId).eq('user_id', targetUserId);
-  }
+  const { error } = await supabase.rpc('review_room_member', {
+    p_room_id: roomId,
+    p_target_user_id: targetUserId,
+    p_action: action,
+  });
+  if (error) throw new Error(error.message);
 }

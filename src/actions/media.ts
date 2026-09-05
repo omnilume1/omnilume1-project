@@ -12,17 +12,28 @@ async function getAuthenticatedUser() {
   return { supabase, user };
 }
 async function assertCanCast(supabase: Awaited<ReturnType<typeof createClient>>, roomId: string, userId: string) {
-  const { data: member, error } = await supabase
-    .from('room_members')
-    .select('role, join_status')
-    .eq('room_id', roomId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
+  const { data, error } = await supabase.rpc('room_has_capability', {
+    p_room_id: roomId,
+    p_user_id: userId,
+    p_capability: 'watch_control',
+  });
   if (error) throw new Error(error.message);
-  if (!member || member.join_status !== 'approved' || !['owner', 'admin'].includes(member.role)) {
-    throw new Error('Only an approved room owner or admin can cast media.');
-  }
+  if (!data) throw new Error('You do not have permission to control Watch in this room.');
+}
+
+async function assertCapability(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  roomId: string,
+  userId: string,
+  capability: 'watch' | 'files',
+) {
+  const { data, error } = await supabase.rpc('room_has_capability', {
+    p_room_id: roomId,
+    p_user_id: userId,
+    p_capability: capability,
+  });
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error(`You do not have permission to use ${capability === 'watch' ? 'Watch' : 'Files'} in this room.`);
 }
 
 export async function logTemporaryMedia(
@@ -70,14 +81,7 @@ export async function getActiveTemporaryMedia(roomId: string) {
 
     const { supabase, user } = await getAuthenticatedUser();
     await assertActiveRoom(supabase, roomId);
-    const { data: member, error: memberError } = await supabase
-      .from('room_members')
-      .select('join_status')
-      .eq('room_id', roomId)
-      .eq('user_id', user.id)
-      .maybeSingle();
-    if (memberError) throw new Error(memberError.message);
-    if (!member || member.join_status !== 'approved') throw new Error('You are not an approved room member.');
+    await assertCapability(supabase, roomId, user.id, 'watch');
 
     const { data, error } = await supabase
       .from('temporary_media')
@@ -106,19 +110,7 @@ export async function getSignedStorageUrl(filePath: string, roomId: string): Pro
 
     const { supabase, user } = await getAuthenticatedUser();
     const room = await assertActiveRoom(supabase, roomId);
-
-    // Verify user is an approved room member
-    const { data: member, error: memberError } = await supabase
-      .from('room_members')
-      .select('join_status')
-      .eq('room_id', roomId)
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (memberError) throw new Error(memberError.message);
-    if (!member || member.join_status !== 'approved') {
-      throw new Error('You are not an approved room member.');
-    }
+    await assertCapability(supabase, roomId, user.id, 'files');
 
     // Verify the file path belongs to this room
     if (!filePath.startsWith(`${roomId}/`)) {

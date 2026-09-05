@@ -12,6 +12,16 @@ export type StudyHistoryEntry = {
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unable to update study history.';
 }
+
+async function assertCanUseStudy(supabase: Awaited<ReturnType<typeof createClient>>, roomId: string, userId: string) {
+  const { data, error } = await supabase.rpc('room_has_capability', {
+    p_room_id: roomId,
+    p_user_id: userId,
+    p_capability: 'study',
+  });
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('You do not have permission to use Study in this room.');
+}
 export async function logStudySession(roomId: string, subject: string, durationMinutes: number) {
   try {
     const cleanSubject = subject.trim();
@@ -23,6 +33,7 @@ export async function logStudySession(roomId: string, subject: string, durationM
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) throw new Error('Unauthorized');
     await assertActiveRoom(supabase, roomId);
+    await assertCanUseStudy(supabase, roomId, user.id);
 
     const { error } = await supabase.from('study_sessions').insert({
       user_id: user.id,
@@ -44,6 +55,7 @@ export async function getStudyHistory(roomId: string) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: 'Unauthorized' };
     await assertActiveRoom(supabase, roomId);
+    await assertCanUseStudy(supabase, roomId, user.id);
 
     const { data, error } = await supabase
       .from('study_sessions')
@@ -89,6 +101,7 @@ export async function deleteStudySubject(roomId: string, subject: string) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: 'Unauthorized' };
     await assertActiveRoom(supabase, roomId);
+    await assertCanUseStudy(supabase, roomId, user.id);
 
     const { error } = await supabase
       .from('study_sessions')
