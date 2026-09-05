@@ -171,9 +171,13 @@ export async function updateMyProfile(input: ProfileInput) {
   if (!parsed.success) return parsed;
 
   const { supabase, user } = await requireUser();
+  // profile_completed is written atomically with the profile fields so the
+  // identity gate (proxy.ts) is satisfied by the same write that persists the
+  // profile — a transient failure of the separate completion action can never
+  // leave a saved profile stuck behind the setup gate.
   const { data, error } = await supabase
     .from('profiles')
-    .upsert({ id: user.id, ...parsed.data }, { onConflict: 'id' })
+    .upsert({ id: user.id, ...parsed.data, profile_completed: true }, { onConflict: 'id' })
     .select('id, display_name, username, date_of_birth, gender, avatar_url, bio, is_private, profile_completed, profile_details_completed, created_at, updated_at')
     .single();
 

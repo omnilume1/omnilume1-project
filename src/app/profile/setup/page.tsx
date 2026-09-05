@@ -8,7 +8,6 @@ import { getLoginPath, getSafeRedirectPath } from '@/lib/auth';
 import { createClient } from '@/utils/supabase/client';
 import ProfileForm from '@/components/profile/ProfileForm';
 import OmniLogo from '@/components/ui/OmniLogo';
-
 interface ProfileRecord {
   display_name: string | null;
   username: string | null;
@@ -24,7 +23,6 @@ export default function ProfileSetupPage() {
   const [profile, setProfile] = useState<ProfileRecord | null>(null);
   const [nextPath, setNextPath] = useState('/home');
   const [loading, setLoading] = useState(true);
-  const [pageError, setPageError] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
 
@@ -63,8 +61,19 @@ export default function ProfileSetupPage() {
   }, [router, supabase]);
 
   async function handleSaved() {
-    const result = await completeIdentitySetup();
-    if (!result.success) throw new Error(result.error);
+    // The profile save itself persisted every flag the route gate needs
+    // (updateMyProfile writes profile_completed alongside the profile fields),
+    // so this secondary marker refresh is best-effort only: retry once on
+    // transient failures but never fail the flow or mislabel a completed,
+    // persisted setup as a failed save.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const result = await completeIdentitySetup();
+        if (result.success) return;
+      } catch {
+        // Transport-level failure (e.g. a flaky mobile connection); retry below.
+      }
+    }
     router.replace(nextPath);
   }
 
@@ -87,19 +96,11 @@ export default function ProfileSetupPage() {
           <h1>Make a space that feels like you.</h1>
           <p>Join a community that learns, creates and grows together. Sensitive details remain protected by the existing server and database rules.</p>
           {email && <p className="settings-note"><span>Signed in as</span> <strong>{email}</strong></p>}
-          {pageError && <p className="form-error" role="alert">{pageError}</p>}
         </div>
         <ProfileForm
           initialProfile={profile}
           setup
-          onSaved={async () => {
-            try {
-              await handleSaved();
-            } catch {
-              setPageError('We could not finish account setup. Please try again.');
-              throw new Error('Profile setup could not be completed.');
-            }
-          }}
+          onSaved={handleSaved}
         />
       </div>
     </main>

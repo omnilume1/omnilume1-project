@@ -389,8 +389,26 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .hero-actions .omni-button { width: 100%; }
   .hero-stage { min-height: 325px; transform: scale(.78); width: 128%; margin-left: -14%; margin-bottom: -68px; }
   .omni-footer-columns { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 22px 15px; }
-  .workspace-side { position: absolute; right: 0; bottom: 0; left: 55px; z-index: 6; width: auto; min-width: 0; height: 47vh; border-top: 1px solid var(--omni-line); border-left: 0; }
+  /* Mobile room: a vertically scrolling document. The rail stays pinned left,
+     the active stage sits in the flow, and the selected chat/members/files
+     section continues below the stage instead of a clipped overlay panel. */
+  .room-shell { height: auto; min-height: 100dvh; overflow: visible; }
+  .room-content { display: grid; grid-template-columns: 55px minmax(0, 1fr); grid-template-rows: auto auto; min-height: 0; overflow: visible; }
+  .workspace-rail { grid-column: 1; grid-row: 1 / span 2; width: 55px; }
+  .workspace-main { grid-column: 2; grid-row: 1; height: auto; min-height: 0; overflow: visible; }
+  .workspace-side { position: static; grid-column: 2; grid-row: 2; width: auto !important; min-width: 0; height: auto; border-top: 1px solid var(--omni-line); border-left: 0; }
+  .workspace-side > div:last-child { overflow: visible; }
+  .chat-panel { height: auto; }
+  .chat-scroller { flex: 0 0 auto; min-height: 0; overflow-y: visible; }
+  .message-composer { position: sticky; bottom: calc(78px + env(safe-area-inset-bottom, 0px)); z-index: 5; }
   .workspace-resizer { display: none; }
+  [data-stage-layer] { position: relative; inset: auto; min-width: 0; }
+  [data-stage-layer] > * { min-width: 0; }
+  [data-stage-layer][aria-hidden='true'] { display: none; }
+  [data-stage-card] { flex: none; height: auto; overflow: visible; }
+  [data-media-area] { flex: none; height: 46vh; }
+  [data-media-history] { position: static; order: 4; width: 100%; max-height: none; margin-top: 12px; }
+  [data-study-history] { position: static; order: 4; width: 100%; max-height: none; margin-top: 12px; }
 }
 
 @media (max-width: 640px) {
