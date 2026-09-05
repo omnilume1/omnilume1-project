@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getPublicRooms, processRoomJoin } from '@/actions/rooms';
+import { joinRoomWithInvite, validateRoomInvite } from '@/actions/room-controls';
 import { getLoginPath } from '@/lib/auth';
 import { createClient } from '@/utils/supabase/client';
 import FloatingDock from '@/components/ui/FloatingDock';
@@ -20,6 +21,8 @@ interface PublicRoom {
 
 function safeJoinMessage(error: unknown) {
   const message = error instanceof Error ? error.message : '';
+  if (message.includes('Invite is invalid') || message.includes('Invalid invite')) return 'This invite is invalid, expired, revoked, or has reached its usage limit.';
+  if (message.includes('Room is unavailable')) return 'This room is unavailable. You may be restricted, the room may be locked, or the invite may no longer be valid.';
   if (message.includes('Room not found')) return 'Room not found. Check the code or link and try again.';
   if (message.includes('expired')) return 'This room has expired and is no longer accepting joins.';
   if (message.includes('Unauthorized')) return 'Please sign in before joining a room.';
@@ -75,6 +78,16 @@ export default function ExploreRoomsPage() {
     setProcessingId(identifier);
 
     try {
+      const token = identifier.trim().split('?')[0].split('#')[0].split('/').filter(Boolean).pop() ?? '';
+      const isInvite = /^[a-f0-9]{48}$/i.test(token);
+      if (isInvite) {
+        const invite = await validateRoomInvite(token);
+        if (!invite) throw new Error('Invite is invalid or expired.');
+        const result = await joinRoomWithInvite(token);
+        setStatus({ type: 'success', message: result.role === 'guest' ? 'Temporary guest access granted.' : 'Invite accepted. Opening the room…' });
+        router.push(`/room/${result.room_id}`);
+        return;
+      }
       const result = await processRoomJoin(identifier);
       if (result.status === 'pending') {
         setStatus({ type: 'success', message: 'Request sent. You can keep browsing until the owner approves you.' });
@@ -119,7 +132,7 @@ export default function ExploreRoomsPage() {
           <div className="glass-card-ambient explore-control-card">
             <label htmlFor="room-code" className="explore-control-label"><OmniIcon name="lock" size={16} /> Join with a link or code</label>
             <form onSubmit={(event) => { event.preventDefault(); void handleJoin(roomCode); }} className="explore-code-form">
-              <input id="room-code" type="text" placeholder="Paste a link, username, or UUID..." value={roomCode} onChange={(event) => setRoomCode(event.target.value)} className="omni-input" />
+              <input id="room-code" type="text" placeholder="Paste an invite code, link, username, or UUID..." value={roomCode} onChange={(event) => setRoomCode(event.target.value)} className="omni-input" />
               <button type="submit" disabled={!roomCode.trim() || processingId === roomCode} className="omni-button omni-button-primary shrink-0">{processingId === roomCode ? 'Joining...' : 'Join'}</button>
             </form>
           </div>
