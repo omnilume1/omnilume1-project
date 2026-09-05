@@ -32,15 +32,17 @@ export default function LoginPage() {
     let active = true;
 
     async function redirectExistingSession() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!active) return;
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!active) return;
 
-      if (user) {
-        router.replace(getSafeRedirectPath(new URLSearchParams(window.location.search).get('next')));
-        return;
+        if (user) {
+          router.replace(getSafeRedirectPath(new URLSearchParams(window.location.search).get('next')));
+          return;
+        }
+      } finally {
+        if (active) setCheckingSession(false);
       }
-
-      setCheckingSession(false);
     }
 
     void redirectExistingSession();

@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { cache } from 'react';
 import { createClient } from '@/utils/supabase/server';
 
 export interface CurrentAccount {
@@ -24,7 +25,7 @@ function fallbackDisplayName(email: string | null, metadata: Record<string, unkn
  * reads the existing Supabase session and profiles row without creating a
  * separate client-side auth source or exposing sensitive profile fields.
  */
-export async function getCurrentAccount(): Promise<CurrentAccount | null> {
+export const getCurrentAccount = cache(async (): Promise<CurrentAccount | null> => {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -48,4 +49,4 @@ export async function getCurrentAccount(): Promise<CurrentAccount | null> {
     profileCompleted: profile?.profile_completed === true,
     profileDetailsCompleted: profile?.profile_details_completed === true,
   };
-}
+});

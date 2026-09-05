@@ -52,19 +52,30 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
     itemRefs.current.forEach((element) => {
       element?.style.setProperty('--dock-scale', '1');
       element?.style.setProperty('--dock-lift', '0px');
+      element?.style.setProperty('--dock-z-index', '1');
     });
   }, []);
 
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (event.pointerType !== 'mouse') return;
 
+    const dockRect = event.currentTarget.getBoundingClientRect();
+    const pointerX = event.clientX - dockRect.left;
+
     itemRefs.current.forEach((element) => {
       if (!element) return;
-      const rect = element.getBoundingClientRect();
-      const distance = Math.abs(event.clientX - (rect.left + (rect.width / 2)));
-      const proximity = Math.max(0, 1 - (distance / 148));
-      element.style.setProperty('--dock-scale', (1 + (proximity * 0.42)).toFixed(3));
-      element.style.setProperty('--dock-lift', `${Math.round(proximity * -7)}px`);
+      const isCreate = element.dataset.dockEmphasis === 'true';
+      const center = element.offsetLeft + (element.offsetWidth / 2);
+      const distance = Math.abs(pointerX - center);
+      const proximity = Math.max(0, 1 - (distance / 138));
+
+      // Keep the central create control anchored. Neighbouring items can still
+      // magnify, but their stable layout measurements and lower stack level
+      // prevent them from appearing over the create control.
+      const scale = isCreate ? 1 : 1 + (proximity * 0.27);
+      element.style.setProperty('--dock-scale', scale.toFixed(3));
+      element.style.setProperty('--dock-lift', isCreate ? '0px' : `${Math.round(proximity * -5)}px`);
+      element.style.setProperty('--dock-z-index', isCreate ? '5' : proximity > 0.04 ? '2' : '1');
     });
   }, []);
 
@@ -73,7 +84,7 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
       <nav className="floating-dock" aria-label="OmniLume navigation" onPointerMove={handlePointerMove} onPointerLeave={resetMagnification}>
         <div className="dock-brand"><OmniLogo compact /></div>
         <div className="dock-items">
-          {items.map((item) => {
+          {items.map((item, index) => {
             const active = item.href.includes('#')
               ? false
               : item.href === '/home'
@@ -82,15 +93,19 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
             return (
               <Link
                 key={item.title}
-                ref={(element) => { itemRefs.current[items.indexOf(item)] = element; }}
+                ref={(element) => { itemRefs.current[index] = element; }}
                 href={item.href}
+                data-dock-emphasis={item.emphasis ? 'true' : undefined}
                 aria-label={item.title}
                 title={item.title}
                 onClick={playDockClick}
                 onFocus={(event) => {
                   resetMagnification();
-                  event.currentTarget.style.setProperty('--dock-scale', '1.2');
-                  event.currentTarget.style.setProperty('--dock-lift', '-4px');
+                  if (!item.emphasis) {
+                    event.currentTarget.style.setProperty('--dock-scale', '1.16');
+                    event.currentTarget.style.setProperty('--dock-lift', '-3px');
+                    event.currentTarget.style.setProperty('--dock-z-index', '2');
+                  }
                 }}
                 onBlur={resetMagnification}
                 className={`dock-item ${active ? 'is-active' : ''} ${item.emphasis ? 'is-emphasis' : ''}`}
