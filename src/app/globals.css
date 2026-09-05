@@ -57,12 +57,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .hero-title { max-width: 640px; margin: 0; background: linear-gradient(180deg,#ffffff 8%,#e4e4e7 52%,#a1a1aa 100%); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: clamp(3.5rem,7vw,6.8rem); font-weight: 700; letter-spacing: -.085em; line-height: .94; }
 .hero-title-accent { background: linear-gradient(92deg,#ddd6fe 0%,#c4b5fd 45%,#a78bfa 100%); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 26px rgba(168,85,247,.32)); }
 .hero-subtitle { max-width: 465px; margin: 28px 0 0; color: #a8a9b0; font-size: clamp(1rem,1.55vw,1.18rem); line-height: 1.65; }
-.flipping-words { display: flex; align-items: baseline; gap: 8px; min-height: 1.35em; margin: 22px 0 0; color: var(--omni-accent); font-size: .68rem; font-weight: 700; letter-spacing: .17em; line-height: 1.35; text-transform: uppercase; }
-.flipping-words-prefix { color: var(--omni-faint); }
-.flipping-words-window { display: inline-grid; grid-template-columns: 1fr; width: min(19ch, 58vw); min-width: 12.5em; height: 1.35em; overflow: hidden; vertical-align: bottom; }
-.flipping-words-value { display: inline-block; grid-area: 1 / 1; white-space: nowrap; animation: flip-word-in 520ms cubic-bezier(.2,.8,.2,1) both; }
+.flipping-words { display: flex; align-items: baseline; gap: 10px; min-height: 1.4em; margin: 22px 0 0; color: var(--omni-accent); font-size: 14px; font-weight: 700; letter-spacing: .2em; line-height: 1.3; text-transform: uppercase; text-shadow: 0 0 16px rgba(168,85,247,.35); }
+.flipping-words-prefix { color: var(--omni-muted); font-weight: 600; text-shadow: none; }
+.flipping-words-window { position: relative; display: inline-grid; grid-template-columns: minmax(0,1fr); min-width: 12.6em; height: 1.4em; overflow: visible; vertical-align: bottom; }
+.flipping-words-value { grid-area: 1 / 1; display: inline-flex; align-items: baseline; white-space: nowrap; will-change: transform, opacity, filter; }
+.flip-char, .flip-space { display: inline-block; }
+.flipping-words-value.is-incoming .flip-char { animation: flip-char-in 300ms cubic-bezier(.2,.8,.2,1) both; animation-delay: var(--char-delay, 0ms); }
+.flipping-words-value.is-outgoing { position: absolute; left: 0; top: 0; animation: flip-word-out 300ms cubic-bezier(.4,0,.2,1) both; pointer-events: none; }
+@keyframes flip-char-in { from { opacity: 0; transform: translateY(18px); filter: blur(8px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+@keyframes flip-word-out { from { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); } to { opacity: 0; transform: translateY(-28px) scale(1.04); filter: blur(8px); } }
 .hero-flipping-words { margin-top: 27px; }
-.create-room-flipping-words { margin: 0 0 26px; padding: 10px 12px; border: 1px solid rgba(168,85,247,.13); border-radius: 12px; background: rgba(168,85,247,.045); }
+.create-room-flipping-words { margin: 0 0 26px; padding: 12px 14px; border: 1px solid rgba(168,85,247,.13); border-radius: 12px; background: rgba(168,85,247,.045); }
+@media (min-width: 768px) { .flipping-words { font-size: 16px; } }
+@media (min-width: 1024px) { .flipping-words { font-size: 17px; } }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
 .stat-row { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 0; margin-top: 58px; }
 .stat-item { min-width: 0; padding: 0 20px; border-left: 1px solid var(--omni-line); }
@@ -306,7 +313,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .settings-shell .settings-main select { border: 1px solid var(--omni-line); border-radius: 10px; background: rgba(0,0,0,.25); color: #f4f4f5; }
 .fade-up { animation: fade-up 500ms ease both; }
 @keyframes fade-up { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes flip-word-in { from { opacity: 0; transform: translateY(74%) rotateX(-65deg); filter: blur(4px); } to { opacity: 1; transform: translateY(0) rotateX(0); filter: blur(0); } }
 @keyframes preview-pulse { 0%,100% { opacity: .52; transform: scaleX(.94); transform-origin: left; } 50% { opacity: 1; transform: scaleX(1); transform-origin: left; } }
 @keyframes preview-wave { from { transform: scaleY(.52); opacity: .55; } to { transform: scaleY(1); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }

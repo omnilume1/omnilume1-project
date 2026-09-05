@@ -41,7 +41,7 @@ export default function CreateRoomPage() {
           <p className="section-copy mb-8">Choose a name, set the room rules and invite people when you are ready.</p>
           <FlippingWords
             prefix="CREATE A ROOM ·"
-            phrases={["WATCH TOGETHER", "LISTEN TOGETHER", "STUDY TOGETHER", "WORK TOGETHER", "CREATE TOGETHER"]}
+            phrases={["GROW TOGETHER", "STUDY TOGETHER", "WATCH TOGETHER"]}
             className="create-room-flipping-words"
           />
 

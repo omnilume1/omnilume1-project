@@ -57,7 +57,7 @@ export default async function Home() {
             </div>
             <FlippingWords
               prefix="Create together ·"
-              phrases={['Study together', 'Watch together', 'Listen together', 'Grow together']}
+              phrases={['GROW TOGETHER', 'STUDY TOGETHER', 'WATCH TOGETHER']}
               className="hero-flipping-words"
             />
             <div className="stat-row" aria-label="OmniLume highlights">
