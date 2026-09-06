@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { getPublicRooms, processRoomJoin } from '@/actions/rooms';
+import { getMyJoinedRooms, getPublicRooms, processRoomJoin } from '@/actions/rooms';
 import { getMyRoomJoinEligibility, joinRoomWithInvite, validateRoomInvite } from '@/actions/room-controls';
 import { getLoginPath } from '@/lib/auth';
 import { createClient } from '@/utils/supabase/client';
 import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
 import { OmniIcon } from '@/components/ui/OmniIcon';
+import { getMinimizedRoomIds, restoreMinimizedRoom } from '@/lib/minimized-rooms';
 
 interface PublicRoom {
   id: string;
@@ -18,6 +19,7 @@ interface PublicRoom {
   username: string | null;
   room_members: Array<{ count: number }>;
 }
+type JoinedRoom = { role: string; rooms: { id: string; name: string; username: string | null } | { id: string; name: string; username: string | null }[] };
 
 function safeJoinMessage(error: unknown) {
   const message = error instanceof Error ? error.message : '';
@@ -42,12 +44,14 @@ function eligibilityMessage(state: string) {
 
 export default function ExploreRoomsPage() {
   const [rooms, setRooms] = useState<PublicRoom[]>([]);
+  const [joinedRooms, setJoinedRooms] = useState<JoinedRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [status, setStatus] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const [minimizedRoomIds] = useState<string[]>(() => getMinimizedRoomIds());
   const router = useRouter();
   const supabase = createClient();
 
@@ -56,8 +60,9 @@ export default function ExploreRoomsPage() {
 
     async function fetchRooms() {
       try {
-        const data = await getPublicRooms();
+        const [data, joined] = await Promise.all([getPublicRooms(), getMyJoinedRooms()]);
         if (active) setRooms((data ?? []) as PublicRoom[]);
+        if (active) setJoinedRooms((joined ?? []) as JoinedRoom[]);
       } catch {
         if (active) setLoadError('Public rooms could not be loaded right now. Please refresh to try again.');
       } finally {
@@ -70,6 +75,22 @@ export default function ExploreRoomsPage() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const notice = searchParams.get('roomNotice');
+    const timer = window.setTimeout(() => {
+      if (notice === 'kicked') setStatus({ type: 'error', message: 'You were kicked from this room.' });
+      if (notice === 'blocked') setStatus({ type: 'error', message: 'You have been blocked from this room.' });
+      if (notice === 'minimized') setStatus({ type: 'success', message: 'Room minimized. You are still a member and can reopen it below.' });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const minimizedRooms = useMemo(() => {
+    const ids = new Set(minimizedRoomIds);
+    return joinedRooms.filter((entry) => ids.has(Array.isArray(entry.rooms) ? entry.rooms[0]?.id : entry.rooms?.id));
+  }, [joinedRooms, minimizedRoomIds]);
 
   const handleJoin = async (identifier: string) => {
     if (!identifier.trim()) return;
@@ -137,6 +158,7 @@ export default function ExploreRoomsPage() {
     <div className="omni-internal">
       <InternalTopbar eyebrow="Discover together" title="Explore" description="Find public spaces or use an invite from someone you know." actions={<Link href="/create-room" className="omni-button omni-button-primary"><OmniIcon name="plus" size={15} /> Create room</Link>} />
       <main className="omni-main-content explore-main">
+        {minimizedRooms.length > 0 && <section className="glass-card-ambient mb-5 p-5"><p className="section-kicker !mb-0">Your joined rooms</p><p className="mt-2 text-sm text-neutral-500">Rooms you minimized remain joined and can be reopened instantly.</p><div className="mt-4 flex flex-wrap gap-3">{minimizedRooms.map((entry) => { const room = Array.isArray(entry.rooms) ? entry.rooms[0] : entry.rooms; if (!room) return null; return <button key={room.id} type="button" onClick={() => { restoreMinimizedRoom(room.id); router.push(`/room/${room.id}`); }} className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left hover:bg-white/[0.07]"><span className="block text-sm font-semibold text-white">{room.name}</span><span className="mt-1 block text-xs capitalize text-violet-200">{entry.role} · Reopen room</span></button>; })}</div></section>}
         <section className="explore-intro glass-card-ambient fade-up">
           <div>
             <p className="section-kicker">Public spaces</p>

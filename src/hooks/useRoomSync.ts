@@ -88,6 +88,7 @@ export type RoomControlEvent = {
   roomId: string;
   eventType: 'membership_changed' | 'role_changed' | 'invite_changed' | 'restriction_changed' | 'ownership_changed' | 'settings_changed' | 'lock_changed' | 'announcement_changed' | 'guest_changed' | 'feature_changed';
   subjectUserId: string | null;
+  payload: Record<string, unknown>;
   createdAt: string;
 };
 
@@ -418,6 +419,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       roomId,
       eventType: event.event_type as RoomControlEvent['eventType'],
       subjectUserId: typeof event.subject_user_id === 'string' ? event.subject_user_id : null,
+      payload: event.payload && typeof event.payload === 'object' ? event.payload as Record<string, unknown> : {},
       createdAt: event.created_at,
     };
     setRoomControlEvents((current) => current.some((item) => item.id === controlEvent.id)

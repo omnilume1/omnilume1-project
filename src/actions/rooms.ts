@@ -118,6 +118,22 @@ export async function processRoomJoin(identifier: string) {
   return { roomId: data[0].room_id, status: data[0].status };
 }
 
+// The Rooms surface only receives the caller's currently approved memberships.
+// RLS on both tables remains the authority for private-room visibility.
+export async function getMyJoinedRooms() {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) throw new Error('Unauthorized');
+
+  const { data, error } = await supabase
+    .from('room_members')
+    .select('role, rooms!inner(id, name, description, username, is_private, expiration_type, expires_at, reopened_until)')
+    .eq('user_id', user.id)
+    .eq('join_status', 'approved');
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
 // 4. Phase 16: Convert a Temporary Room into a Permanent Group
 export async function convertRoomToGroup(roomId: string, groupUsername: string) {
   const supabase = await createClient();

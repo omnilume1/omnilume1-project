@@ -24,6 +24,11 @@ export async function getRoomAccess(identifier: string) {
     .single();
 
   if (!member) {
+    const { data: eligibility } = await supabase.rpc('get_my_room_join_eligibility', { p_room_id: room.id });
+    const restrictionState = eligibility?.[0]?.state;
+    if (restrictionState === 'blocked' || restrictionState === 'banned') {
+      return { status: restrictionState, role: null, room };
+    }
     if (!room.is_private) return { status: 'public_not_joined', role: null, room };
     return { status: 'private_not_joined', role: null, room };
   }

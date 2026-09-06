@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { deleteMessageForEveryone } from '@/actions/chat';
+import { getRoomControlState } from '@/actions/room-controls';
 
 interface RoomChatProps {
   roomId: string;
@@ -16,6 +17,7 @@ interface RoomChatMessage {
   is_deleted?: boolean;
   created_at: string;
 }
+interface RoomAnnouncementMessage { id: string; body: string; is_pinned: boolean; created_at: string; }
 
 function mergeMessage(messages: RoomChatMessage[], incoming: RoomChatMessage) {
   const existingIndex = messages.findIndex((message) => message.id === incoming.id);
@@ -30,6 +32,7 @@ function mergeMessage(messages: RoomChatMessage[], incoming: RoomChatMessage) {
 
 export default function RoomChat({ roomId }: RoomChatProps) {
   const [messages, setMessages] = useState<RoomChatMessage[]>([]);
+  const [announcements, setAnnouncements] = useState<RoomAnnouncementMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
@@ -40,7 +43,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
-  const { currentUserId: roomCurrentUserId, typingUsers, broadcastEvent, roomMessageEvents } = useRoomRealtime();
+  const { currentUserId: roomCurrentUserId, typingUsers, broadcastEvent, roomMessageEvents, roomControlVersion } = useRoomRealtime();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -76,6 +79,14 @@ export default function RoomChat({ roomId }: RoomChatProps) {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [roomMessageEvents]);
+
+  useEffect(() => {
+    let active = true;
+    void getRoomControlState(roomId).then((state) => {
+      if (active) setAnnouncements((state.announcements ?? []) as RoomAnnouncementMessage[]);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [roomId, roomControlVersion]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -168,6 +179,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
       {deleteError && <p className="border-b border-red-500/20 bg-red-500/5 px-4 py-2 text-xs text-red-300" role="alert">{deleteError}</p>}
 
       <div ref={scrollRef} className="chat-scroller flex flex-col gap-4">
+        {announcements.map((announcement) => <article key={`announcement-${announcement.id}`} className="rounded-xl border border-violet-300/20 bg-violet-500/10 px-3 py-3"><p className="text-[10px] font-bold uppercase tracking-[.16em] text-violet-200">{announcement.is_pinned ? 'Pinned announcement' : 'Room announcement'}</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-violet-50">{announcement.body}</p></article>)}
         {messages.length === 0 ? (
           <p className="text-xs text-neutral-500 text-center mt-10">No messages yet. Say hello!</p>
         ) : (

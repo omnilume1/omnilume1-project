@@ -8,6 +8,8 @@ import {
   listRoomInviteHistory,
   revokeRoomInvite,
   setRoomRolePermission,
+  setRoomMemberRole,
+  transferRoomOwnership,
   updateRoomAnnouncement,
   updateRoomControls,
   updateRoomSpecificProfile,
@@ -18,7 +20,7 @@ import { OmniIcon } from '@/components/ui/OmniIcon';
 type Feature = 'chat' | 'watch' | 'files' | 'study' | 'announcements';
 type RoomRole = 'admin' | 'member' | 'guest';
 type Capability = 'manage_members' | 'manage_invites' | 'manage_settings' | 'manage_announcements' | 'chat' | 'watch' | 'watch_control' | 'files' | 'study';
-type Tab = 'overview' | 'invites' | 'rules' | 'permissions' | 'announcements' | 'profile';
+type Tab = 'overview' | 'invites' | 'rules' | 'permissions' | 'announcements' | 'profile' | 'user-control';
 
 type Settings = { rules: string; welcome_message: string; is_locked: boolean; feature_flags: Record<Feature, boolean> };
 type Permission = { role: RoomRole; capability: Capability; allowed: boolean };
@@ -73,12 +75,16 @@ export default function RoomControlCenter({
   currentUserRole,
   onClose,
   onStateChange,
+  requestedTab,
+  selectedMemberId,
 }: {
   open: boolean;
   roomId: string;
   currentUserRole: string | null;
   onClose: () => void;
   onStateChange: (state: { featureFlags: Partial<Record<Feature, boolean>>; canManageMembers: boolean }) => void;
+  requestedTab?: Tab | null;
+  selectedMemberId?: string | null;
 }) {
   const { roomControlVersion } = useRoomRealtime();
   const [tab, setTab] = useState<Tab>('overview');
@@ -105,6 +111,7 @@ export default function RoomControlCenter({
   const [profileName, setProfileName] = useState('');
   const [profileAvatarUrl, setProfileAvatarUrl] = useState('');
   const [profileBio, setProfileBio] = useState('');
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(selectedMemberId ?? null);
 
   const isOwner = currentUserRole === 'owner';
   const permissionFor = useCallback((capability: Capability, nextPermissions = permissions) => (
@@ -152,6 +159,15 @@ export default function RoomControlCenter({
     return () => window.clearTimeout(timer);
   }, [load, roomControlVersion]);
 
+  useEffect(() => {
+    if (!open || !requestedTab) return;
+    const timer = window.setTimeout(() => {
+      setTab(requestedTab);
+      if (selectedMemberId) setSelectedUserId(selectedMemberId);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [open, requestedTab, selectedMemberId]);
+
   const run = async (key: string, action: () => Promise<void>, success: string) => {
     setWorking(key);
     setError(null);
@@ -172,6 +188,8 @@ export default function RoomControlCenter({
   const inviteCode = useMemo(() => invite?.token ?? '', [invite]);
   const guestStates = memberStates.filter((state) => state.role === 'guest');
   const restrictedStates = memberStates.filter((state) => (state.restriction_types?.length ?? 0) > 0);
+  const selectedMember = memberStates.find((state) => state.user_id === selectedUserId) ?? null;
+  const eligibleRoleTarget = selectedMember?.join_status === 'approved' && selectedMember.role !== 'owner' && selectedMember.role !== 'guest' && (selectedMember.restriction_types?.length ?? 0) === 0;
 
   const copyInvite = async () => {
     try {
@@ -186,7 +204,7 @@ export default function RoomControlCenter({
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-5" role="dialog" aria-modal="true" aria-labelledby="room-control-title">
-      <section className="flex max-h-[calc(100dvh-16px)] w-full max-w-5xl flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-[#0c0d12] shadow-2xl sm:max-h-[calc(100dvh-40px)] sm:rounded-3xl">
+      <section className="flex max-h-[calc(100dvh-16px)] w-full max-w-7xl flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-[#0c0d12] shadow-2xl sm:max-h-[calc(100dvh-40px)] sm:rounded-3xl">
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 px-4 py-4 sm:px-6">
           <div><p className="text-[10px] font-bold uppercase tracking-[.18em] text-violet-300">Room management</p><h2 id="room-control-title" className="mt-1 text-xl font-semibold text-white">Control Center</h2><p className="mt-1 text-xs text-neutral-500">The server enforces every role, capability, restriction, and room setting.</p></div>
           <button type="button" onClick={onClose} className="rounded-xl border border-white/10 p-2 text-neutral-400 hover:bg-white/10 hover:text-white" aria-label="Close Control Center"><OmniIcon name="close" size={18} /></button>
@@ -194,7 +212,7 @@ export default function RoomControlCenter({
 
         <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
           <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-white/10 p-2 sm:w-44 sm:flex-col sm:overflow-y-auto sm:border-b-0 sm:border-r" aria-label="Room Control Center sections">
-            {([['overview', 'Overview'], ['invites', 'Invites'], ['rules', 'Rules & welcome'], ['permissions', 'Permissions'], ['announcements', 'Announcements'], ['profile', 'Room profile']] as Array<[Tab, string]>).map(([key, label]) => <button key={key} type="button" onClick={() => setTab(key)} className={`shrink-0 rounded-xl px-3 py-2.5 text-left text-xs font-semibold transition ${tab === key ? 'bg-violet-500/15 text-violet-200' : 'text-neutral-400 hover:bg-white/5 hover:text-white'}`}>{label}</button>)}
+            {([['overview', 'Overview'], ['invites', 'Invites'], ['rules', 'Rules & welcome'], ['permissions', 'Permissions'], ['user-control', 'User control'], ['announcements', 'Announcements'], ['profile', 'Room profile']] as Array<[Tab, string]>).map(([key, label]) => <button key={key} type="button" onClick={() => setTab(key)} className={`shrink-0 rounded-xl px-3 py-2.5 text-left text-xs font-semibold transition ${tab === key ? 'bg-violet-500/15 text-violet-200' : 'text-neutral-400 hover:bg-white/5 hover:text-white'}`}>{label}</button>)}
           </nav>
 
           <div className="min-h-0 flex-1 overflow-y-auto p-4 pb-28 sm:p-6 sm:pb-6">
@@ -213,6 +231,8 @@ export default function RoomControlCenter({
               {tab === 'rules' && <div className="space-y-5"><div><h3 className="font-semibold text-white">Rules and welcome</h3><p className="mt-1 text-sm text-neutral-500">Approved members receive a read-only view; authorized controllers can update it.</p></div>{canManageSettings ? <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4"><label className="block text-sm font-medium text-white">Welcome message<textarea value={draftWelcome} onChange={(event) => setDraftWelcome(event.target.value)} maxLength={1000} rows={3} className="omni-input mt-2 min-h-24" /></label><label className="block text-sm font-medium text-white">Room rules<textarea value={draftRules} onChange={(event) => setDraftRules(event.target.value)} maxLength={5000} rows={8} className="omni-input mt-2 min-h-40" /></label><button type="button" disabled={working === 'rules'} onClick={() => void run('rules', () => updateRoomControls(roomId, { rules: draftRules, welcomeMessage: draftWelcome }).then(() => undefined), 'Rules and welcome message saved.')} className="omni-button omni-button-primary">{working === 'rules' ? 'Saving…' : 'Save rules & welcome'}</button></section> : <ReadOnly message={`${settings.welcome_message || 'No welcome message has been configured.'}${settings.rules ? `\n\n${settings.rules}` : ''}`} />}</div>}
 
               {tab === 'permissions' && <div className="space-y-5"><div><h3 className="font-semibold text-white">Granular permissions</h3><p className="mt-1 text-sm text-neutral-500">These persisted values are enforced by the backend for every room operation.</p></div>{!isOwner ? <ReadOnly message="Only the room owner can change granular permissions." /> : <div className="overflow-x-auto rounded-2xl border border-white/10"><table className="w-full min-w-[620px] text-left text-xs"><thead className="bg-white/[0.04] text-neutral-400"><tr><th className="p-3">Capability</th>{(['admin', 'member', 'guest'] as RoomRole[]).map((role) => <th key={role} className="p-3 capitalize">{role}</th>)}</tr></thead><tbody>{CAPABILITIES.map((capability) => <tr key={capability.key} className="border-t border-white/10"><td className="p-3 text-white">{capability.label}</td>{(['admin', 'member', 'guest'] as RoomRole[]).map((role) => { const allowed = permissions.some((permission) => permission.role === role && permission.capability === capability.key && permission.allowed); const key = `permission-${role}-${capability.key}`; return <td key={role} className="p-3"><button type="button" disabled={working === key} onClick={() => void run(key, () => setRoomRolePermission(roomId, role, capability.key, !allowed), `${role} permission updated.`)} className={`rounded-lg px-3 py-1.5 font-semibold ${allowed ? 'bg-emerald-500/15 text-emerald-200' : 'bg-white/5 text-neutral-500'}`}>{allowed ? 'Allowed' : 'Denied'}</button></td>; })}</tr>)}</tbody></table></div>}</div>}
+
+              {tab === 'user-control' && <div className="space-y-5"><div><h3 className="font-semibold text-white">User Control</h3><p className="mt-1 text-sm text-neutral-500">Role changes use the existing room permission system and remain server-authorized.</p></div>{memberStates.length === 0 ? <ReadOnly message="No room members are available to manage." /> : <><label className="block text-sm font-medium text-white">Selected user<select value={selectedUserId ?? ''} onChange={(event) => setSelectedUserId(event.target.value || null)} className="omni-input mt-2"><option value="">Select a room member</option>{memberStates.filter((state) => state.join_status === 'approved').map((state) => <option key={state.user_id} value={state.user_id}>User {shortUserId(state.user_id)} · {state.role ?? 'former member'}</option>)}</select></label>{selectedMember ? <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"><p className="text-[10px] font-bold uppercase tracking-[.16em] text-violet-200">Selected user</p><h4 className="mt-2 font-semibold text-white">User {shortUserId(selectedMember.user_id)}</h4><p className="mt-1 text-sm text-neutral-400">Current room role: <span className="font-semibold capitalize text-white">{selectedMember.role ?? 'former member'}</span></p><div className="mt-4 grid gap-2 sm:grid-cols-2">{(['owner', 'admin', 'member', 'guest'] as const).map((role) => <div key={role} className={`rounded-xl border p-3 text-sm ${selectedMember.role === role ? 'border-violet-400/30 bg-violet-500/10 text-violet-100' : 'border-white/10 text-neutral-500'}`}><span className="font-semibold capitalize">{role}</span><p className="mt-1 text-xs leading-5">{role === 'owner' ? 'Owner is assigned only by ownership transfer.' : role === 'guest' ? 'Guest access is assigned only by a temporary invite.' : 'Available to eligible permanent members.'}</p></div>)}</div>{!isOwner ? <p className="mt-4 text-sm text-neutral-500">Only the room owner can change roles or transfer ownership.</p> : !eligibleRoleTarget ? <p className="mt-4 text-sm text-neutral-500">This member is not eligible for a permanent role change. Guests remain governed by their temporary invite.</p> : <div className="mt-5 flex flex-wrap gap-3">{selectedMember.role !== 'admin' && <button type="button" disabled={working === 'user-admin'} onClick={() => void run('user-admin', () => setRoomMemberRole(roomId, selectedMember.user_id, 'admin'), 'Member role updated to admin.')} className="omni-button omni-button-ghost">Make admin</button>}{selectedMember.role !== 'member' && <button type="button" disabled={working === 'user-member'} onClick={() => void run('user-member', () => setRoomMemberRole(roomId, selectedMember.user_id, 'member'), 'Member role updated to member.')} className="omni-button omni-button-ghost">Make member</button>}<button type="button" disabled={working === 'user-owner'} onClick={() => void run('user-owner', () => transferRoomOwnership(roomId, selectedMember.user_id), 'Ownership transferred.')} className="omni-button omni-button-primary">Transfer ownership</button></div>}</section> : <ReadOnly message="Choose a member to view the applicable room role controls." />}</>}</div>}
 
               {tab === 'announcements' && <div className="space-y-5"><div><h3 className="font-semibold text-white">Announcements</h3><p className="mt-1 text-sm text-neutral-500">Pinned updates are shown first for authorized room members.</p></div>{settings.feature_flags.announcements === false ? <ReadOnly message="Announcements are currently disabled for this room." /> : <>{canManageAnnouncements && <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"><textarea value={announcementBody} onChange={(event) => setAnnouncementBody(event.target.value)} rows={4} maxLength={2000} className="omni-input min-h-28" placeholder="Share an update with the room…" /><label className="mt-3 flex items-center gap-2 text-sm text-neutral-300"><input type="checkbox" checked={announcementPinned} onChange={(event) => setAnnouncementPinned(event.target.checked)} /> Pin this announcement</label><button type="button" disabled={!announcementBody.trim() || working === 'announcement'} onClick={() => void run('announcement', async () => { await createRoomAnnouncement(roomId, announcementBody, announcementPinned); setAnnouncementBody(''); setAnnouncementPinned(false); }, 'Announcement published.')} className="omni-button omni-button-primary mt-4">Publish announcement</button></section>}<div className="space-y-3">{announcements.length === 0 ? <ReadOnly message="No announcements yet." /> : announcements.map((announcement) => <article key={announcement.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"><div className="mb-2 flex items-center justify-between gap-2"><span className="text-[10px] font-bold uppercase tracking-wider text-violet-200">{announcement.is_pinned ? 'Pinned' : 'Announcement'}</span><span className="text-[10px] text-neutral-500">{formatDate(announcement.created_at)}</span></div>{editingAnnouncement === announcement.id && canManageAnnouncements ? <div><textarea value={editAnnouncementBody} rows={4} maxLength={2000} className="omni-input min-h-24" onChange={(event) => setEditAnnouncementBody(event.target.value)} /><label className="mt-2 flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" checked={editAnnouncementPinned} onChange={(event) => setEditAnnouncementPinned(event.target.checked)} /> Pinned</label><div className="mt-3 flex gap-2"><button type="button" disabled={!editAnnouncementBody.trim() || working === 'announcement-update'} onClick={() => void run('announcement-update', () => updateRoomAnnouncement(announcement.id, editAnnouncementBody, editAnnouncementPinned).then(() => undefined), 'Announcement updated.')} className="omni-button omni-button-primary">Save update</button><button type="button" onClick={() => setEditingAnnouncement(null)} className="omni-button omni-button-ghost">Cancel</button></div></div> : <><p className="whitespace-pre-wrap text-sm leading-6 text-neutral-200">{announcement.body}</p>{canManageAnnouncements && <button type="button" onClick={() => { setEditingAnnouncement(announcement.id); setEditAnnouncementBody(announcement.body); setEditAnnouncementPinned(announcement.is_pinned); }} className="mt-3 text-xs font-semibold text-violet-200">Edit</button>}</>}</article>)}</div></>}</div>}
 
