@@ -2,9 +2,9 @@
 
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@/utils/supabase/server';
-import { assertActiveRoom, isRoomExpired } from '@/lib/room-lifecycle';
+import { assertActiveRoom } from '@/lib/room-lifecycle';
 
-// 1. Create Room (Upgraded with Expiration & Anonymous Mode)
+// 1. Create Room
 export async function createRoom(formData: FormData) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -14,7 +14,6 @@ export async function createRoom(formData: FormData) {
   const name = formData.get('name') as string;
   const description = formData.get('description') as string;
   const isPrivate = formData.get('is_private') === 'true';
-  const isAnonymous = formData.get('is_anonymous') === 'true';
   
   const requestedExpirationType = formData.get('expiration_type');
   const expirationType = requestedExpirationType === 'recoverable' || requestedExpirationType === 'irreversible'
@@ -51,7 +50,6 @@ export async function createRoom(formData: FormData) {
       name,
       description,
       is_private: isPrivate,
-      is_anonymous: isAnonymous,
       expiration_type: expirationType,
       expires_at: expiresAt,
       created_by: user.id,
@@ -111,45 +109,29 @@ export async function processRoomJoin(identifier: string) {
   }
   cleanId = cleanId.replace(/^@/, '').toLowerCase();
 
-  // Securely find the room using our new Postgres function
-  const { data, error: rpcError } = await supabase.rpc('get_room_for_join', { identifier: cleanId });
-
-  if (rpcError || !data || data.length === 0) {
-    throw new Error("Room not found. Check your code, link, or username.");
+  // Action 05 keeps joins inside the database transaction so restrictions and
+  // locks cannot be bypassed through a direct table insert.
+  const { data, error } = await supabase.rpc('request_room_join', { p_identifier: cleanId });
+  if (error || !data || data.length === 0) {
+    throw new Error(error?.message || 'Room not found. Check your code, link, or username.');
   }
+  return { roomId: data[0].room_id, status: data[0].status };
+}
 
-  const room = data[0];
-  if (isRoomExpired(room)) {
-    throw new Error('This room has expired and is no longer accepting joins.');
-  }
+// The Rooms surface only receives the caller's currently approved memberships.
+// RLS on both tables remains the authority for private-room visibility.
+export async function getMyJoinedRooms() {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) throw new Error('Unauthorized');
 
-  // Check if the user already requested or joined
-  const { data: existing } = await supabase
+  const { data, error } = await supabase
     .from('room_members')
-    .select('join_status')
-    .eq('room_id', room.id)
+    .select('role, rooms!inner(id, name, description, username, is_private, expiration_type, expires_at, reopened_until)')
     .eq('user_id', user.id)
-    .single();
-
-  if (existing) {
-    return { roomId: room.id, status: existing.join_status };
-  }
-
-  // If private, send to 'pending'. If public, instantly 'approved'.
-  const statusToSet = room.is_private ? 'pending' : 'approved';
-
-  const { error: insertError } = await supabase
-    .from('room_members')
-    .insert({
-      room_id: room.id,
-      user_id: user.id,
-      role: 'member',
-      join_status: statusToSet
-    });
-
-  if (insertError) throw new Error(insertError.message);
-
-  return { roomId: room.id, status: statusToSet };
+    .eq('join_status', 'approved');
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }
 
 // 4. Phase 16: Convert a Temporary Room into a Permanent Group
