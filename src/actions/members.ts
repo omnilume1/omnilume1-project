@@ -54,6 +54,14 @@ export async function getRoomMembersList(roomId: string) {
   return data;
 }
 
+export async function getRoomMemberIdentities(roomId: string) {
+  const supabase = await createClient();
+  await assertActiveRoom(supabase, roomId);
+  const { data, error } = await supabase.rpc('get_room_member_identities', { p_room_id: roomId });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
 // 3. The Owner's Control: Approve or Reject a pending user
 export async function manageMemberRequest(roomId: string, targetUserId: string, action: 'approve' | 'reject') {
   const supabase = await createClient();

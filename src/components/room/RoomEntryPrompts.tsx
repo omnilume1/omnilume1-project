@@ -12,8 +12,6 @@ export default function RoomEntryPrompts({ roomId, onOpenRoomProfile }: { roomId
 
   useEffect(() => {
     let active = true;
-    const key = `omnilume:room-entry-prompts:${roomId}`;
-    if (window.sessionStorage.getItem(key)) return;
 
     void getRoomControlState(roomId).then((state) => {
       if (!active) return;
@@ -21,7 +19,6 @@ export default function RoomEntryPrompts({ roomId, onOpenRoomProfile }: { roomId
       const nextRules = state.settings?.rules ?? '';
       setWelcome(nextWelcome);
       setRules(nextRules);
-      window.sessionStorage.setItem(key, 'seen');
       setPrompt(nextWelcome || nextRules ? 'rules' : 'profile');
     }).catch(() => {
       // Entry prompts are additive; room access remains authoritative.
