@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '@/utils/supabase/server';
 import { assertActiveRoom } from '@/lib/room-lifecycle';
 
-// 1. Create Room (Upgraded with Expiration & Anonymous Mode)
+// 1. Create Room
 export async function createRoom(formData: FormData) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -14,7 +14,6 @@ export async function createRoom(formData: FormData) {
   const name = formData.get('name') as string;
   const description = formData.get('description') as string;
   const isPrivate = formData.get('is_private') === 'true';
-  const isAnonymous = formData.get('is_anonymous') === 'true';
   
   const requestedExpirationType = formData.get('expiration_type');
   const expirationType = requestedExpirationType === 'recoverable' || requestedExpirationType === 'irreversible'
@@ -51,7 +50,6 @@ export async function createRoom(formData: FormData) {
       name,
       description,
       is_private: isPrivate,
-      is_anonymous: isAnonymous,
       expiration_type: expirationType,
       expires_at: expiresAt,
       created_by: user.id,
