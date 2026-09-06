@@ -24,6 +24,11 @@ export async function getRoomAccess(identifier: string) {
     .single();
 
   if (!member) {
+    const { data: eligibility } = await supabase.rpc('get_my_room_join_eligibility', { p_room_id: room.id });
+    const restrictionState = eligibility?.[0]?.state;
+    if (restrictionState === 'blocked' || restrictionState === 'banned') {
+      return { status: restrictionState, role: null, room };
+    }
     if (!room.is_private) return { status: 'public_not_joined', role: null, room };
     return { status: 'private_not_joined', role: null, room };
   }
@@ -49,6 +54,14 @@ export async function getRoomMembersList(roomId: string) {
   return data;
 }
 
+export async function getRoomMemberIdentities(roomId: string) {
+  const supabase = await createClient();
+  await assertActiveRoom(supabase, roomId);
+  const { data, error } = await supabase.rpc('get_room_member_identities', { p_room_id: roomId });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
 // 3. The Owner's Control: Approve or Reject a pending user
 export async function manageMemberRequest(roomId: string, targetUserId: string, action: 'approve' | 'reject') {
   const supabase = await createClient();
@@ -69,9 +82,10 @@ export async function manageMemberRequest(roomId: string, targetUserId: string, 
     throw new Error("Only owners and admins can manage requests.");
   }
 
-  if (action === 'reject') {
-    await supabase.from('room_members').delete().eq('room_id', roomId).eq('user_id', targetUserId);
-  } else {
-    await supabase.from('room_members').update({ join_status: 'approved' }).eq('room_id', roomId).eq('user_id', targetUserId);
-  }
+  const { error } = await supabase.rpc('review_room_member', {
+    p_room_id: roomId,
+    p_target_user_id: targetUserId,
+    p_action: action,
+  });
+  if (error) throw new Error(error.message);
 }
