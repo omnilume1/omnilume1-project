@@ -76,6 +76,29 @@ export async function getOrCreatePrivateChat(friendId: string) {
   if (fetchError) throw new Error(fetchError.message);
   if (existing) return existing.id;
 
+  // New private chats require an accepted friendship or an accepted message
+  // request. The database trigger on private_chats enforces the same rule;
+  // this pre-check keeps the error friendly for the UI.
+  const { data: isFriend, error: friendError } = await supabase.rpc('is_current_friend', {
+    p_user_one: user.id,
+    p_user_two: friendId,
+  });
+  if (friendError) throw new Error(friendError.message);
+  if (!isFriend) {
+    const { data: acceptedRequest, error: requestError } = await supabase
+      .from('message_requests')
+      .select('id')
+      .or(
+        `and(requester_id.eq.${user.id},recipient_id.eq.${friendId}),and(requester_id.eq.${friendId},recipient_id.eq.${user.id})`,
+      )
+      .eq('status', 'accepted')
+      .maybeSingle();
+    if (requestError) throw new Error(requestError.message);
+    if (!acceptedRequest) {
+      throw new Error('You can only start a secure chat with an accepted friend or an accepted message request.');
+    }
+  }
+
   const { data: chat, error: insertError } = await supabase
     .from('private_chats')
     .insert({ user_one: user.id, user_two: friendId })
@@ -129,6 +152,27 @@ export async function sendEncryptedMessage({
 
   const expectedReceiver = chat.user_one === user.id ? chat.user_two : chat.user_one;
   if (expectedReceiver !== receiverId) throw new Error('Invalid chat recipient.');
+
+  // Existing chat containers may predate the request gate. Keep their history
+  // readable, but require the same accepted relationship before sending new
+  // private messages through this action.
+  const { data: isFriend, error: friendError } = await supabase.rpc('is_current_friend', {
+    p_user_one: user.id,
+    p_user_two: receiverId,
+  });
+  if (friendError) throw new Error(friendError.message);
+  if (!isFriend) {
+    const { data: acceptedRequest, error: requestError } = await supabase
+      .from('message_requests')
+      .select('id')
+      .or(
+        `and(requester_id.eq.${user.id},recipient_id.eq.${receiverId}),and(requester_id.eq.${receiverId},recipient_id.eq.${user.id})`,
+      )
+      .eq('status', 'accepted')
+      .maybeSingle();
+    if (requestError) throw new Error(requestError.message);
+    if (!acceptedRequest) throw new Error('This secure chat is not authorized for new messages.');
+  }
 
   const { error } = await supabase.from('messages').insert({
     chat_id: chatId,

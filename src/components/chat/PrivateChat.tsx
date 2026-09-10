@@ -10,9 +10,10 @@ interface PrivateChatProps {
   currentUserId: string;
   receiverId: string;
   sharedKey: CryptoKey | null;
+  peerName?: string;
 }
 
-export default function PrivateChat({ chatId, currentUserId, receiverId, sharedKey }: PrivateChatProps) {
+export default function PrivateChat({ chatId, currentUserId, receiverId, sharedKey, peerName }: PrivateChatProps) {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -63,7 +64,7 @@ export default function PrivateChat({ chatId, currentUserId, receiverId, sharedK
       <div className="chat-topbar shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-emerald-500 text-xs">🔒</span>
-          <h3 className="font-medium text-sm text-white">End-to-End Encrypted Chat</h3>
+          <h3 className="font-medium text-sm text-white">{peerName ? `Encrypted chat with ${peerName}` : 'End-to-End Encrypted Chat'}</h3>
         </div>
         <details className="relative ml-auto text-right">
           <summary className="cursor-pointer text-[10px] text-neutral-500 hover:text-neutral-300">
@@ -96,7 +97,7 @@ export default function PrivateChat({ chatId, currentUserId, receiverId, sharedK
             return (
               <div key={msg.id} className={`flex flex-col gap-1 ${isMe ? 'items-end' : 'items-start'}`}>
                 <span className="text-[10px] font-semibold text-neutral-500">
-                  {isMe ? 'You' : 'Friend'}
+                  {isMe ? 'You' : (peerName || 'Friend')}
                 </span>
                 <div className={`message-bubble max-w-[80%] p-3 text-sm ${
                   msg.decryptionStatus === 'undecryptable'
