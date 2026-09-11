@@ -111,6 +111,11 @@ export async function getMyMessageInbox(): Promise<MessageInbox> {
   const requestPartnerIds = Array.from(new Set(requestRows.map((request) =>
     request.requester_id === user.id ? request.recipient_id : request.requester_id,
   )));
+  const acceptedRequestPartnerIds = new Set(
+    requestRows
+      .filter((request) => request.status === 'accepted')
+      .map((request) => request.requester_id === user.id ? request.recipient_id : request.requester_id),
+  );
   const connectionRows = [
     ...((followersRes.data ?? []) as Array<{ user_id: string; display_name: string | null; username: string | null; avatar_url: string | null }>),
     ...((followingRes.data ?? []) as Array<{ user_id: string; display_name: string | null; username: string | null; avatar_url: string | null }>),
@@ -165,20 +170,26 @@ export async function getMyMessageInbox(): Promise<MessageInbox> {
   const makePerson = (id: string): InboxPerson | null => {
     const profile = profileById.get(id);
     if (!profile) return null;
+    const canUsePrivateChat = friendIds.includes(id) || acceptedRequestPartnerIds.has(id);
     return {
       user_id: id,
       display_name: profile.display_name,
       username: profile.username,
       avatar_url: profile.avatar_url,
-      chat_id: chatByPartner.get(id)?.id ?? null,
+      // A historical chat row is not, by itself, permission to open an active
+      // conversation. Keep it available only while the relationship that
+      // authorized the chat is still accepted.
+      chat_id: canUsePrivateChat ? chatByPartner.get(id)?.id ?? null : null,
       has_public_key: hasPublicKey.has(id),
     };
   };
 
-  // Personal = accepted friends + existing private conversations (deduped).
+  // Personal is derived from current relationship authorization. Historical
+  // private_chats rows remain in the database, but cannot keep a removed friend
+  // visible in the active Personal list.
   const personalIds = new Set<string>();
   for (const id of friendIds) if (id !== user.id) personalIds.add(id);
-  for (const id of chatPartnerIds) if (id !== user.id) personalIds.add(id);
+  for (const id of acceptedRequestPartnerIds) if (id !== user.id) personalIds.add(id);
 
   const friends = Array.from(personalIds)
     .map(makePerson)

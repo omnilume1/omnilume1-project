@@ -17,18 +17,46 @@ export async function saveUserPublicKey(publicKey: string) {
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
 
-  const { error: profileError } = await supabase
-    .from('profiles')
-    .upsert({ id: user.id, public_key: publicKey }, { onConflict: 'id' });
+  const [{ data: profile, error: profileError }, { data: legacyKey, error: legacyError }] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('public_key')
+      .eq('id', user.id)
+      .maybeSingle(),
+    supabase
+      .from('user_keys')
+      .select('public_key')
+      .eq('user_id', user.id)
+      .maybeSingle(),
+  ]);
   if (profileError) throw new Error(profileError.message);
+  if (legacyError) throw new Error(legacyError.message);
 
-  const { error: keyError } = await supabase
-    .from('user_keys')
-    .upsert(
-      { user_id: user.id, public_key: publicKey, updated_at: new Date().toISOString() },
-      { onConflict: 'user_id' },
-    );
-  if (keyError) throw new Error(keyError.message);
+  if (profile?.public_key && legacyKey?.public_key && profile.public_key !== legacyKey.public_key) {
+    throw new Error('Secure messaging identity is inconsistent on the server.');
+  }
+
+  const storedPublicKey = profile?.public_key ?? legacyKey?.public_key ?? null;
+  if (storedPublicKey && storedPublicKey !== publicKey) {
+    throw new Error('Secure messaging identity already exists on another device.');
+  }
+
+  if (profile?.public_key !== publicKey) {
+    const { error: profileUpdateError } = await supabase
+      .from('profiles')
+      .upsert({ id: user.id, public_key: publicKey }, { onConflict: 'id' });
+    if (profileUpdateError) throw new Error(profileUpdateError.message);
+  }
+
+  if (legacyKey?.public_key !== publicKey) {
+    const { error: keyError } = await supabase
+      .from('user_keys')
+      .upsert(
+        { user_id: user.id, public_key: publicKey, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' },
+      );
+    if (keyError) throw new Error(keyError.message);
+  }
   return true;
 }
 
@@ -39,23 +67,27 @@ export async function getUserPublicKey(userId: string) {
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
 
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('public_key')
-    .eq('id', userId)
-    .maybeSingle();
+  const [{ data: profile, error: profileError }, { data: legacyKey, error: legacyError }] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('public_key')
+      .eq('id', userId)
+      .maybeSingle(),
+    supabase
+      .from('user_keys')
+      .select('public_key')
+      .eq('user_id', userId)
+      .maybeSingle(),
+  ]);
 
   if (profileError) throw new Error(profileError.message);
-  if (profile?.public_key) return profile.public_key;
+  if (legacyError) throw new Error(legacyError.message);
+  if (profile?.public_key && legacyKey?.public_key && profile.public_key !== legacyKey.public_key) {
+    throw new Error('Peer secure messaging identity is inconsistent on the server.');
+  }
 
   // Keep compatibility with accounts created before profiles gained the key.
-  const { data: legacyKey, error: legacyError } = await supabase
-    .from('user_keys')
-    .select('public_key')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (legacyError) throw new Error(legacyError.message);
-  return legacyKey?.public_key ?? null;
+  return profile?.public_key ?? legacyKey?.public_key ?? null;
 }
 
 export async function getOrCreatePrivateChat(friendId: string) {

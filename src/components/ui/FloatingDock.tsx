@@ -5,6 +5,7 @@ import { useCallback, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import OmniLogo from '@/components/ui/OmniLogo';
 import { OmniIcon, type OmniIconName } from '@/components/ui/OmniIcon';
+import { usePersonalMessageNotifications } from '@/hooks/usePersonalMessageNotifications';
 
 export interface FloatingDockItem {
   title: string;
@@ -46,6 +47,7 @@ function playDockClick() {
 export function FloatingDock({ items = defaultItems }: { items?: FloatingDockItem[] }) {
   const pathname = usePathname();
   const itemRefs = useRef<Array<HTMLAnchorElement | null>>([]);
+  const { unreadCount } = usePersonalMessageNotifications();
 
   const resetMagnification = useCallback(() => {
     itemRefs.current.forEach((element) => {
@@ -108,6 +110,11 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
                 className={`dock-item ${active ? 'is-active' : ''} ${item.emphasis ? 'is-emphasis' : ''}`}
               >
                 <OmniIcon name={item.icon} size={22} />
+                {item.title === 'Messages' && unreadCount > 0 ? (
+                  <span className="dock-message-badge" aria-label={`${unreadCount} unread personal message${unreadCount === 1 ? '' : 's'}`}>
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                ) : null}
                 <span className="dock-tooltip" aria-hidden="true">{item.title}</span>
                 <span className="dock-sr-label">{item.title}</span>
               </Link>

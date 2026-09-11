@@ -347,3 +347,48 @@ GRANT EXECUTE ON FUNCTION public.cancel_message_request(uuid) TO authenticated;
 -- ---------------------------------------------------------------------------
 
 CREATE INDEX IF NOT EXISTS messages_chat_id_idx ON public.messages USING btree (chat_id);
+
+-- The Messages workspace listens for request, private-chat, and friendship
+-- changes. Keep those tables in the Realtime publication when this migration
+-- is applied to a project where they are not already present.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    IF to_regclass('public.message_requests') IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1
+         FROM pg_publication_tables
+         WHERE pubname = 'supabase_realtime'
+           AND schemaname = 'public'
+           AND tablename = 'message_requests'
+       ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.message_requests;
+    END IF;
+    IF to_regclass('public.private_chats') IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1
+         FROM pg_publication_tables
+         WHERE pubname = 'supabase_realtime'
+           AND schemaname = 'public'
+           AND tablename = 'private_chats'
+       ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.private_chats;
+    END IF;
+    IF to_regclass('public.friendships') IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1
+         FROM pg_publication_tables
+         WHERE pubname = 'supabase_realtime'
+           AND schemaname = 'public'
+           AND tablename = 'friendships'
+       ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.friendships;
+    END IF;
+  END IF;
+END;
+$$;
+
+-- Make the newly-created RPCs visible to PostgREST immediately after the
+-- migration is applied. This is safe to repeat and does not create another
+-- function or alter the request contract.
+NOTIFY pgrst, 'reload schema';
