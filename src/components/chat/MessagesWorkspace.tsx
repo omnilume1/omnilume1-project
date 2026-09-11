@@ -108,6 +108,7 @@ export default function MessagesWorkspace() {
 
   const inboxRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const beginChatRequestRef = useRef(0);
+  const inboxLoadRequestRef = useRef(0);
 
   useEffect(() => {
     const supabase = createClient();
@@ -135,7 +136,11 @@ export default function MessagesWorkspace() {
           kind: 'error',
           text: message === 'Stored secure messaging identity is invalid.'
             ? 'This browser has an invalid secure messaging identity. Your existing encrypted history was not replaced; clear site storage only if you intentionally want to re-key this device.'
-            : 'Unable to initialize end-to-end encryption in this browser.',
+            : message === 'Secure messaging identity already exists on another device.'
+              ? 'This account already has a secure messaging identity on another device. Your local identity was not replaced, so existing encrypted history remains protected.'
+              : message === 'Secure messaging identity is inconsistent on the server.'
+                ? 'Secure messaging setup is inconsistent on the server. No identity was replaced; contact support before sending new messages.'
+                : 'Unable to initialize end-to-end encryption in this browser.',
         });
       }
     }
@@ -143,12 +148,16 @@ export default function MessagesWorkspace() {
   }, []);
 
   const loadInbox = useCallback(async () => {
+    const requestId = inboxLoadRequestRef.current + 1;
+    inboxLoadRequestRef.current = requestId;
     try {
       const data = await getMyMessageInbox();
+      if (inboxLoadRequestRef.current !== requestId) return;
       setInbox(data);
       setInboxStatus('ready');
       setInboxError(null);
     } catch (error: unknown) {
+      if (inboxLoadRequestRef.current !== requestId) return;
       setInboxStatus('error');
       setInboxError(error instanceof Error ? error.message : 'Unable to load conversations.');
     }
@@ -168,26 +177,13 @@ export default function MessagesWorkspace() {
 
   useEffect(() => {
     let cancelled = false;
-    async function fetchInitialInbox() {
-      try {
-        const data = await getMyMessageInbox();
-        if (!cancelled) {
-          setInbox(data);
-          setInboxStatus('ready');
-          setInboxError(null);
-        }
-      } catch (error: unknown) {
-        if (!cancelled) {
-          setInboxStatus('error');
-          setInboxError(error instanceof Error ? error.message : 'Unable to load conversations.');
-        }
-      }
-    }
-    void fetchInitialInbox();
+    queueMicrotask(() => {
+      if (!cancelled) void loadInbox();
+    });
     return () => {
       cancelled = true;
     };
-  }, [inboxReloadToken]);
+  }, [inboxReloadToken, loadInbox]);
 
   // Inbox updates from other clients: new/updated message requests and new
   // private-chat rows are pushed to this client without a manual reload.
@@ -226,8 +222,42 @@ export default function MessagesWorkspace() {
         { event: 'INSERT', schema: 'public', table: 'private_chats', filter: `user_two=eq.${currentUserId}` },
         () => scheduleInboxRefresh(),
       )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'friendships', filter: `user_one=eq.${currentUserId}` },
+        () => scheduleInboxRefresh(),
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'friendships', filter: `user_two=eq.${currentUserId}` },
+        () => scheduleInboxRefresh(),
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'friendships', filter: `user_one=eq.${currentUserId}` },
+        () => scheduleInboxRefresh(),
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'friendships', filter: `user_two=eq.${currentUserId}` },
+        () => scheduleInboxRefresh(),
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'friendships', filter: `user_one=eq.${currentUserId}` },
+        () => scheduleInboxRefresh(),
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'friendships', filter: `user_two=eq.${currentUserId}` },
+        () => scheduleInboxRefresh(),
+      )
       .subscribe();
     return () => {
+      if (inboxRefreshTimer.current) {
+        clearTimeout(inboxRefreshTimer.current);
+        inboxRefreshTimer.current = null;
+      }
       supabase.removeChannel(channel);
     };
   }, [currentUserId, scheduleInboxRefresh]);
