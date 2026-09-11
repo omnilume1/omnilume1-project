@@ -11,7 +11,7 @@ const Player = dynamic(() => import('react-player').then((module) => module.defa
 
 interface MediaStageProps {
   roomId: string;
-  currentUserRole: string | null;
+  canControlMedia: boolean;
 }
 
 interface AudioTrackLike {
@@ -73,9 +73,18 @@ function normalizeCastUrl(value: string) {
   const hostname = parsed.hostname.replace(/^www\./i, '').toLowerCase();
   if (hostname === 'kick.com' || hostname.endsWith('.kick.com')) {
     if (!/\.m3u8(?:$|\?)/i.test(parsed.pathname + parsed.search)) {
-      throw new Error('Kick channel pages are not direct media streams. Paste the direct HTTPS HLS (.m3u8) stream URL provided by the source.');
+      throw new Error('Kick channel or video pages are not direct media streams. Paste a direct HTTPS HLS (.m3u8) stream URL provided by the source.');
     }
     return { url: parsed.toString(), title: 'Kick live stream' };
+  }
+  if (hostname === 'twitch.tv' || hostname === 'go.twitch.tv') {
+    const path = parsed.pathname.replace(/\/+$/, '');
+    const isChannel = /^\/[a-z0-9_]+$/i.test(path);
+    const isVideo = /^\/videos?\/\d+$/i.test(path) || /^\d+$/.test(parsed.searchParams.get('video') ?? '');
+    if (!isChannel && !isVideo) {
+      throw new Error('This Twitch URL is not a supported channel or video. Paste a Twitch channel/video URL or a direct HTTPS media URL.');
+    }
+    return { url: parsed.toString(), title: isVideo ? 'Twitch video' : 'Twitch live stream' };
   }
   return {
     url: parsed.toString(),
@@ -83,7 +92,7 @@ function normalizeCastUrl(value: string) {
   };
 }
 
-export default function MediaStage({ roomId, currentUserRole }: MediaStageProps) {
+export default function MediaStage({ roomId, canControlMedia }: MediaStageProps) {
   const {
     mediaState,
     broadcastEvent,
@@ -108,6 +117,8 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
   const [errorUrl, setErrorUrl] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [localUpload, setLocalUpload] = useState<LocalUploadState | null>(null);
+  const [localVolume, setLocalVolume] = useState<number | null>(null);
+  const [localMuted, setLocalMuted] = useState<boolean | null>(null);
 
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'subtitles' | 'audio'>('subtitles');
@@ -123,7 +134,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const supabase = createClient();
-  const canCast = currentUserRole === 'owner' || currentUserRole === 'admin';
+  const canCast = canControlMedia;
   const activeMediaUrl = mediaState?.url ?? null;
   const activeSubtitleUrl = mediaState?.subtitleUrl ?? null;
   const mediaTitle = mediaState?.title ?? 'External Stream';
@@ -132,6 +143,9 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
   const activeCastId = mediaState?.castId ?? activeMediaUrl;
   const playing = mediaState?.playing ?? false;
   const muted = mediaState?.muted ?? false;
+  const volume = mediaState?.volume ?? 1;
+  const displayedVolume = canCast ? volume : (localVolume ?? volume);
+  const displayedMuted = canCast ? muted : (localMuted ?? muted);
   const playbackSpeed = mediaState?.speed ?? 1;
   const isReady = activeMediaUrl !== null && readyCastId === activeCastId;
   const playerKey = activeMediaUrl && activeCastId ? `${activeCastId}:${retryNonce}` : 'empty';
@@ -185,6 +199,8 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
     // authoritative room playback state after the seek without rebroadcasting
     // the resulting native events.
     if (playerRef.current) {
+      playerRef.current.volume = displayedVolume;
+      playerRef.current.muted = displayedMuted;
       if (mediaState.playing && playerRef.current.paused) {
         void playerRef.current.play().catch(() => undefined);
       } else if (!mediaState.playing && !playerRef.current.paused) {
@@ -194,7 +210,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
 
     const timeout = window.setTimeout(() => { isSyncing.current = false; }, 500);
     return () => window.clearTimeout(timeout);
-  }, [isReady, mediaState]);
+  }, [displayedMuted, displayedVolume, isReady, mediaState]);
 
   useEffect(() => {
     // Every client requests the current room snapshot. Controllers must not
@@ -219,10 +235,11 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
       castId: activeCastId,
       mediaId: activeMediaId,
       muted,
+      volume,
     });
-  }, [activeCastId, activeMediaId, activeMediaUrl, activeSourceType, activeSubtitleUrl, broadcastEvent, canCast, currentUserId, mediaState?.controllerId, mediaState?.source, mediaTitle, muted, playbackSpeed, playing]);
+  }, [activeCastId, activeMediaId, activeMediaUrl, activeSourceType, activeSubtitleUrl, broadcastEvent, canCast, currentUserId, mediaState?.controllerId, mediaState?.source, mediaTitle, muted, playbackSpeed, playing, volume]);
 
-  const broadcastPlayback = (eventType: 'play' | 'pause' | 'seek' | 'mute', time = safeGetTime(), nextPlaying = playing, nextSpeed = playbackSpeed, nextMuted = muted) => {
+  const broadcastPlayback = (eventType: 'play' | 'pause' | 'seek' | 'mute', time = safeGetTime(), nextPlaying = playing, nextSpeed = playbackSpeed, nextMuted = muted, nextVolume = volume) => {
     if (!canCast || mediaState?.source === 'restored') return;
     broadcastEvent(eventType, {
       url: activeMediaUrl,
@@ -234,6 +251,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
       castId: activeCastId,
       mediaId: activeMediaId,
       muted: nextMuted,
+      volume: nextVolume,
     });
   };
 
@@ -250,7 +268,22 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
   };
 
   const handleVolumeChange = () => {
-    if (!isSyncing.current) broadcastPlayback('mute', safeGetTime(), playing, playbackSpeed, Boolean(playerRef.current?.muted));
+    if (isSyncing.current) return;
+    const nextVolume = playerRef.current?.volume ?? displayedVolume;
+    const nextMuted = Boolean(playerRef.current?.muted);
+    if (!canCast) {
+      setLocalVolume(nextVolume);
+      setLocalMuted(nextMuted);
+      return;
+    }
+    broadcastPlayback(
+      'mute',
+      safeGetTime(),
+      playing,
+      playbackSpeed,
+      nextMuted,
+      nextVolume,
+    );
   };
 
   const handleReady = () => {
@@ -531,7 +564,8 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
                 ref={playerRef}
                 src={activeMediaUrl}
                 playing={playing}
-                muted={muted}
+                muted={displayedMuted}
+                volume={displayedVolume}
                 playbackRate={playbackSpeed}
                 controls
                 width="100%"
@@ -558,7 +592,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
             <div className="flex w-full max-w-xl flex-col items-center">
               <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-white/5"><svg viewBox="0 0 24 24" className="ml-0.5 h-7 w-7 text-white" fill="currentColor"><path d="M8 5.14v13.72L19.06 12 8 5.14z" /></svg></div>
               <h2 className="mb-2 text-lg font-bold text-white">Stage is empty</h2>
-              {canCast ? <div className="mt-4 w-full"><p className="text-center text-xs text-neutral-400">Paste a YouTube, MP4, or media URL to cast it immediately, or upload local media for the room.</p><form onSubmit={startUrlCasting} className="mt-4 flex gap-2"><input type="url" value={castInput} onChange={(event) => setCastInput(event.target.value)} placeholder="Paste YouTube, MP4, or media URL..." className="min-w-0 flex-1 rounded-lg border border-neutral-800 bg-[#121212] px-3 py-2 text-sm text-white transition focus:border-indigo-500 focus:outline-none" /><button type="submit" disabled={isCastingUrl || Boolean(localUpload)} className="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-60">Cast</button></form><input type="file" ref={localFileRef} onChange={handleLocalFileUpload} className="hidden" accept="video/*,audio/*" />{localUpload ? <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-left" aria-live="polite"><div className="flex items-center justify-between gap-2 text-xs font-bold text-white"><span className="truncate" title={localUpload.fileName}>{localUpload.fileName} · {formatBytes(localUpload.total)}</span><span className="shrink-0 text-emerald-400">{localUpload.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-neutral-800"><div className="h-full rounded-full bg-emerald-500 transition-[width] duration-150" style={{ width: `${localUpload.percent}%` }} /></div><p className="mt-2 text-[10px] text-neutral-500">{localUpload.phase === 'saving' ? 'Finishing upload...' : `${formatBytes(localUpload.loaded)} of ${formatBytes(localUpload.total)}`}</p></div> : <button type="button" onClick={() => localFileRef.current?.click()} className="mx-auto mt-4 block cursor-pointer rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2 text-xs font-bold text-neutral-200 transition hover:border-neutral-600 hover:text-white">Upload local media (under 50MB)</button>}{historyError && <p className="mt-3 text-center text-[10px] text-amber-300">{historyError}</p>}</div> : <p className="mt-2 text-sm text-zinc-500">Waiting for a room admin to cast media...</p>}
+              {canCast ? <div className="mt-4 w-full"><p className="text-center text-xs text-neutral-400">Paste a YouTube, Twitch, direct HTTPS media, or Kick HLS (.m3u8) URL to cast it immediately, or upload local media for the room.</p><form onSubmit={startUrlCasting} className="mt-4 flex gap-2"><input type="url" value={castInput} onChange={(event) => setCastInput(event.target.value)} placeholder="Paste YouTube, Twitch, MP4, or media URL..." className="min-w-0 flex-1 rounded-lg border border-neutral-800 bg-[#121212] px-3 py-2 text-sm text-white transition focus:border-indigo-500 focus:outline-none" /><button type="submit" disabled={isCastingUrl || Boolean(localUpload)} className="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-60">Cast</button></form><input type="file" ref={localFileRef} onChange={handleLocalFileUpload} className="hidden" accept="video/*,audio/*" />{localUpload ? <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-left" aria-live="polite"><div className="flex items-center justify-between gap-2 text-xs font-bold text-white"><span className="truncate" title={localUpload.fileName}>{localUpload.fileName} · {formatBytes(localUpload.total)}</span><span className="shrink-0 text-emerald-400">{localUpload.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-neutral-800"><div className="h-full rounded-full bg-emerald-500 transition-[width] duration-150" style={{ width: `${localUpload.percent}%` }} /></div><p className="mt-2 text-[10px] text-neutral-500">{localUpload.phase === 'saving' ? 'Finishing upload...' : `${formatBytes(localUpload.loaded)} of ${formatBytes(localUpload.total)}`}</p></div> : <button type="button" onClick={() => localFileRef.current?.click()} className="mx-auto mt-4 block cursor-pointer rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2 text-xs font-bold text-neutral-200 transition hover:border-neutral-600 hover:text-white">Upload local media (under 50MB)</button>}{historyError && <p className="mt-3 text-center text-[10px] text-amber-300">{historyError}</p>}</div> : <p className="mt-2 text-sm text-zinc-500">Waiting for a room admin to cast media...</p>}
               {connectionState === 'error' && <p className="mt-4 text-[10px] text-amber-400">Realtime connection interrupted. Reconnect or refresh to sync with the host.</p>}
             </div>
           )}

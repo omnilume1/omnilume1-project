@@ -96,6 +96,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [leaveError, setLeaveError] = useState<string | null>(null);
   const [featureFlags, setFeatureFlags] = useState<Record<RoomFeature, boolean>>(DEFAULT_FEATURE_FLAGS);
   const [canManageMembers, setCanManageMembers] = useState(false);
+  const [canControlMedia, setCanControlMedia] = useState(false);
   const [controlCenterTab, setControlCenterTab] = useState<'user-control' | 'profile' | null>(null);
   const [controlCenterMemberId, setControlCenterMemberId] = useState<string | null>(null);
 
@@ -326,7 +327,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [activeTool, setActiveTool] = useState<'chat' | 'members' | 'files' | 'notes' | 'timer'>('chat');
   const [timerNavigationRequest, setTimerNavigationRequest] = useState(0);
   const roomIsExpired = accessStatus === 'expired' || isExpired;
-  const roomSync = useRoomSync(roomIsExpired ? '' : (roomData?.id ?? ''), userRole === 'owner' || userRole === 'admin');
+  const roomSync = useRoomSync(roomIsExpired ? '' : (roomData?.id ?? ''), userRole === 'owner' || canControlMedia);
   const roomPresence = useRoomPresence(roomData?.id ?? '');
   useEffect(() => {
     const currentUserId = roomSync.currentUserId;
@@ -341,9 +342,10 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   }, [roomSync.currentUserId, roomSync.roomControlEvents, router]);
   const focusRoomPath = `/room/${encodeURIComponent(identifier)}`;
   const featureEnabled = (feature: RoomFeature) => featureFlags[feature] !== false;
-  const handleControlStateChange = useCallback(({ featureFlags: nextFlags, canManageMembers: nextCanManageMembers }: { featureFlags: Partial<Record<RoomFeature, boolean>>; canManageMembers: boolean }) => {
+  const handleControlStateChange = useCallback(({ featureFlags: nextFlags, canManageMembers: nextCanManageMembers, canControlMedia: nextCanControlMedia }: { featureFlags: Partial<Record<RoomFeature, boolean>>; canManageMembers: boolean; canControlMedia: boolean }) => {
     setFeatureFlags({ ...DEFAULT_FEATURE_FLAGS, ...nextFlags });
     setCanManageMembers(nextCanManageMembers);
+    setCanControlMedia(nextCanControlMedia);
   }, []);
 
   const handleLeave = async () => {
@@ -533,7 +535,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             aria-hidden={mainActivity !== 'watch'}
             className={`absolute inset-0 flex min-h-0 ${mainActivity === 'watch' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
           >
-            {featureEnabled('watch') ? <MediaStage roomId={roomData.id} currentUserRole={userRole} /> : <RoomFeatureUnavailable label="Watch" />}
+            {featureEnabled('watch') ? <MediaStage roomId={roomData.id} canControlMedia={userRole === 'owner' || canControlMedia} /> : <RoomFeatureUnavailable label="Watch" />}
           </div>
 
           {/* Keep the study timer mounted too, so it continues through room
@@ -585,7 +587,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
             {activeTool === 'chat' && roomData && (featureEnabled('chat') ? <RoomChat roomId={roomData.id} /> : <RoomFeatureUnavailable label="Room chat" compact />)}
             {activeTool === 'members' && roomData && <MembersTab roomId={roomData.id} currentUserRole={userRole} canManageMembers={canManageMembers} onChangeRole={(memberId) => { setControlCenterMemberId(memberId); setControlCenterTab('user-control'); setShowControlCenter(true); }} />}
-            {activeTool === 'files' && roomData && (featureEnabled('files') ? <FilesTab roomId={roomData.id} currentUserRole={userRole} /> : <RoomFeatureUnavailable label="Files" compact />)}
+            {activeTool === 'files' && roomData && (featureEnabled('files') ? <FilesTab roomId={roomData.id} currentUserRole={userRole} canControlMedia={userRole === 'owner' || canControlMedia} /> : <RoomFeatureUnavailable label="Files" compact />)}
           </div>
         </aside>
       </div>

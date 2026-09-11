@@ -44,6 +44,7 @@ export type RoomMediaState = {
   castId: string;
   mediaId?: string;
   muted: boolean;
+  volume: number;
   controllerId: string | null;
   eventId: string;
   eventTimestamp: number;
@@ -67,6 +68,7 @@ export type TimerState = {
 
 export type RoomSyncValue = {
   currentUserId: string | null;
+  canControlMedia: boolean;
   connectionState: 'idle' | 'connecting' | 'connected' | 'error';
   typingUsers: Map<string, number>;
   mediaState: RoomMediaState | null;
@@ -215,6 +217,7 @@ function normalizeMediaState(value: Partial<RoomMediaState> | null | undefined):
     castId: typeof value.castId === 'string' && value.castId ? value.castId : createEventId(),
     mediaId: typeof value.mediaId === 'string' && value.mediaId ? value.mediaId : undefined,
     muted: Boolean(value.muted),
+    volume: Math.min(1, Math.max(0, typeof value.volume === 'number' && Number.isFinite(value.volume) ? value.volume : 1)),
     controllerId: typeof value.controllerId === 'string' && value.controllerId ? value.controllerId : null,
     eventId: typeof value.eventId === 'string' && value.eventId ? value.eventId : createEventId(),
     eventTimestamp: typeof value.eventTimestamp === 'number' && Number.isFinite(value.eventTimestamp)
@@ -260,6 +263,9 @@ function createMediaState(
     castId: asString(payload.castId, previous?.castId ?? createEventId()),
     mediaId: asString(payload.mediaId, previous?.mediaId ?? '') || undefined,
     muted: typeof payload.muted === 'boolean' ? payload.muted : (previous?.muted ?? false),
+    volume: typeof payload.volume === 'number' && Number.isFinite(payload.volume)
+      ? Math.min(1, Math.max(0, payload.volume))
+      : (previous?.volume ?? 1),
     controllerId: asString(payload.controllerId, meta?.senderId ?? previous?.controllerId ?? '') || null,
     eventId: meta?.eventId ?? previous?.eventId ?? createEventId(),
     eventTimestamp,
@@ -542,6 +548,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     const eventPayload = eventType === 'cast'
       ? { ...payload, castId: asString(payload.castId, createEventId()) }
       : payload;
+    if (isMediaEvent(eventType) && !canControlMedia) return;
     const meta: MediaEventMeta = {
       eventId: createEventId(),
       timestamp: Date.now(),
@@ -558,17 +565,19 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     if (!sendEvent(eventType, eventPayload, meta)) {
       pendingEventsRef.current.push({ eventType, payload: eventPayload, meta });
     }
-  }, [applyMediaEvent, applyTimerEvent, roomId, sendEvent]);
+  }, [applyMediaEvent, applyTimerEvent, canControlMedia, roomId, sendEvent]);
 
   // Keep late joiners in sync even while the host has temporarily switched to
   // Study or another room tool and the player component is unmounted.
   useEffect(() => {
     if (syncRequestTrigger === 0) return;
     const current = mediaStateRef.current;
-    // A restored snapshot is not allowed to answer a join request. Any
-    // connected client with a live room snapshot may relay it, which lets an
-    // owner rejoin without having their stale browser state win the race.
+    // A restored snapshot is not allowed to answer a join request. Only the
+    // active controller may relay the live snapshot; allowing another client
+    // to rebroadcast its older remote copy could turn stale state into a new
+    // revision and overwrite the room timeline.
     if (!current || current.source === 'restored' || !currentUserIdRef.current) return;
+    if (current.controllerId && current.controllerId !== currentUserIdRef.current) return;
     if (current.source === 'local' && !canControlMedia) return;
 
     sendEvent('force_sync', {
@@ -582,6 +591,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       castId: current.castId,
       mediaId: current.mediaId,
       muted: current.muted,
+      volume: current.volume,
       controllerId: current.controllerId,
     });
   }, [canControlMedia, sendEvent, syncRequestTrigger]);
@@ -694,6 +704,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
 
   return {
     currentUserId,
+    canControlMedia,
     connectionState,
     typingUsers,
     mediaState,
