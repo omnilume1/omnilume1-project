@@ -161,7 +161,7 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
           </div>
 
           <aside className="glass-card-ambient dashboard-profile-card">
-            <button onClick={() => setIsProfileOpen(true)} className="absolute top-4 right-4 icon-button" aria-label="Open profile menu"><OmniIcon name="more" size={17} /></button>
+            <button onClick={() => setIsProfileOpen(true)} className="dashboard-profile-menu-button icon-button" aria-label="Open profile menu"><OmniIcon name="more" size={17} /></button>
             <DashboardAvatar name={account.displayName} src={account.avatarUrl} />
             <h3>{account.displayName}</h3><p>{account.username ? `@${account.username}` : account.email}</p>
             <div className="mt-8 grid grid-cols-3 gap-2 border-y border-white/10 py-4 text-center"><div><strong className="block text-white">{dashboardLoading ? '—' : friends.length}</strong><span className="text-[10px] text-neutral-500">Friends</span></div><div><strong className="block text-white">{dashboardLoading ? '—' : publicRooms.length}</strong><span className="text-[10px] text-neutral-500">Public rooms</span></div><div><strong className="block text-white">{account.profileDetailsCompleted ? '✓' : '—'}</strong><span className="text-[10px] text-neutral-500">Profile</span></div></div>
