@@ -158,6 +158,7 @@ export default function RoomControlCenter({
   onStateChange: (state: {
     featureFlags: Partial<Record<Feature, boolean>>;
     canManageMembers: boolean;
+    canControlMedia: boolean;
   }) => void;
   requestedTab?: Tab | null;
   selectedMemberId?: string | null;
@@ -253,6 +254,14 @@ export default function RoomControlCenter({
               permission.capability === "manage_members" &&
               permission.allowed,
           ),
+        canControlMedia:
+          isOwner ||
+          nextPermissions.some(
+            (permission) =>
+              permission.role === currentUserRole &&
+              permission.capability === "watch_control" &&
+              permission.allowed,
+          ),
       });
       setError(null);
     } catch (loadError) {
@@ -304,7 +313,18 @@ export default function RoomControlCenter({
       ? permissions.map((permission) => permission.role === role && permission.capability === capability ? { ...permission, allowed } : permission)
       : [...permissions, { role, capability, allowed }];
 
+    const publishPermissionState = (nextPermissions: Permission[]) => {
+      onStateChange({
+        featureFlags: settings.feature_flags,
+        canManageMembers:
+          isOwner || nextPermissions.some((permission) => permission.role === currentUserRole && permission.capability === "manage_members" && permission.allowed),
+        canControlMedia:
+          isOwner || nextPermissions.some((permission) => permission.role === currentUserRole && permission.capability === "watch_control" && permission.allowed),
+      });
+    };
+
     setPermissions(next);
+    publishPermissionState(next);
     setWorking(key);
     setError(null);
     try {
@@ -312,6 +332,7 @@ export default function RoomControlCenter({
       setNotice(`${role} permission updated.`);
     } catch (actionError) {
       setPermissions(previous);
+      publishPermissionState(previous);
       setError(messageFrom(actionError, "This permission could not be updated."));
     } finally {
       setWorking(null);

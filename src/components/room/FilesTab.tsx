@@ -10,6 +10,7 @@ import OmniFileUpload from '@/components/ui/OmniFileUpload';
 interface FilesTabProps {
   roomId: string;
   currentUserRole: string | null;
+  canControlMedia?: boolean;
 }
 
 interface TemporaryMedia {
@@ -38,13 +39,13 @@ function hoursUntil(expiresAt: string) {
   return Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 3_600_000));
 }
 
-export default function FilesTab({ roomId, currentUserRole }: FilesTabProps) {
+export default function FilesTab({ roomId, currentUserRole, canControlMedia = false }: FilesTabProps) {
   const { broadcastEvent } = useRoomRealtime();
   const [mediaList, setMediaList] = useState<TemporaryMedia[]>([]);
   const [upload, setUpload] = useState<UploadState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const supabase = createClient();
-  const canCast = currentUserRole === 'owner' || currentUserRole === 'admin';
+  const canCast = canControlMedia || currentUserRole === 'owner';
 
   const loadMedia = useCallback(async () => {
     const result = await getActiveTemporaryMedia(roomId);
