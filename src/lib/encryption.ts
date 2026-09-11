@@ -1,3 +1,96 @@
+export interface DeviceIdentity {
+  privateKey: CryptoKey;
+  publicKeyBase64: string;
+}
+
+const deviceIdentityCache = new Map<string, Promise<DeviceIdentity>>();
+
+function privateKeyStorageKey(userId: string) {
+  return `privKey_${userId}`;
+}
+
+function isStoredPrivateKey(jwk: JsonWebKey): jwk is JsonWebKey & {
+  kty: 'EC';
+  crv: 'P-256';
+  x: string;
+  y: string;
+  d: string;
+} {
+  return jwk.kty === 'EC'
+    && jwk.crv === 'P-256'
+    && typeof jwk.x === 'string'
+    && typeof jwk.y === 'string'
+    && typeof jwk.d === 'string';
+}
+
+async function importPublicKeyFromPrivateJwk(jwk: JsonWebKey) {
+  if (!isStoredPrivateKey(jwk)) {
+    throw new Error('Stored secure messaging identity is invalid.');
+  }
+
+  return window.crypto.subtle.importKey(
+    'jwk',
+    {
+      kty: jwk.kty,
+      crv: jwk.crv,
+      x: jwk.x,
+      y: jwk.y,
+      ext: true,
+    },
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    [],
+  );
+}
+
+async function loadDeviceIdentity(userId: string): Promise<DeviceIdentity> {
+  if (typeof window === 'undefined') {
+    throw new Error('Secure messaging is only available in a browser.');
+  }
+
+  const storedJwk = window.localStorage.getItem(privateKeyStorageKey(userId));
+  if (storedJwk) {
+    let parsedJwk: JsonWebKey;
+    try {
+      parsedJwk = JSON.parse(storedJwk) as JsonWebKey;
+    } catch {
+      throw new Error('Stored secure messaging identity is invalid.');
+    }
+
+    if (!isStoredPrivateKey(parsedJwk)) {
+      throw new Error('Stored secure messaging identity is invalid.');
+    }
+
+    const privateKey = await importPrivateKey(parsedJwk);
+    const publicKey = await importPublicKeyFromPrivateJwk(parsedJwk);
+    return { privateKey, publicKeyBase64: await exportPublicKey(publicKey) };
+  }
+
+  const keyPair = await generateKeyPair();
+  const privateJwk = await exportPrivateKey(keyPair.privateKey);
+  // Persist only the private JWK. The public half is safe to sync separately,
+  // while the private key remains browser-local for the device lifetime.
+  window.localStorage.setItem(privateKeyStorageKey(userId), JSON.stringify(privateJwk));
+  return { privateKey: keyPair.privateKey, publicKeyBase64: await exportPublicKey(keyPair.publicKey) };
+}
+
+/**
+ * Load one stable device identity per signed-in user for this browser tab.
+ * A rejected promise is evicted so a transient storage failure can be retried;
+ * an invalid stored identity is never silently replaced with a new key.
+ */
+export function getDeviceIdentity(userId: string): Promise<DeviceIdentity> {
+  const cached = deviceIdentityCache.get(userId);
+  if (cached) return cached;
+
+  const identityPromise = loadDeviceIdentity(userId).catch((error: unknown) => {
+    deviceIdentityCache.delete(userId);
+    throw error;
+  });
+  deviceIdentityCache.set(userId, identityPromise);
+  return identityPromise;
+}
+
 // Generate an ECDH keypair for the user's session
 export async function generateKeyPair(): Promise<CryptoKeyPair> {
     return await window.crypto.subtle.generateKey(

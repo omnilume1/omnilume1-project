@@ -19,7 +19,14 @@ export default function PrivateChat({ chatId, currentUserId, receiverId, sharedK
   const [sendError, setSendError] = useState<string | null>(null);
   
   // This hook auto-fetches and decrypts messages in real-time
-  const { messages, status, error, retry } = usePrivateChat(chatId, sharedKey);
+  const {
+    messages,
+    status,
+    error,
+    retry,
+    addOptimisticMessage,
+    removeOptimisticMessage,
+  } = usePrivateChat(chatId, sharedKey);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,14 +40,20 @@ export default function PrivateChat({ chatId, currentUserId, receiverId, sharedK
     try {
       // 1. Encrypt in the browser FIRST
       const { ciphertext, iv } = await encryptMessage(textToSend, sharedKey);
+      const optimisticMessageId = addOptimisticMessage({
+        sender_id: currentUserId,
+        text: textToSend,
+        ciphertext,
+        iv,
+      });
 
       // 2. Send the scrambled ciphertext to the server
-      await sendEncryptedMessage({
-        chatId,
-        receiverId,
-        ciphertext,
-        iv
-      });
+      try {
+        await sendEncryptedMessage({ chatId, receiverId, ciphertext, iv });
+      } catch (error) {
+        removeOptimisticMessage(optimisticMessageId);
+        throw error;
+      }
     } catch {
       setSendError('Unable to send the encrypted message. Please try again.');
       // Restore text if it failed
@@ -99,7 +112,7 @@ export default function PrivateChat({ chatId, currentUserId, receiverId, sharedK
                 <span className="text-[10px] font-semibold text-neutral-500">
                   {isMe ? 'You' : (peerName || 'Friend')}
                 </span>
-                <div className={`message-bubble max-w-[80%] p-3 text-sm ${
+                <div className={`message-bubble max-w-[80%] p-3 text-sm ${msg.pending ? 'opacity-80' : ''} ${
                   msg.decryptionStatus === 'undecryptable'
                     ? 'border border-amber-500/40 bg-amber-500/10 text-amber-200'
                     : isMe
