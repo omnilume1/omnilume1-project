@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   getRoomMemberIdentities,
   getRoomMembersList,
@@ -57,6 +58,10 @@ function messageFrom(error: unknown, fallback: string) {
 
 function userLabel(userId: string) {
   return memberIdentityLabels.get(userId) || `User ${userId.slice(0, 8)}`;
+}
+
+function realMemberLabel(identity: MemberIdentity | undefined, userId: string) {
+  return identity?.username || identity?.account_display_name || `User ${userId.slice(0, 8)}`;
 }
 
 function formatExpiry(value: string | null) {
@@ -278,7 +283,7 @@ export default function MembersTab({
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="relative">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500/20 text-xs font-bold text-indigo-400">
-                        {(identity?.room_display_name || identity?.account_display_name || identity?.username || member.user_id).slice(0, 2).toUpperCase()}
+                        {(identity?.room_display_name || realMemberLabel(identity, member.user_id)).slice(0, 2).toUpperCase()}
                       </div>
                       <div
                         className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-[#050505] transition-all ${isOnline ? "scale-100 bg-emerald-500" : "scale-75 bg-neutral-600"}`}
@@ -287,11 +292,11 @@ export default function MembersTab({
                     <div className="min-w-0">
                       <span
                         className="block max-w-[120px] truncate text-sm font-medium text-white"
-                        title={member.user_id}
+                        title={realMemberLabel(identity, member.user_id)}
                       >
-                        {identity?.room_display_name || identity?.account_display_name || identity?.username || userLabel(member.user_id)}
+                        {realMemberLabel(identity, member.user_id)}
                       </span>
-                      {identity?.username && <span className="block max-w-[120px] truncate text-[10px] text-violet-200">@{identity.username}</span>}
+                      {identity?.room_display_name && identity.room_display_name !== realMemberLabel(identity, member.user_id) && <span className="block max-w-[180px] truncate text-[10px] text-violet-200">Room name: {identity.room_display_name}</span>}
                       <span
                         className={`text-[10px] font-bold uppercase tracking-wider ${member.role === "owner" ? "text-amber-500" : member.role === "admin" ? "text-indigo-400" : "text-neutral-500"}`}
                       >
@@ -311,8 +316,7 @@ export default function MembersTab({
                       )}
                     </div>
                   </div>
-                  {member.user_id !== currentUserId && (
-                    <div className="relative">
+                  <div className="relative">
                       <button
                         type="button"
                         onClick={() =>
@@ -322,43 +326,45 @@ export default function MembersTab({
                               : member.user_id,
                           )
                         }
-                        className="rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-white"
-                        aria-label={`Member actions for ${userLabel(member.user_id)}`}
+                        className="room-member-action rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-white"
+                        aria-label={`Profile and actions for ${realMemberLabel(identity, member.user_id)}`}
                       >
                         <OmniIcon name="more" size={17} />
                       </button>
-                      {activeMenuId === member.user_id && canModerateTarget && (
+                      {activeMenuId === member.user_id && (
                         <div className="absolute right-0 top-full z-30 mt-1 flex w-44 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#15161d] py-1 shadow-2xl">
-                          <MenuAction
-                            label="Kick user"
-                            onClick={() =>
-                              setConfirmAction({
-                                userId: member.user_id,
-                                action: "kick",
-                              })
-                            }
-                          />
-                          <MenuAction
-                            label="Ban user"
-                            tone="danger"
-                            onClick={() =>
-                              setConfirmAction({
-                                userId: member.user_id,
-                                action: "ban",
-                              })
-                            }
-                          />
-                          <MenuAction
-                            label="Change role"
-                            onClick={() => {
-                              onChangeRole?.(member.user_id);
-                              setActiveMenuId(null);
-                            }}
-                          />
+                          <Link href={`/profile/${member.user_id}`} className="px-3 py-2 text-left text-xs font-medium text-violet-200 hover:bg-violet-500/10" onClick={() => setActiveMenuId(null)}>View profile</Link>
+                          {canModerateTarget && <>
+                            <MenuAction
+                              label="Kick user"
+                              onClick={() =>
+                                setConfirmAction({
+                                  userId: member.user_id,
+                                  action: "kick",
+                                })
+                              }
+                            />
+                            <MenuAction
+                              label="Ban user"
+                              tone="danger"
+                              onClick={() =>
+                                setConfirmAction({
+                                  userId: member.user_id,
+                                  action: "ban",
+                                })
+                              }
+                            />
+                            <MenuAction
+                              label="Change role"
+                              onClick={() => {
+                                onChangeRole?.(member.user_id);
+                                setActiveMenuId(null);
+                              }}
+                            />
+                          </>}
                         </div>
                       )}
-                    </div>
-                  )}
+                  </div>
                 </article>
               );
             })}

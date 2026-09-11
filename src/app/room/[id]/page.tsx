@@ -27,6 +27,7 @@ import RoomNotifications from '@/components/room/RoomNotifications';
 import RoomControlCenter from '@/components/room/RoomControlCenter';
 import RoomEntryPrompts from '@/components/room/RoomEntryPrompts';
 import RoomAnnouncementBanner from '@/components/room/RoomAnnouncementBanner';
+import RoomRoleChangeNotification from '@/components/room/RoomRoleChangeNotification';
 import FloatingDock from '@/components/ui/FloatingDock';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import { leaveRoom, transferRoomOwnership } from '@/actions/room-controls';
@@ -103,6 +104,23 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   // ==========================================
   const [sidebarWidth, setSidebarWidth] = useState(320); // Default 320px
   const [isDragging, setIsDragging] = useState(false);
+  const [sidebarWidthLoaded, setSidebarWidthLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!roomData?.id) return;
+    const timer = window.setTimeout(() => {
+      const saved = window.localStorage.getItem(`omnilume:room:${roomData.id}:sidebar-width`);
+      const parsed = saved ? Number(saved) : NaN;
+      if (Number.isFinite(parsed)) setSidebarWidth(Math.min(600, Math.max(280, parsed)));
+      setSidebarWidthLoaded(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [roomData?.id]);
+
+  useEffect(() => {
+    if (!roomData?.id || !sidebarWidthLoaded) return;
+    window.localStorage.setItem(`omnilume:room:${roomData.id}:sidebar-width`, String(sidebarWidth));
+  }, [roomData?.id, sidebarWidth, sidebarWidthLoaded]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -472,6 +490,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
       </header>
 
       <RoomNotifications roomId={roomData.id} />
+      <RoomRoleChangeNotification events={roomSync.roomControlEvents} currentUserId={roomSync.currentUserId} />
       <RoomAnnouncementBanner roomId={roomData.id} />
       <RoomEntryPrompts roomId={roomData.id} onOpenRoomProfile={() => { setControlCenterTab('profile'); setShowControlCenter(true); }} />
 

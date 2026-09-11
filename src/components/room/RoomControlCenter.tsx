@@ -298,6 +298,26 @@ export default function RoomControlCenter({
     }
   };
 
+  const togglePermission = async (role: RoomRole, capability: Capability, allowed: boolean, key: string) => {
+    const previous = permissions;
+    const next = permissions.some((permission) => permission.role === role && permission.capability === capability)
+      ? permissions.map((permission) => permission.role === role && permission.capability === capability ? { ...permission, allowed } : permission)
+      : [...permissions, { role, capability, allowed }];
+
+    setPermissions(next);
+    setWorking(key);
+    setError(null);
+    try {
+      await setRoomRolePermission(roomId, role, capability, allowed);
+      setNotice(`${role} permission updated.`);
+    } catch (actionError) {
+      setPermissions(previous);
+      setError(messageFrom(actionError, "This permission could not be updated."));
+    } finally {
+      setWorking(null);
+    }
+  };
+
   const canManageSettings = permissionFor("manage_settings");
   const canManageInvites = permissionFor("manage_invites");
   const canManageAnnouncements = permissionFor("manage_announcements");
@@ -864,19 +884,7 @@ export default function RoomControlCenter({
                                       <button
                                         type="button"
                                         disabled={working === key}
-                                        onClick={() =>
-                                          void run(
-                                            key,
-                                            () =>
-                                              setRoomRolePermission(
-                                                roomId,
-                                                role,
-                                                capability.key,
-                                                !allowed,
-                                              ),
-                                            `${role} permission updated.`,
-                                          )
-                                        }
+                                        onClick={() => void togglePermission(role, capability.key, !allowed, key)}
                                         className={`rounded-lg px-3 py-1.5 font-semibold ${allowed ? "bg-emerald-500/15 text-emerald-200" : "bg-white/5 text-neutral-500"}`}
                                       >
                                         {allowed ? "Allowed" : "Denied"}
