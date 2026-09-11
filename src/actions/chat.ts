@@ -153,27 +153,9 @@ export async function sendEncryptedMessage({
   const expectedReceiver = chat.user_one === user.id ? chat.user_two : chat.user_one;
   if (expectedReceiver !== receiverId) throw new Error('Invalid chat recipient.');
 
-  // Existing chat containers may predate the request gate. Keep their history
-  // readable, but require the same accepted relationship before sending new
-  // private messages through this action.
-  const { data: isFriend, error: friendError } = await supabase.rpc('is_current_friend', {
-    p_user_one: user.id,
-    p_user_two: receiverId,
-  });
-  if (friendError) throw new Error(friendError.message);
-  if (!isFriend) {
-    const { data: acceptedRequest, error: requestError } = await supabase
-      .from('message_requests')
-      .select('id')
-      .or(
-        `and(requester_id.eq.${user.id},recipient_id.eq.${receiverId}),and(requester_id.eq.${receiverId},recipient_id.eq.${user.id})`,
-      )
-      .eq('status', 'accepted')
-      .maybeSingle();
-    if (requestError) throw new Error(requestError.message);
-    if (!acceptedRequest) throw new Error('This secure chat is not authorized for new messages.');
-  }
-
+  // The messages INSERT policy is the authorization source of truth for the
+  // friendship/request relationship. Keeping that check in the same database
+  // operation removes two round trips without creating a client-side bypass.
   const { error } = await supabase.from('messages').insert({
     chat_id: chatId,
     sender_id: user.id,
@@ -181,7 +163,12 @@ export async function sendEncryptedMessage({
     ciphertext,
     iv,
   });
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (error.code === '42501' || error.message.toLowerCase().includes('row-level security')) {
+      throw new Error('This secure chat is not authorized for new messages.');
+    }
+    throw new Error(error.message);
+  }
 
   return true;
 }

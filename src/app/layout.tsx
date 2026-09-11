@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import GlobalFocusTrap from "@/components/GlobalFocusTrap";
+import { Agentation } from "agentation";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,19 +17,28 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Omnilume",
-  description: "Shared digital spaces for watching, studying, and talking together.",
+  description:
+    "Shared digital spaces for watching, studying, and talking together.",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: ReactNode }>) {
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
     >
       <body className="min-h-full bg-background font-sans text-foreground">
-        {/* INJECTED: The Global Trap that enforces the URL redirect */}
+        {/* Global Trap that enforces the URL redirect */}
         <GlobalFocusTrap />
+
         {children}
+
+        {/* Agentation - development only */}
+        {process.env.NODE_ENV === "development" && (
+          <Agentation endpoint="http://localhost:4747" />
+        )}
       </body>
     </html>
   );

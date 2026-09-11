@@ -6,10 +6,7 @@ import { createClient } from '@/utils/supabase/client';
 import PrivateChat from '@/components/chat/PrivateChat';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import {
-  generateKeyPair,
-  exportPublicKey,
-  exportPrivateKey,
-  importPrivateKey,
+  getDeviceIdentity,
   deriveSharedKey,
 } from '@/lib/encryption';
 import { saveUserPublicKey, getUserPublicKey, getOrCreatePrivateChat } from '@/actions/chat';
@@ -39,6 +36,43 @@ interface ActiveConversation {
 interface Notice {
   kind: 'info' | 'error';
   text: string;
+}
+
+// These caches are intentionally memory-only. Public keys and derived session
+// keys are safe to reuse for the life of this browser tab; private keys and
+// plaintext are never placed in them or sent to the server.
+const peerPublicKeyPromises = new Map<string, Promise<string | null>>();
+const sharedKeyPromises = new Map<string, Promise<CryptoKey>>();
+
+function getCachedPeerPublicKey(userId: string, peerId: string) {
+  const cacheKey = `${userId}:${peerId}`;
+  const cached = peerPublicKeyPromises.get(cacheKey);
+  if (cached) return cached;
+
+  const promise = getUserPublicKey(peerId).catch((error: unknown) => {
+    peerPublicKeyPromises.delete(cacheKey);
+    throw error;
+  });
+  peerPublicKeyPromises.set(cacheKey, promise);
+  return promise;
+}
+
+function getCachedSharedKey(
+  userId: string,
+  peerId: string,
+  privateKey: CryptoKey,
+  publicKeyBase64: string,
+) {
+  const cacheKey = `${userId}:${peerId}:${publicKeyBase64}`;
+  const cached = sharedKeyPromises.get(cacheKey);
+  if (cached) return cached;
+
+  const promise = deriveSharedKey(privateKey, publicKeyBase64).catch((error: unknown) => {
+    sharedKeyPromises.delete(cacheKey);
+    throw error;
+  });
+  sharedKeyPromises.set(cacheKey, promise);
+  return promise;
 }
 
 function personName(person: InboxPerson) {
@@ -73,6 +107,7 @@ export default function MessagesWorkspace() {
   const [inboxReloadToken, setInboxReloadToken] = useState(0);
 
   const inboxRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const beginChatRequestRef = useRef(0);
 
   useEffect(() => {
     const supabase = createClient();
@@ -84,20 +119,24 @@ export default function MessagesWorkspace() {
       }
       setCurrentUserId(user.id);
       try {
-        const storedJwk = localStorage.getItem(`privKey_${user.id}`);
-        if (storedJwk) {
-          const privateKey = await importPrivateKey(JSON.parse(storedJwk));
-          setMyPrivateKey(privateKey);
-        } else {
-          const keyPair = await generateKeyPair();
-          setMyPrivateKey(keyPair.privateKey);
-          const jwk = await exportPrivateKey(keyPair.privateKey);
-          localStorage.setItem(`privKey_${user.id}`, JSON.stringify(jwk));
-          const pubKeyBase64 = await exportPublicKey(keyPair.publicKey);
-          await saveUserPublicKey(pubKeyBase64);
+        const identity = await getDeviceIdentity(user.id);
+        // Retry a failed first sync after refresh without generating a new
+        // identity. The marker contains only the public key and is never used
+        // as a substitute for the private key.
+        const publicKeyMarker = `publicKeySynced_${user.id}`;
+        if (localStorage.getItem(publicKeyMarker) !== identity.publicKeyBase64) {
+          await saveUserPublicKey(identity.publicKeyBase64);
+          localStorage.setItem(publicKeyMarker, identity.publicKeyBase64);
         }
-      } catch {
-        setNotice({ kind: 'error', text: 'Unable to initialize end-to-end encryption in this browser.' });
+        setMyPrivateKey(identity.privateKey);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : '';
+        setNotice({
+          kind: 'error',
+          text: message === 'Stored secure messaging identity is invalid.'
+            ? 'This browser has an invalid secure messaging identity. Your existing encrypted history was not replaced; clear site storage only if you intentionally want to re-key this device.'
+            : 'Unable to initialize end-to-end encryption in this browser.',
+        });
       }
     }
     void initializeCrypto();
@@ -211,21 +250,26 @@ export default function MessagesWorkspace() {
 
   const beginChat = useCallback(async (contact: InboxPerson) => {
     const peerName = personName(contact);
-    if (!myPrivateKey) {
+    if (!myPrivateKey || !currentUserId) {
       setNotice({ kind: 'info', text: 'Secure messaging is still being set up in this browser.' });
       return;
     }
+    const requestId = beginChatRequestRef.current + 1;
+    beginChatRequestRef.current = requestId;
     setActive({ contactId: contact.user_id, peerName, chatId: contact.chat_id ?? null, sharedKey: null, phase: 'key' });
     setNotice(null);
     try {
-      const publicKeyBase64 = await getUserPublicKey(contact.user_id);
+      const publicKeyBase64 = await getCachedPeerPublicKey(currentUserId, contact.user_id);
+      if (beginChatRequestRef.current !== requestId) return;
       if (!publicKeyBase64) {
         setActive({ contactId: contact.user_id, peerName, chatId: contact.chat_id ?? null, sharedKey: null, phase: 'no-key' });
         return;
       }
-      const sharedKey = await deriveSharedKey(myPrivateKey, publicKeyBase64);
+      const sharedKey = await getCachedSharedKey(currentUserId, contact.user_id, myPrivateKey, publicKeyBase64);
+      if (beginChatRequestRef.current !== requestId) return;
       const knownChatId = chatIdOverrides[contact.user_id] ?? contact.chat_id;
       const chatId = knownChatId ?? await getOrCreatePrivateChat(contact.user_id);
+      if (beginChatRequestRef.current !== requestId) return;
       if (!knownChatId) {
         setChatIdOverrides((current) => ({ ...current, [contact.user_id]: chatId }));
       }
@@ -234,7 +278,7 @@ export default function MessagesWorkspace() {
       setNotice({ kind: 'error', text: error instanceof Error ? error.message : 'Unable to open the secure chat.' });
       setActive(null);
     }
-  }, [myPrivateKey, chatIdOverrides]);
+  }, [currentUserId, myPrivateKey, chatIdOverrides]);
 
   const handleAccept = async (contact: InboxGeneralContact) => {
     const request = contact.request;
@@ -636,7 +680,10 @@ export default function MessagesWorkspace() {
                 type="button"
                 className="icon-button lg:hidden"
                 aria-label="Back to conversation list"
-                onClick={() => setActive(null)}
+                onClick={() => {
+                  beginChatRequestRef.current += 1;
+                  setActive(null);
+                }}
               >
                 <OmniIcon name="arrow" size={16} className="rotate-180" />
               </button>

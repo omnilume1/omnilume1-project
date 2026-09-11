@@ -40,7 +40,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .omni-logo-mark { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; border: 1px solid rgba(255,255,255,.24); border-radius: 50%; background: conic-gradient(from 150deg, #a78bfa, #8473ff 42%, #bd72d3 63%, #a78bfa); box-shadow: 0 0 22px rgba(141,123,255,.24); }
 .omni-logo-mark::before { width: 11px; height: 11px; border-radius: 50%; background: #08090b; content: ""; }
 .omni-logo-mark span { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: #d6ccff; box-shadow: 0 0 9px #b9a8ff; }
-.omni-logo-word { font-size: .98rem; font-weight: 650; letter-spacing: -.035em; }
+.omni-logo-word { font-size: 1.15rem; font-weight: 650; letter-spacing: -.035em; }
 
 .public-login, .omni-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 42px; border: 1px solid var(--omni-line); border-radius: 999px; padding: 0 18px; color: white; font-size: .82rem; font-weight: 600; text-decoration: none; cursor: pointer; transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease; }
 .public-login:hover, .omni-button:hover { border-color: rgba(255,255,255,.25); transform: translateY(-1px); }
