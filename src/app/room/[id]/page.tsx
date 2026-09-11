@@ -62,6 +62,13 @@ const DEFAULT_FEATURE_FLAGS: Record<RoomFeature, boolean> = {
   announcements: true,
 };
 
+const MIN_SIDEBAR_WIDTH = 280;
+const MAX_SIDEBAR_WIDTH = 600;
+
+function clampSidebarWidth(width: number) {
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
+}
+
 export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const identifier = resolvedParams.id;
@@ -112,7 +119,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     const timer = window.setTimeout(() => {
       const saved = window.localStorage.getItem(`omnilume:room:${roomData.id}:sidebar-width`);
       const parsed = saved ? Number(saved) : NaN;
-      if (Number.isFinite(parsed)) setSidebarWidth(Math.min(600, Math.max(280, parsed)));
+      if (Number.isFinite(parsed)) setSidebarWidth(clampSidebarWidth(parsed));
       setSidebarWidthLoaded(true);
     }, 0);
     return () => window.clearTimeout(timer);
@@ -127,9 +134,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging) return;
       const newWidth = document.body.clientWidth - e.clientX;
-      if (newWidth > 280 && newWidth < 600) {
-        setSidebarWidth(newWidth);
-      }
+      setSidebarWidth(clampSidebarWidth(newWidth));
     };
 
     const handleMouseUp = () => setIsDragging(false);
@@ -485,9 +490,9 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         <div className="room-actions flex items-center gap-4">
           {userRole === 'owner' && roomData?.expiration_type === 'recoverable' && !roomData.reopened_until && <button onClick={() => setShowConvertModal(true)} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition">Upgrade to Group</button>}
           {roomData.reopened_until && <button onClick={handlePermanentRequest} disabled={permanentSubmitting || permanentRequests.some((request) => request.status === 'pending')} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition disabled:cursor-wait disabled:opacity-50">{permanentSubmitting ? 'Requesting...' : 'Request Permanent Room'}</button>}
-          <button type="button" onClick={() => setShowControlCenter(true)} className="room-action"><OmniIcon name="settings" size={14} /><span>Controls</span></button>
+          <button type="button" onClick={() => setShowControlCenter(true)} className="room-action room-action-controls"><OmniIcon name="settings" size={14} /><span>Controls</span></button>
           <button type="button" onClick={minimizeActiveRoom} className="room-action" title="Return to Rooms without leaving"><span aria-hidden="true">—</span><span>Minimize room</span></button>
-          <button type="button" onClick={() => { setLeaveError(null); setShowLeaveConfirmation(true); }} data-room-leave className="px-4 py-1.5 bg-neutral-100 hover:bg-white text-black rounded text-xs font-semibold transition">Leave</button>
+          <button type="button" onClick={() => { setLeaveError(null); setShowLeaveConfirmation(true); }} data-room-leave className="room-action room-action-leave">Leave</button>
         </div>
       </header>
 
@@ -573,10 +578,33 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         </main>
 
         {/* DRAGGABLE RESIZER HANDLE */}
-        <div 
+        <div
+          role="separator"
+          tabIndex={0}
+          aria-label="Resize chat panel"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_SIDEBAR_WIDTH}
+          aria-valuemax={MAX_SIDEBAR_WIDTH}
+          aria-valuenow={sidebarWidth}
           onMouseDown={() => setIsDragging(true)}
-          className={`workspace-resizer z-20 ${isDragging ? 'bg-indigo-500' : 'bg-transparent'}`}
-          title="Drag to resize sidebar"
+          onDoubleClick={() => setSidebarWidth(320)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft') {
+              event.preventDefault();
+              setSidebarWidth((width) => clampSidebarWidth(width + 40));
+            } else if (event.key === 'ArrowRight') {
+              event.preventDefault();
+              setSidebarWidth((width) => clampSidebarWidth(width - 40));
+            } else if (event.key === 'Home') {
+              event.preventDefault();
+              setSidebarWidth(MIN_SIDEBAR_WIDTH);
+            } else if (event.key === 'End') {
+              event.preventDefault();
+              setSidebarWidth(MAX_SIDEBAR_WIDTH);
+            }
+          }}
+          className={`workspace-resizer z-20 ${isDragging ? 'is-resizing bg-indigo-500' : 'bg-transparent'}`}
+          title="Drag to resize chat panel"
         />
 
         {/* DYNAMIC WIDTH SIDEBAR */}

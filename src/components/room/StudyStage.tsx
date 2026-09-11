@@ -11,6 +11,7 @@ import {
 import { deleteStudySubject, getStudyHistory, logStudySession, type StudyHistoryEntry } from '@/actions/study';
 import StudySubTimer from '@/components/room/StudySubTimer';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
+import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import type { TimerState } from '@/hooks/useRoomSync';
 import {
   FOCUS_LOCK_EVENT,
@@ -169,6 +170,15 @@ export function StudyMiniTimer({ timerState, roomId, focusLockExpiresAt, onOpen 
 
 export default function StudyStage({ roomId, focusRoomPath, timerNavigationRequest = 0 }: StudyStageProps) {
   const { timerState, broadcastEvent, currentUserId } = useRoomRealtime();
+  const {
+    panelRef,
+    panelHeight,
+    isResizing,
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+    handleKeyDown,
+  } = useRoomPanelResize(roomId, 'study-height', { minHeight: 360, maxHeight: 760 });
   const [activeTab, setActiveTab] = useState<StudyTab>('TIMER');
   const [subject, setSubject] = useState('');
   const [inputHrs, setInputHrs] = useState(0);
@@ -519,7 +529,11 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
   );
 
   return (
-    <div className="glass-panel relative flex min-h-0 flex-1 flex-col p-4 transition-all duration-300 sm:p-6">
+    <div
+      ref={panelRef}
+      style={panelHeight === null ? undefined : { height: `${panelHeight}px`, flex: '0 1 auto' }}
+      className={`room-study-resizable glass-panel relative flex min-h-0 flex-1 flex-col p-4 transition-all duration-300 sm:p-6 ${isResizing ? 'is-resizing' : ''}`}
+    >
       {renderHistoryPanel}
       {focusWarning}
 
@@ -576,7 +590,7 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
               </div>
             )}
 
-            <div className={`mt-8 font-mono text-6xl font-black tabular-nums tracking-tighter transition-colors sm:text-8xl ${focusLockActive ? 'text-red-400' : 'text-white'}`}>
+            <div className={`mt-6 font-mono text-5xl font-black tabular-nums tracking-tighter transition-colors sm:text-6xl ${focusLockActive ? 'text-red-400' : 'text-white'}`}>
               {formatCountdown(displayedRemaining)}
             </div>
             <p className="mt-3 text-xs text-neutral-500">
@@ -584,9 +598,9 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
             </p>
             {focusLockRemaining > 0 && <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-red-400">Focus lock · {formatCountdown(focusLockRemaining)} remaining</p>}
 
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               {!timerState.isRunning && (
-                <button type="button" onClick={startTimer} disabled={!canManageTimer || !currentUserId || isSavingSession} className="cursor-pointer rounded-xl bg-indigo-600 px-6 py-3 text-sm font-bold text-white shadow-[0_0_20px_rgba(79,70,229,0.25)] transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">
+                <button type="button" onClick={startTimer} disabled={!canManageTimer || !currentUserId || isSavingSession} className="cursor-pointer rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white shadow-[0_0_20px_rgba(79,70,229,0.25)] transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">
                   {hasSession && !timerState.completed ? 'Resume' : 'Start session'}
                 </button>
               )}
@@ -595,8 +609,8 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
                   {isSavingSession ? 'Saving…' : 'Pause'}
                 </button>
               )}
-              <button type="button" onClick={() => void resetTimer()} disabled={!canManageTimer || isSavingSession} className="cursor-pointer rounded-xl border border-neutral-700 bg-neutral-900 px-5 py-3 text-sm font-bold text-neutral-200 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50">Reset</button>
-              <button type="button" onClick={() => { if (!focusLockActive) setShowFocusWarning(true); }} disabled={focusLockActive} className={`cursor-pointer rounded-xl border px-5 py-3 text-sm font-bold transition disabled:cursor-not-allowed ${focusLockActive ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-neutral-700 bg-neutral-900 text-neutral-300 hover:border-red-500/50 hover:text-red-300'}`}>
+              <button type="button" onClick={() => void resetTimer()} disabled={!canManageTimer || isSavingSession} className="cursor-pointer rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2.5 text-sm font-bold text-neutral-200 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50">Reset</button>
+              <button type="button" onClick={() => { if (!focusLockActive) setShowFocusWarning(true); }} disabled={focusLockActive} className={`cursor-pointer rounded-xl border px-4 py-2.5 text-sm font-bold transition disabled:cursor-not-allowed ${focusLockActive ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-neutral-700 bg-neutral-900 text-neutral-300 hover:border-red-500/50 hover:text-red-300'}`}>
                 {focusLockActive ? `Locked · ${formatCountdown(focusLockRemaining)}` : 'Focus lock'}
               </button>
             </div>
@@ -619,6 +633,22 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
           </div>
         )}
       </div>
+
+      <div
+        role="separator"
+        tabIndex={0}
+        aria-label="Resize study workspace"
+        aria-orientation="horizontal"
+        aria-valuemin={360}
+        aria-valuemax={760}
+        aria-valuenow={panelHeight ?? undefined}
+        className="room-panel-resize-handle room-study-resize-handle"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onKeyDown={handleKeyDown}
+      />
 
       {activeTab !== 'TIMER' && timerState.isRunning && <StudyMiniTimer timerState={timerState} focusLockExpiresAt={focusLockActive && focusLock ? focusLock.expiresAt : null} onOpen={() => setActiveTab('TIMER')} />}
     </div>
