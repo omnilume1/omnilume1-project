@@ -13,6 +13,7 @@ export type SyncEventType =
   | 'play'
   | 'pause'
   | 'seek'
+  | 'mute'
   | 'cast'
   | 'stop_cast'
   | 'force_sync'
@@ -42,6 +43,11 @@ export type RoomMediaState = {
   sourceType: 'url' | 'upload';
   castId: string;
   mediaId?: string;
+  muted: boolean;
+  controllerId: string | null;
+  eventId: string;
+  eventTimestamp: number;
+  source: 'local' | 'remote' | 'restored';
   updatedAt: number;
 };
 
@@ -170,11 +176,61 @@ function asString(value: unknown, fallback: string) {
   return typeof value === 'string' && value.trim() ? value : fallback;
 }
 
+type MediaEventMeta = {
+  eventId: string;
+  timestamp: number;
+  senderId?: string;
+  source: 'local' | 'remote' | 'restored';
+};
+
+type MediaRevision = Pick<MediaEventMeta, 'eventId' | 'timestamp'>;
+
+function isMediaEvent(eventType: SyncEventType) {
+  return eventType === 'cast'
+    || eventType === 'stop_cast'
+    || eventType === 'subtitle_upload'
+    || eventType === 'force_sync'
+    || eventType === 'play'
+    || eventType === 'pause'
+    || eventType === 'seek'
+    || eventType === 'mute';
+}
+
+function isNewerMediaRevision(next: MediaRevision, current: MediaRevision | null) {
+  if (!current) return true;
+  if (next.timestamp !== current.timestamp) return next.timestamp > current.timestamp;
+  return next.eventId > current.eventId;
+}
+
+function normalizeMediaState(value: Partial<RoomMediaState> | null | undefined): RoomMediaState | null {
+  if (!value || typeof value.url !== 'string' || !value.url) return null;
+  return {
+    url: value.url,
+    title: typeof value.title === 'string' && value.title ? value.title : 'External Stream',
+    subtitleUrl: typeof value.subtitleUrl === 'string' ? value.subtitleUrl : null,
+    time: Math.max(0, typeof value.time === 'number' && Number.isFinite(value.time) ? value.time : 0),
+    speed: Math.min(4, Math.max(0.25, typeof value.speed === 'number' && Number.isFinite(value.speed) ? value.speed : 1)),
+    playing: Boolean(value.playing),
+    sourceType: value.sourceType === 'upload' ? 'upload' : 'url',
+    castId: typeof value.castId === 'string' && value.castId ? value.castId : createEventId(),
+    mediaId: typeof value.mediaId === 'string' && value.mediaId ? value.mediaId : undefined,
+    muted: Boolean(value.muted),
+    controllerId: typeof value.controllerId === 'string' && value.controllerId ? value.controllerId : null,
+    eventId: typeof value.eventId === 'string' && value.eventId ? value.eventId : createEventId(),
+    eventTimestamp: typeof value.eventTimestamp === 'number' && Number.isFinite(value.eventTimestamp)
+      ? value.eventTimestamp
+      : (typeof value.updatedAt === 'number' && Number.isFinite(value.updatedAt) ? value.updatedAt : 0),
+    source: value.source === 'local' || value.source === 'remote' ? value.source : 'restored',
+    updatedAt: typeof value.updatedAt === 'number' && Number.isFinite(value.updatedAt) ? value.updatedAt : Date.now(),
+  };
+}
+
 function createMediaState(
   payload: Record<string, unknown>,
   previous: RoomMediaState | null,
   playing: boolean,
   resetSubtitle = false,
+  meta?: MediaEventMeta,
 ): RoomMediaState | null {
   const url = asString(payload.url, previous?.url ?? '');
   if (!url) return null;
@@ -191,6 +247,7 @@ function createMediaState(
     : typeof payload.subtitleUrl === 'string'
       ? payload.subtitleUrl
       : (payload.subtitleUrl === null ? null : (previous?.subtitleUrl ?? null));
+  const eventTimestamp = meta?.timestamp ?? Date.now();
 
   return {
     url,
@@ -202,6 +259,11 @@ function createMediaState(
     sourceType,
     castId: asString(payload.castId, previous?.castId ?? createEventId()),
     mediaId: asString(payload.mediaId, previous?.mediaId ?? '') || undefined,
+    muted: typeof payload.muted === 'boolean' ? payload.muted : (previous?.muted ?? false),
+    controllerId: asString(payload.controllerId, meta?.senderId ?? previous?.controllerId ?? '') || null,
+    eventId: meta?.eventId ?? previous?.eventId ?? createEventId(),
+    eventTimestamp,
+    source: meta?.source ?? previous?.source ?? 'local',
     updatedAt: Date.now(),
   };
 }
@@ -217,18 +279,20 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   const supabase = createClient();
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
-  const canControlMediaRef = useRef(canControlMedia);
 
   const [connectionState, setConnectionState] = useState<RoomSyncValue['connectionState']>('idle');
   const connectionStateRef = useRef<RoomSyncValue['connectionState']>('idle');
   const channelRef = useRef<RoomChannel | null>(null);
-  const pendingEventsRef = useRef<Array<{ eventType: SyncEventType; payload: Record<string, unknown> }>>([]);
+  const pendingEventsRef = useRef<Array<{ eventType: SyncEventType; payload: Record<string, unknown>; meta: MediaEventMeta }>>([]);
 
   const [typingUsers, setTypingUsers] = useState<Map<string, number>>(new Map());
   const [mediaState, setMediaState] = useState<RoomMediaState | null>(() =>
-    readSessionValue(mediaStorageKey(roomId), null),
+    normalizeMediaState(readSessionValue<Partial<RoomMediaState> | null>(mediaStorageKey(roomId), null)),
   );
   const mediaStateRef = useRef<RoomMediaState | null>(mediaState);
+  // A restored browser snapshot is only a bootstrap value. It must not be
+  // allowed to reject the first authoritative event from the active room.
+  const lastMediaRevisionRef = useRef<MediaRevision | null>(null);
   const [timerState, setTimerState] = useState<TimerState>(() =>
     normalizeTimerState(readSessionValue<Partial<TimerState>>(timerStorageKey(roomId), DEFAULT_TIMER)),
   );
@@ -271,9 +335,15 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     writeSessionValue(mediaStorageKey(roomId), next);
   }, [roomId]);
 
-  const applyMediaEvent = useCallback((eventType: SyncEventType, payload: Record<string, unknown>) => {
+  const applyMediaEvent = useCallback((eventType: SyncEventType, payload: Record<string, unknown>, meta: MediaEventMeta) => {
+    if (isMediaEvent(eventType)) {
+      const revision = { eventId: meta.eventId, timestamp: meta.timestamp };
+      if (meta.source === 'remote' && !isNewerMediaRevision(revision, lastMediaRevisionRef.current)) return;
+      lastMediaRevisionRef.current = revision;
+    }
+
     if (eventType === 'cast') {
-      updateMediaState(() => createMediaState(payload, null, payload.playing !== false, true));
+      updateMediaState(() => createMediaState(payload, null, payload.playing !== false, true, meta));
       return;
     }
 
@@ -286,6 +356,10 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       updateMediaState((current) => current ? {
         ...current,
         subtitleUrl: asString(payload.subtitleUrl, current.subtitleUrl ?? '') || null,
+        controllerId: meta.senderId ?? current.controllerId,
+        eventId: meta.eventId,
+        eventTimestamp: meta.timestamp,
+        source: meta.source,
         updatedAt: Date.now(),
       } : current);
       return;
@@ -297,18 +371,19 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
         current,
         payload.playing === true,
         false,
+        meta,
       ));
       return;
     }
 
-    if (eventType === 'play' || eventType === 'pause' || eventType === 'seek') {
+    if (eventType === 'play' || eventType === 'pause' || eventType === 'seek' || eventType === 'mute') {
       updateMediaState((current) => {
         const nextPlaying = eventType === 'play'
           ? (typeof payload.playing === 'boolean' ? payload.playing : true)
           : eventType === 'pause'
             ? false
             : (current?.playing ?? false);
-        return createMediaState(payload, current, nextPlaying, false);
+        return createMediaState(payload, current, nextPlaying, false, meta);
       });
     }
   }, [updateMediaState]);
@@ -365,6 +440,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   const handleIncomingEvent = useCallback((incoming: { payload?: Partial<SyncEvent> }) => {
     const event = incoming.payload;
     if (!event || event.room_id !== roomId || !event.event_type) return;
+    if (event.sender_id && event.sender_id === currentUserIdRef.current) return;
 
     if (event.event_type === 'typing') {
       if (event.sender_id) {
@@ -406,7 +482,14 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       ? { ...payload, time: payload.time + Math.max(0, (Date.now() - event.timestamp) / 1_000) }
       : payload;
 
-    applyMediaEvent(event.event_type, adjustedPayload);
+    applyMediaEvent(event.event_type, adjustedPayload, {
+      eventId: typeof event.event_id === 'string' && event.event_id
+        ? event.event_id
+        : `${event.sender_id ?? 'unknown'}:${event.timestamp ?? 0}:${event.event_type}`,
+      timestamp: typeof event.timestamp === 'number' && Number.isFinite(event.timestamp) ? event.timestamp : 0,
+      senderId: event.sender_id,
+      source: 'remote',
+    });
     applyTimerEvent(event.event_type, adjustedPayload);
   }, [applyMediaEvent, applyTimerEvent, roomId]);
 
@@ -428,15 +511,15 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     setRoomControlVersion((current) => current + 1);
   }, [roomId]);
 
-  const sendEvent = useCallback((eventType: SyncEventType, payload: Record<string, unknown>) => {
+  const sendEvent = useCallback((eventType: SyncEventType, payload: Record<string, unknown>, meta?: Partial<MediaEventMeta>) => {
     const channel = channelRef.current;
     const senderId = currentUserIdRef.current;
     if (!channel || !senderId || connectionStateRef.current !== 'connected') return false;
 
     const event: SyncEvent = {
-      event_id: createEventId(),
+      event_id: meta?.eventId ?? createEventId(),
       sender_id: senderId,
-      timestamp: Date.now(),
+      timestamp: meta?.timestamp ?? Date.now(),
       room_id: roomId,
       event_type: eventType,
       payload,
@@ -452,35 +535,41 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   const flushPendingEvents = useCallback(() => {
     if (!channelRef.current || !currentUserIdRef.current || connectionStateRef.current !== 'connected') return;
     const queuedEvents = pendingEventsRef.current.splice(0);
-    queuedEvents.forEach(({ eventType, payload }) => sendEvent(eventType, payload));
+    queuedEvents.forEach(({ eventType, payload, meta }) => sendEvent(eventType, payload, meta));
   }, [sendEvent]);
 
   const broadcastEvent = useCallback((eventType: SyncEventType, payload: Record<string, unknown> = {}) => {
     const eventPayload = eventType === 'cast'
       ? { ...payload, castId: asString(payload.castId, createEventId()) }
       : payload;
+    const meta: MediaEventMeta = {
+      eventId: createEventId(),
+      timestamp: Date.now(),
+      senderId: currentUserIdRef.current ?? undefined,
+      source: 'local',
+    };
 
     // Update the local room state immediately. This keeps the cast responsive
     // even if the Realtime handshake is still finishing.
-    applyMediaEvent(eventType, eventPayload);
+    applyMediaEvent(eventType, eventPayload, meta);
     applyTimerEvent(eventType, eventPayload);
 
     if (!roomId) return;
-    if (!sendEvent(eventType, eventPayload)) {
-      pendingEventsRef.current.push({ eventType, payload: eventPayload });
+    if (!sendEvent(eventType, eventPayload, meta)) {
+      pendingEventsRef.current.push({ eventType, payload: eventPayload, meta });
     }
   }, [applyMediaEvent, applyTimerEvent, roomId, sendEvent]);
-
-  useEffect(() => {
-    canControlMediaRef.current = canControlMedia;
-  }, [canControlMedia]);
 
   // Keep late joiners in sync even while the host has temporarily switched to
   // Study or another room tool and the player component is unmounted.
   useEffect(() => {
-    if (!canControlMediaRef.current || syncRequestTrigger === 0) return;
+    if (syncRequestTrigger === 0) return;
     const current = mediaStateRef.current;
-    if (!current) return;
+    // A restored snapshot is not allowed to answer a join request. Any
+    // connected client with a live room snapshot may relay it, which lets an
+    // owner rejoin without having their stale browser state win the race.
+    if (!current || current.source === 'restored' || !currentUserIdRef.current) return;
+    if (current.source === 'local' && !canControlMedia) return;
 
     sendEvent('force_sync', {
       url: current.url,
@@ -492,13 +581,16 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       sourceType: current.sourceType,
       castId: current.castId,
       mediaId: current.mediaId,
+      muted: current.muted,
+      controllerId: current.controllerId,
     });
-  }, [sendEvent, syncRequestTrigger]);
+  }, [canControlMedia, sendEvent, syncRequestTrigger]);
 
   useEffect(() => {
     let isActive = true;
-    const restoredMedia = readSessionValue<RoomMediaState | null>(mediaStorageKey(roomId), null);
+    const restoredMedia = normalizeMediaState(readSessionValue<Partial<RoomMediaState> | null>(mediaStorageKey(roomId), null));
     mediaStateRef.current = restoredMedia;
+    lastMediaRevisionRef.current = null;
     pendingEventsRef.current = [];
 
     const restoreTimer = window.setTimeout(() => {

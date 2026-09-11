@@ -70,6 +70,13 @@ function normalizeCastUrl(value: string) {
   const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   const parsed = new URL(withProtocol);
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Please enter an HTTP or HTTPS media URL.');
+  const hostname = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+  if (hostname === 'kick.com' || hostname.endsWith('.kick.com')) {
+    if (!/\.m3u8(?:$|\?)/i.test(parsed.pathname + parsed.search)) {
+      throw new Error('Kick channel pages are not direct media streams. Paste the direct HTTPS HLS (.m3u8) stream URL provided by the source.');
+    }
+    return { url: parsed.toString(), title: 'Kick live stream' };
+  }
   return {
     url: parsed.toString(),
     title: parsed.hostname.replace(/^www\./i, '') || 'Web stream',
@@ -82,6 +89,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
     broadcastEvent,
     connectionState,
     recordMediaTime,
+    currentUserId,
   } = useRoomRealtime();
 
   const playerRef = useRef<HTMLVideoElementWithAudioTracks>(null);
@@ -123,6 +131,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
   const activeSourceType = mediaState?.sourceType;
   const activeCastId = mediaState?.castId ?? activeMediaUrl;
   const playing = mediaState?.playing ?? false;
+  const muted = mediaState?.muted ?? false;
   const playbackSpeed = mediaState?.speed ?? 1;
   const isReady = activeMediaUrl !== null && readyCastId === activeCastId;
   const playerKey = activeMediaUrl && activeCastId ? `${activeCastId}:${retryNonce}` : 'empty';
@@ -170,18 +179,35 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
     if (!mediaState || !isReady) return;
     isSyncing.current = true;
     const targetTime = mediaState.time || 0;
-    if (Math.abs(safeGetTime() - targetTime) > 2) safeSeekTo(targetTime);
+    if (Math.abs(safeGetTime() - targetTime) > 0.25) safeSeekTo(targetTime);
 
-    const timeout = window.setTimeout(() => { isSyncing.current = false; }, 1_000);
+    // Seeking a native media element can briefly pause it. Re-apply the
+    // authoritative room playback state after the seek without rebroadcasting
+    // the resulting native events.
+    if (playerRef.current) {
+      if (mediaState.playing && playerRef.current.paused) {
+        void playerRef.current.play().catch(() => undefined);
+      } else if (!mediaState.playing && !playerRef.current.paused) {
+        playerRef.current.pause();
+      }
+    }
+
+    const timeout = window.setTimeout(() => { isSyncing.current = false; }, 500);
     return () => window.clearTimeout(timeout);
   }, [isReady, mediaState]);
 
   useEffect(() => {
-    if (!canCast) broadcastEvent('request_sync');
-  }, [broadcastEvent, canCast]);
+    // Every client requests the current room snapshot. Controllers must not
+    // assume their restored browser state is authoritative when rejoining.
+    broadcastEvent('request_sync');
+  }, [broadcastEvent, roomId]);
 
   const forceSyncToRoom = useCallback(() => {
     if (!canCast || !activeMediaUrl) return;
+    if (mediaState?.source === 'restored' || (mediaState?.controllerId && mediaState.controllerId !== currentUserId)) {
+      broadcastEvent('request_sync');
+      return;
+    }
     broadcastEvent('force_sync', {
       url: activeMediaUrl,
       subtitleUrl: activeSubtitleUrl,
@@ -192,11 +218,12 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
       sourceType: activeSourceType,
       castId: activeCastId,
       mediaId: activeMediaId,
+      muted,
     });
-  }, [activeCastId, activeMediaId, activeMediaUrl, activeSourceType, activeSubtitleUrl, broadcastEvent, canCast, mediaTitle, playbackSpeed, playing]);
+  }, [activeCastId, activeMediaId, activeMediaUrl, activeSourceType, activeSubtitleUrl, broadcastEvent, canCast, currentUserId, mediaState?.controllerId, mediaState?.source, mediaTitle, muted, playbackSpeed, playing]);
 
-  const broadcastPlayback = (eventType: 'play' | 'pause' | 'seek', time = safeGetTime(), nextPlaying = playing, nextSpeed = playbackSpeed) => {
-    if (!canCast) return;
+  const broadcastPlayback = (eventType: 'play' | 'pause' | 'seek' | 'mute', time = safeGetTime(), nextPlaying = playing, nextSpeed = playbackSpeed, nextMuted = muted) => {
+    if (!canCast || mediaState?.source === 'restored') return;
     broadcastEvent(eventType, {
       url: activeMediaUrl,
       title: mediaTitle,
@@ -206,6 +233,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
       sourceType: activeSourceType,
       castId: activeCastId,
       mediaId: activeMediaId,
+      muted: nextMuted,
     });
   };
 
@@ -221,11 +249,17 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
     if (!isSyncing.current) broadcastPlayback('seek', safeGetTime(), playing);
   };
 
+  const handleVolumeChange = () => {
+    if (!isSyncing.current) broadcastPlayback('mute', safeGetTime(), playing, playbackSpeed, Boolean(playerRef.current?.muted));
+  };
+
   const handleReady = () => {
     if (!activeCastId || readyCastIdRef.current === activeCastId) return;
     readyCastIdRef.current = activeCastId;
     setReadyCastId(activeCastId);
+    isSyncing.current = true;
     if (mediaState?.time !== undefined) safeSeekTo(mediaState.time);
+    window.setTimeout(() => { isSyncing.current = false; }, 500);
 
     const tracks = playerRef.current?.audioTracks;
     if (!tracks) return;
@@ -419,7 +453,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
         }
       ` }} />
 
-      <div data-stage-card className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b] shadow-2xl">
+      <div data-stage-card className="room-cast-resizable relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b] shadow-2xl">
         <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/90 to-transparent p-4 pointer-events-auto">
           <div className="flex min-w-0 flex-col">
             <span className="truncate text-sm font-bold text-white drop-shadow-md">{activeMediaUrl ? mediaTitle : 'Watch Party Stage'}</span>
@@ -497,6 +531,7 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
                 ref={playerRef}
                 src={activeMediaUrl}
                 playing={playing}
+                muted={muted}
                 playbackRate={playbackSpeed}
                 controls
                 width="100%"
@@ -507,11 +542,12 @@ export default function MediaStage({ roomId, currentUserRole }: MediaStageProps)
                 onPlay={handlePlay}
                 onPause={handlePause}
                 onSeeked={handleSeeked}
+                onVolumeChange={handleVolumeChange}
                 onError={() => {
                   setErrorUrl(activeMediaUrl);
                   setPlayerError('This stream could not be loaded. Try again or choose another history item.');
                 }}
-                config={{ youtube: { rel: 0, iv_load_policy: 3 } }}
+                config={{ youtube: { rel: 0, iv_load_policy: 3 }, hls: { capLevelToPlayerSize: false, maxBufferLength: 30, backBufferLength: 60 } }}
               >
                 {activeSubtitleUrl && showSubtitles && <track kind="subtitles" src={activeSubtitleUrl} srcLang="en" default label="English" />}
               </Player>
