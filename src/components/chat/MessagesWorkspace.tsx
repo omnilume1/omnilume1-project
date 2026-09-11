@@ -6,6 +6,10 @@ import { createClient } from '@/utils/supabase/client';
 import PrivateChat from '@/components/chat/PrivateChat';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import {
+  usePersonalMessageNotifications,
+  type PersonalMessageToast,
+} from '@/hooks/usePersonalMessageNotifications';
+import {
   getDeviceIdentity,
   deriveSharedKey,
 } from '@/lib/encryption';
@@ -79,8 +83,8 @@ function personName(person: InboxPerson) {
   return person.display_name || person.username || 'OmniLume member';
 }
 
-function PersonAvatar({ person, size = 'md' }: { person: InboxPerson; size?: 'md' | 'sm' }) {
-  const cls = size === 'sm' ? 'person-avatar !h-9 !w-9' : 'person-avatar';
+function PersonAvatar({ person, size = 'md', className = '' }: { person: InboxPerson; size?: 'md' | 'sm'; className?: string }) {
+  const cls = `${size === 'sm' ? 'person-avatar !h-9 !w-9' : 'person-avatar'} ${className}`.trim();
   return (
     <span className={cls}>
       {person.avatar_url ? <img src={person.avatar_url} alt="" /> : personName(person).charAt(0).toUpperCase()}
@@ -105,6 +109,12 @@ export default function MessagesWorkspace() {
   const [composerText, setComposerText] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [inboxReloadToken, setInboxReloadToken] = useState(0);
+  const {
+    toasts,
+    registerContacts,
+    setActiveChat,
+    dismissToast,
+  } = usePersonalMessageNotifications();
 
   const inboxRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const beginChatRequestRef = useRef(0);
@@ -268,6 +278,15 @@ export default function MessagesWorkspace() {
     return () => clearTimeout(timer);
   }, [notice]);
 
+  useEffect(() => {
+    registerContacts(inbox?.friends ?? []);
+  }, [inbox, registerContacts]);
+
+  useEffect(() => {
+    setActiveChat(active?.chatId ?? null);
+    return () => setActiveChat(null);
+  }, [active?.chatId, setActiveChat]);
+
   const setMemberBusy = (userId: string, action: MemberAction | undefined) => {
     setBusy((current) => ({ ...current, [userId]: action }));
   };
@@ -309,6 +328,18 @@ export default function MessagesWorkspace() {
       setActive(null);
     }
   }, [currentUserId, myPrivateKey, chatIdOverrides]);
+
+  const openPersonalToast = useCallback((notification: PersonalMessageToast) => {
+    dismissToast(notification.id);
+    setTab('personal');
+    setQuery('');
+    const contact = inbox?.friends.find((friend) => friend.user_id === notification.senderId);
+    if (!contact) {
+      setNotice({ kind: 'info', text: 'Refresh Personal to open this secure conversation.' });
+      return;
+    }
+    void beginChat({ ...contact, chat_id: notification.chatId });
+  }, [beginChat, dismissToast, inbox]);
 
   const handleAccept = async (contact: InboxGeneralContact) => {
     const request = contact.request;
@@ -755,6 +786,37 @@ export default function MessagesWorkspace() {
           </div>
         )}
       </section>
+      {toasts.length > 0 ? (
+        <div className="personal-message-toast-stack" aria-label="New personal messages" aria-live="polite">
+          {toasts.map((notification) => (
+            <button
+              type="button"
+              key={notification.id}
+              className="personal-message-toast"
+              aria-label={`Open encrypted message from ${notification.senderName}`}
+              onClick={() => openPersonalToast(notification)}
+            >
+              <PersonAvatar
+                size="sm"
+                className="personal-message-toast-avatar"
+                person={{
+                  user_id: notification.senderId,
+                  display_name: notification.senderName,
+                  username: notification.senderUsername,
+                  avatar_url: notification.senderAvatarUrl,
+                  chat_id: notification.chatId,
+                  has_public_key: true,
+                }}
+              />
+              <span className="personal-message-toast-copy">
+                <strong>{notification.senderName}</strong>
+                <span>{notification.preview}</span>
+              </span>
+              <OmniIcon name="chevron" size={15} className="personal-message-toast-arrow" />
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
