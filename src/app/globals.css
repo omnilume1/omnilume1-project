@@ -274,10 +274,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .workspace-tool:hover, .workspace-tool.is-active { border-color: rgba(168,85,247,.2); background: rgba(168,85,247,.085); color: var(--omni-accent); transform: translateY(-1px); }
 .workspace-main { position: relative; display: flex; min-width: 0; flex: 1; flex-direction: column; overflow: hidden; }
 .workspace-side { position: relative; display: flex; flex-direction: column; width: min(380px,32vw); min-width: 290px; border-left: 1px solid var(--omni-line-soft); background: rgba(10,11,14,.76); }
-.workspace-resizer { position: absolute; top: 0; bottom: 0; left: -5px; z-index: 5; width: 10px; cursor: col-resize; }
-.workspace-resizer:hover { background: rgba(168,85,247,.12); }
-.workspace-resizer::after { content: ''; position: absolute; top: 50%; left: 50%; width: 2px; height: 44px; transform: translate(-50%,-50%); border-radius: 999px; background: rgba(255,255,255,.18); }
+.workspace-resizer { position: absolute; top: 0; bottom: 0; left: -8px; z-index: 5; width: 16px; cursor: col-resize; border-right: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.025); }
+.workspace-resizer:hover,.workspace-resizer:focus-visible { background: rgba(168,85,247,.14); }
+.workspace-resizer::after { content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 58px; transform: translate(-50%,-50%); border-radius: 999px; background: rgba(255,255,255,.42); box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
 .workspace-resizer:hover::after,.workspace-resizer.is-resizing::after { background: rgba(129,140,248,.9); }
+.workspace-resizer:focus-visible { outline: 2px solid rgba(129,140,248,.95); outline-offset: -2px; }
 .room-panel-resize-handle { position: absolute; bottom: 0; left: 50%; z-index: 30; width: 64px; height: 28px; transform: translateX(-50%); cursor: row-resize; border-radius: 12px 12px 0 0; background: linear-gradient(to top,rgba(15,15,20,.9),transparent); }
 .room-panel-resize-handle::after { content: ''; position: absolute; top: 12px; left: 50%; width: 34px; height: 4px; transform: translateX(-50%); border-radius: 999px; background: rgba(255,255,255,.24); }
 .room-panel-resize-handle:hover::after,.room-panel-resize-handle:focus-visible::after,.room-panel-resize-handle.is-resizing::after { background: rgba(129,140,248,.95); }
