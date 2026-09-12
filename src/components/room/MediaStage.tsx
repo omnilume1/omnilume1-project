@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEv
 import dynamic from 'next/dynamic';
 import { getActiveTemporaryMedia, logCastHistory, logTemporaryMedia, getSignedStorageUrl } from '@/actions/media';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
+import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import { uploadFileWithProgress } from '@/lib/storage';
 import { createClient } from '@/utils/supabase/client';
 
@@ -134,6 +135,15 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const supabase = createClient();
+  const {
+    panelRef,
+    panelHeight,
+    isResizing,
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+    handleKeyDown,
+  } = useRoomPanelResize(roomId, 'cast-height', { minHeight: 280, maxHeight: 760 });
   const canCast = canControlMedia;
   const activeMediaUrl = mediaState?.url ?? null;
   const activeSubtitleUrl = mediaState?.subtitleUrl ?? null;
@@ -487,8 +497,10 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
       ` }} />
 
       <div
+        ref={panelRef}
         data-stage-card
-        className="room-cast-resizable relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b] shadow-2xl"
+        style={panelHeight === null ? undefined : { height: `${panelHeight}px`, flex: '0 1 auto' }}
+        className={`room-cast-resizable relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b] shadow-2xl ${isResizing ? 'is-resizing' : ''}`}
       >
         <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/90 to-transparent p-4 pointer-events-auto">
           <div className="flex min-w-0 flex-col">
@@ -600,6 +612,21 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
             </div>
           )}
         </div>
+        <div
+          role="separator"
+          tabIndex={0}
+          aria-label="Resize casting stage height"
+          aria-orientation="horizontal"
+          aria-valuemin={280}
+          aria-valuemax={760}
+          aria-valuenow={panelHeight ?? undefined}
+          className="room-panel-resize-handle room-cast-resize-handle"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onKeyDown={handleKeyDown}
+        />
       </div>
     </section>
   );
