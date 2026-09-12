@@ -332,8 +332,9 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [activeTool, setActiveTool] = useState<'chat' | 'members' | 'files' | 'notes' | 'timer'>('chat');
   const [timerNavigationRequest, setTimerNavigationRequest] = useState(0);
   const roomIsExpired = accessStatus === 'expired' || isExpired;
-  const roomSync = useRoomSync(roomIsExpired ? '' : (roomData?.id ?? ''), userRole === 'owner' || canControlMedia);
-  const roomPresence = useRoomPresence(roomData?.id ?? '');
+  const realtimeRoomId = accessStatus === 'approved' && !roomIsExpired ? (roomData?.id ?? '') : '';
+  const roomSync = useRoomSync(realtimeRoomId, userRole === 'owner' || canControlMedia);
+  const roomPresence = useRoomPresence(realtimeRoomId);
   useEffect(() => {
     const currentUserId = roomSync.currentUserId;
     const removed = roomSync.roomControlEvents.find((event) => event.subjectUserId === currentUserId && ((event.eventType === 'membership_changed' && event.payload.action === 'kick') || (event.eventType === 'restriction_changed' && (event.payload.action === 'ban' || event.payload.action === 'block'))));

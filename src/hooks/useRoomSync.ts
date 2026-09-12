@@ -5,6 +5,8 @@ import { createClient } from '@/utils/supabase/client';
 
 type BrowserSupabaseClient = ReturnType<typeof createClient>;
 type RoomChannel = ReturnType<BrowserSupabaseClient['channel']>;
+type RoomChannelKind = 'general' | 'control';
+type RoomChannels = Record<RoomChannelKind, RoomChannel | null>;
 
 export type SyncEventType =
   | 'typing'
@@ -198,6 +200,10 @@ function isMediaEvent(eventType: SyncEventType) {
     || eventType === 'mute';
 }
 
+function channelKindForEvent(eventType: SyncEventType): RoomChannelKind {
+  return isMediaEvent(eventType) ? 'control' : 'general';
+}
+
 function isNewerMediaRevision(next: MediaRevision, current: MediaRevision | null) {
   if (!current) return true;
   if (next.timestamp !== current.timestamp) return next.timestamp > current.timestamp;
@@ -288,7 +294,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
 
   const [connectionState, setConnectionState] = useState<RoomSyncValue['connectionState']>('idle');
   const connectionStateRef = useRef<RoomSyncValue['connectionState']>('idle');
-  const channelRef = useRef<RoomChannel | null>(null);
+  const channelRefs = useRef<RoomChannels>({ general: null, control: null });
   const pendingEventsRef = useRef<Array<{ eventType: SyncEventType; payload: Record<string, unknown>; meta: MediaEventMeta }>>([]);
 
   const [typingUsers, setTypingUsers] = useState<Map<string, number>>(new Map());
@@ -518,7 +524,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   }, [roomId]);
 
   const sendEvent = useCallback((eventType: SyncEventType, payload: Record<string, unknown>, meta?: Partial<MediaEventMeta>) => {
-    const channel = channelRef.current;
+    const channel = channelRefs.current[channelKindForEvent(eventType)];
     const senderId = currentUserIdRef.current;
     if (!channel || !senderId || connectionStateRef.current !== 'connected') return false;
 
@@ -539,7 +545,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   }, [roomId]);
 
   const flushPendingEvents = useCallback(() => {
-    if (!channelRef.current || !currentUserIdRef.current || connectionStateRef.current !== 'connected') return;
+    if (!currentUserIdRef.current || connectionStateRef.current !== 'connected') return;
     const queuedEvents = pendingEventsRef.current.splice(0);
     queuedEvents.forEach(({ eventType, payload, meta }) => sendEvent(eventType, payload, meta));
   }, [sendEvent]);
@@ -623,12 +629,15 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
 
   useEffect(() => {
     let isMounted = true;
-    const previousChannel = channelRef.current;
-    if (previousChannel) {
-      void previousChannel.unsubscribe();
-      void supabase.removeChannel(previousChannel);
-      channelRef.current = null;
-    }
+    const readyChannels = new Set<RoomChannelKind>();
+    const previousChannels = Object.values(channelRefs.current);
+    previousChannels.forEach((channel) => {
+      if (channel) {
+        void channel.unsubscribe();
+        void supabase.removeChannel(channel);
+      }
+    });
+    channelRefs.current = { general: null, control: null };
 
     currentUserIdRef.current = null;
     pendingEventsRef.current = [];
@@ -648,23 +657,38 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     const connectingTimer = window.setTimeout(() => {
       if (isMounted) setConnectionState('connecting');
     }, 0);
-    const syncChannel = supabase.channel(`sync:${roomId}`);
-    channelRef.current = syncChannel;
+    const channels: Array<{ kind: RoomChannelKind; channel: RoomChannel }> = [
+      {
+        kind: 'general',
+        channel: supabase.channel(`sync:${roomId}`, { config: { private: true } }),
+      },
+      {
+        kind: 'control',
+        channel: supabase.channel(`sync-control:${roomId}`, { config: { private: true } }),
+      },
+    ];
 
-    syncChannel
-      .on('broadcast', { event: 'room_action' }, handleIncomingEvent)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_control_events', filter: `room_id=eq.${roomId}` }, handleRoomControlEvent)
-      .subscribe((status: string) => {
+    channels.forEach(({ kind, channel }) => {
+      channelRefs.current[kind] = channel;
+      channel.on('broadcast', { event: 'room_action' }, handleIncomingEvent);
+      if (kind === 'general') {
+        channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_control_events', filter: `room_id=eq.${roomId}` }, handleRoomControlEvent);
+      }
+      channel.subscribe((status: string) => {
         if (!isMounted) return;
         if (status === 'SUBSCRIBED') {
-          connectionStateRef.current = 'connected';
-          setConnectionState('connected');
-          flushPendingEvents();
+          readyChannels.add(kind);
+          if (readyChannels.size === channels.length) {
+            connectionStateRef.current = 'connected';
+            setConnectionState('connected');
+            flushPendingEvents();
+          }
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           connectionStateRef.current = 'error';
           setConnectionState('error');
         }
       });
+    });
 
     void (async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -677,10 +701,13 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     return () => {
       isMounted = false;
       window.clearTimeout(connectingTimer);
-      if (channelRef.current === syncChannel) channelRef.current = null;
+      readyChannels.clear();
+      channelRefs.current = { general: null, control: null };
       connectionStateRef.current = 'idle';
-      void syncChannel.unsubscribe();
-      void supabase.removeChannel(syncChannel);
+      channels.forEach(({ channel }) => {
+        void channel.unsubscribe();
+        void supabase.removeChannel(channel);
+      });
     };
   }, [flushPendingEvents, handleIncomingEvent, handleRoomControlEvent, roomId, supabase]);
 
