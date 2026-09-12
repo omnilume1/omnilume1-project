@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>lean-ctx graph export</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #0f172a;
+      --panel2: #111c33;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --danger: #fb7185;
+      --edge: rgba(148, 163, 184, 0.28);
+      --edge-hi: rgba(56, 189, 248, 0.65);
+    }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      height: 100vh;
+    }
+    .sidebar {
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      border-right: 1px solid rgba(148, 163, 184, 0.15);
+      padding: 16px;
+      overflow: auto;
+    }
+    .h1 { font-size: 14px; font-weight: 700; letter-spacing: 0.02em; margin: 0 0 10px 0; }
+    .meta { font-size: 12px; color: var(--muted); line-height: 1.35; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    input[type="text"] {
+      width: 100%;
+      padding: 10px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(2, 6, 23, 0.35);
+      color: var(--text);
+      outline: none;
+    }
+    input[type="text"]:focus {
+      border-color: rgba(56, 189, 248, 0.65);
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+    }
+    .btn {
+      padding: 10px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(2, 6, 23, 0.25);
+      color: var(--text);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn:hover { border-color: rgba(56, 189, 248, 0.35); }
+    .divider { height: 1px; background: rgba(148, 163, 184, 0.12); margin: 12px 0; }
+    .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; font-size: 12px; }
+    .k { color: var(--muted); }
+    .v { overflow-wrap: anywhere; }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.22);
+      color: var(--text);
+      margin-right: 6px;
+      margin-top: 6px;
+    }
+    .warn {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+      border: 1px solid rgba(251, 113, 133, 0.25);
+      background: rgba(251, 113, 133, 0.08);
+      border-radius: 12px;
+      padding: 10px;
+    }
+    .canvasWrap { position: relative; }
+    canvas { display: block; width: 100%; height: 100%; }
+    .hint {
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      font-size: 12px;
+      color: var(--muted);
+      background: rgba(2, 6, 23, 0.55);
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      border-radius: 999px;
+      padding: 6px 10px;
+      backdrop-filter: blur(6px);
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="h1">lean-ctx — graph export</div>
+      <div class="meta" id="meta"></div>
+      <div class="divider"></div>
+      <div class="row">
+        <input id="q" type="text" placeholder="Search by path (substring)..." />
+        <button class="btn" id="reset">Reset</button>
+      </div>
+      <div class="row" style="margin-top: 10px;">
+        <button class="btn" id="exportPng">Export PNG</button>
+        <button class="btn" id="clearHighlight">Clear highlight</button>
+      </div>
+      <div class="divider"></div>
+      <div class="h1">Selection</div>
+      <div class="kv">
+        <div class="k">Path</div><div class="v" id="selPath">—</div>
+        <div class="k">Language</div><div class="v" id="selLang">—</div>
+        <div class="k">Tokens</div><div class="v" id="selTokens">—</div>
+        <div class="k">Lines</div><div class="v" id="selLines">—</div>
+        <div class="k">Degree</div><div class="v" id="selDegree">—</div>
+      </div>
+      <div id="exports"></div>
+      <div class="divider"></div>
+      <div class="h1">Imports</div>
+      <div class="meta" id="selImports">—</div>
+      <div class="divider"></div>
+      <div class="h1">Dependents</div>
+      <div class="meta" id="selDependents">—</div>
+      <div class="divider"></div>
+      <div class="h1">Summary</div>
+      <div class="meta" id="selSummary">—</div>
+      <div id="warn" class="warn" style="display:none"></div>
+    </aside>
+    <main class="canvasWrap">
+      <canvas id="c"></canvas>
+      <div class="hint">Drag = pan · Wheel = zoom · Click = select</div>
+    </main>
+  </div>
+
+  <script id="graph-data" type="application/json">{"projectRoot":"C:\\Projects\\omnilume1-project","generatedAtUnixMs":1789117653449,"nodes":[{"id":0,"path":"next.config.ts","label":"next.config.ts","language":"ts","summary":"const nextConfig: NextConfig = {","exports":[],"tokenCount":30,"lineCount":7,"degree":2},{"id":1,"path":"src/actions/account.ts","label":"account.ts","language":"ts","summary":"'use server';","exports":["deleteMyAccount"],"tokenCount":636,"lineCount":66,"degree":1},{"id":2,"path":"src/actions/auth.ts","label":"auth.ts","language":"ts","summary":"'use server';","exports":["IdentitySetupResult","completeIdentitySetup"],"tokenCount":227,"lineCount":33,"degree":1},{"id":3,"path":"src/actions/chat.ts","label":"chat.ts","language":"ts","summary":"'use server';","exports":["saveUserPublicKey","getUserPublicKey","getOrCreatePrivateChat","sendEncryptedMessage","deleteMessageForEveryone"],"tokenCount":2369,"lineCount":263,"degree":1},{"id":4,"path":"src/actions/media.ts","label":"media.ts","language":"ts","summary":"'use server';","exports":["logTemporaryMedia","getActiveTemporaryMedia","logCastHistory","getSignedStorageUrl"],"tokenCount":1329,"lineCount":136,"degree":1},{"id":5,"path":"src/actions/members.ts","label":"members.ts","language":"ts","summary":"'use server';","exports":["getRoomAccess","getRoomMembersList","getRoomMemberIdentities","manageMemberRequest"],"tokenCount":874,"lineCount":91,"degree":1},{"id":6,"path":"src/actions/messages.ts","label":"messages.ts","language":"ts","summary":"'use server';","exports":["MessageRequestStatus","InboxRequestInfo","InboxPerson","InboxGeneralContact","InboxGroup","MessageInbox","getMyMessageInbox","sendMessageRequest","acceptMessageRequest","rejectMessageRequest","cancelMessageRequest"],"tokenCount":3047,"lineCount":336,"degree":1},{"id":7,"path":"src/actions/notifications.ts","label":"notifications.ts","language":"ts","summary":"'use server';","exports":["RoomNotification","getRoomNotifications","markRoomNotificationRead"],"tokenCount":411,"lineCount":45,"degree":1},{"id":8,"path":"src/actions/profiles.ts","label":"profiles.ts","language":"ts","summary":"'use server';","exports":["getMyProfile","getMyProfileBundle","getPublicProfileBundle","updateMyProfile","getPublicProfile","getPublicProfileByUsername","getProfileFollowers","getProfileFollowing","requestFollow","respondToFollowRequest","cancelFollowRequest","unfollowUser","removeFollower","requestFriend","respondToFriendRequest","cancelFriendRequest","removeFriend","getMyRelationshipState","getMyFriends","getMyFriendRequests","getPostsForProfile","createPost","updatePost","deletePost"],"tokenCount":5015,"lineCount":455,"degree":2},{"id":9,"path":"src/actions/recovery.ts","label":"recovery.ts","language":"ts","summary":"'use server';","exports":["RecoveryRequestStatus","RecoveryRequest","PermanentRoomRequest","getRecoveryRequestStatus","getRoomRecoveryRequests","requestRoomRecovery","reviewRoomRecovery","getPermanentRoomRequests","requestPermanentRoom","reviewPermanentRoomRequest"],"tokenCount":1650,"lineCount":180,"degree":1},{"id":10,"path":"src/actions/room-controls.ts","label":"room-controls.ts","language":"ts","summary":"'use server';","exports":["createRoomInvite","validateRoomInvite","joinRoomWithInvite","revokeRoomInvite","listRoomInviteHistory","getMyRoomJoinEligibility","getRoomMemberControlStates","leaveRoom","moderateRoomMember","transferRoomOwnership","setRoomMemberRole","updateRoomControls","setRoomRolePermission","updateRoomSpecificProfile","getRoomSpecificProfile","getMyRoomSpecificProfile","createRoomAnnouncement","updateRoomAnnouncement","getRoomControlState"],"tokenCount":3098,"lineCount":256,"degree":1},{"id":11,"path":"src/actions/rooms.ts","label":"rooms.ts","language":"ts","summary":"'use server';","exports":["createRoom","getPublicRooms","processRoomJoin","getMyJoinedRooms","convertRoomToGroup"],"tokenCount":1596,"lineCount":180,"degree":12},{"id":12,"path":"src/actions/study.ts","label":"study.ts","language":"ts","summary":"'use server';","exports":["StudyHistoryEntry","logStudySession","getStudyHistory","deleteStudySubject"],"tokenCount":1024,"lineCount":118,"degree":1},{"id":13,"path":"src/app/api/internal/cleanup-expired-rooms/route.ts","label":"route.ts","language":"ts","summary":"const STORAGE_BUCKET = 'room_attachments';","exports":[],"tokenCount":1802,"lineCount":310,"degree":0},{"id":14,"path":"src/app/auth/callback/route.ts","label":"route.ts","language":"ts","summary":"DEFAULT_AUTH_REDIRECT,","exports":["GET"],"tokenCount":371,"lineCount":46,"degree":0},{"id":15,"path":"src/app/auth/update-password/page.tsx","label":"page.tsx","language":"tsx","summary":"'use client';","exports":["UpdatePasswordPage"],"tokenCount":1157,"lineCount":116,"degree":0},{"id":16,"path":"src/app/create-room/page.tsx","label":"page.tsx","language":"tsx","summary":"'use client';","exports":["CreateRoomPage"],"tokenCount":1277,"lineCount":66,"degree":0},{"id":17,"path":"src/app/explore/page.tsx","label":"page.tsx","language":"tsx","summary":"'use client';","exports":["ExploreRoomsPage"],"tokenCount":2989,"lineCount":202,"degree":0},{"id":18,"path":"src/app/forgot-password/page.tsx","label":"page.tsx","language":"tsx","summary":"'use client';","exports":["ForgotPasswordPage"],"tokenCount":646,"lineCount":86,"degree":0},{"id":19,"path":"src/app/home/page.tsx","label":"page.tsx","language":"tsx","summary":"export default async function HomePage() {","exports":["HomePage"],"tokenCount":186,"lineCount":21,"degree":0},{"id":20,"path":"src/app/layout.tsx","label":"layout.tsx","language":"tsx","summary":"const geistSans = Geist({","exports":["RootLayout"],"tokenCount":286,"lineCount":45,"degree":2},{"id":21,"path":"src/app/login/page.tsx","label":"page.tsx","language":"tsx","summary":"'use client';","exports":["LoginPage"],"tokenCount":1923,"lineCount":239,"degree":0},{"id":22,"path":"src/app/messages/page.tsx","label":"page.tsx","language":"tsx","summary":"'use client';","exports":["MessagesPage"],"tokenCount":124,"lineCount":21,"degree":0},{"id":23,"path":"src/app/page.tsx","label":"page.tsx","language":"tsx","summary":"type MarketingFeature = 'study' | 'watch' | 'music' | 'files' | 'assistant';","exports":["Home"],"tokenCount":1461,"lineCount":97,"degree":2},{"id":24,"path":"src/app/profile/[id]/page.tsx","label":"page.tsx","language":"tsx","summary":"export default async function OtherProfilePage({ params }: { params: Promise<{ id: string }> }) {","exports":["OtherProfilePage"],"tokenCount":53,"lineCount":6,"degree":0},{"id":25,"path":"src/app/profile/page.tsx","label":"page.tsx","language":"tsx","summary":"export default function ProfilePage() {","exports":["ProfilePage"],"tokenCount":25,"lineCount":5,"degree":0},{"id":26,"path":"src/app/profile/setup/page.tsx","label":"page.tsx","language":"tsx","summary":"'use client';","exports":["ProfileSetupPage"],"tokenCount":1028,"lineCount":113,"degree":0},{"id":27,"path":"src/app/room-settings/page.tsx","label":"page.tsx","language":"tsx","summary":"export default function RoomSettingsPage() {","exports":["RoomSettingsPage"],"tokenCount":298,"lineCount":27,"degree":0},{"id":28,"path":"src/app/room/[id]/page.tsx","label":"page.tsx","language":"tsx","summary":"'use client';","exports":["RoomPage"],"tokenCount":9496,"lineCount":591,"degree":2},{"id":29,"path":"src/app/room/page.tsx","label":"page.tsx","language":"tsx","summary":"export default function RoomPage() {","exports":["RoomPage"],"tokenCount":23,"lineCount":5,"degree":0},{"id":30,"path":"src/app/search/page.tsx","label":"page.tsx","language":"tsx","summary":"'use client';","exports":["SearchPage"],"tokenCount":833,"lineCount":70,"degree":0},{"id":31,"path":"src/app/settings/page.tsx","label":"page.tsx","language":"tsx","summary":"export default function SettingsPage() {","exports":["SettingsPage"],"tokenCount":29,"lineCount":5,"degree":0},{"id":32,"path":"src/components/GlobalFocusTrap.tsx","label":"GlobalFocusTrap.tsx","language":"tsx","summary":"'use client';","exports":["GlobalFocusTrap"],"tokenCount":651,"lineCount":89,"degree":3},{"id":33,"path":"src/components/LandingActions.tsx","label":"LandingActions.tsx","language":"tsx","summary":"\"use client\";","exports":["LandingActions"],"tokenCount":1437,"lineCount":191,"degree":1},{"id":34,"path":"src/components/Navbar.tsx","label":"Navbar.tsx","language":"tsx","summary":"function initials(value: string) {","exports":["Navbar","NavLinks"],"tokenCount":516,"lineCount":48,"degree":2},{"id":35,"path":"src/components/chat/MessagesWorkspace.tsx","label":"MessagesWorkspace.tsx","language":"tsx","summary":"'use client';","exports":["MessagesWorkspace"],"tokenCount":7205,"lineCount":760,"degree":2},{"id":36,"path":"src/components/chat/PrivateChat.tsx","label":"PrivateChat.tsx","language":"tsx","summary":"'use client';","exports":["PrivateChat"],"tokenCount":1497,"lineCount":153,"degree":2},{"id":37,"path":"src/components/home/HomeDashboard.tsx","label":"HomeDashboard.tsx","language":"tsx","summary":"'use client';","exports":["HomeDashboard"],"tokenCount":2917,"lineCount":177,"degree":0},{"id":38,"path":"src/components/profile/AccountControlActions.tsx","label":"AccountControlActions.tsx","language":"tsx","summary":"'use client';","exports":["AccountControlActions"],"tokenCount":1584,"lineCount":120,"degree":1},{"id":39,"path":"src/components/profile/AccountSettingsSurface.tsx","label":"AccountSettingsSurface.tsx","language":"tsx","summary":"'use client';","exports":["AccountSettingsSurface"],"tokenCount":487,"lineCount":38,"degree":1},{"id":40,"path":"src/components/profile/ProfileForm.tsx","label":"ProfileForm.tsx","language":"tsx","summary":"'use client';","exports":["ProfileForm"],"tokenCount":2680,"lineCount":208,"degree":4},{"id":41,"path":"src/components/profile/ProfileSurface.tsx","label":"ProfileSurface.tsx","language":"tsx","summary":"'use client';","exports":["ProfileSurface"],"tokenCount":5005,"lineCount":264,"degree":2},{"id":42,"path":"src/components/room/FilesTab.tsx","label":"FilesTab.tsx","language":"tsx","summary":"'use client';","exports":["FilesTab"],"tokenCount":2133,"lineCount":154,"degree":1},{"id":43,"path":"src/components/room/MediaStage.tsx","label":"MediaStage.tsx","language":"tsx","summary":"'use client';","exports":["MediaStage"],"tokenCount":8408,"lineCount":542,"degree":1},{"id":44,"path":"src/components/room/MembersTab.tsx","label":"MembersTab.tsx","language":"tsx","summary":"\"use client\";","exports":["MembersTab"],"tokenCount":3787,"lineCount":486,"degree":1},{"id":45,"path":"src/components/room/RoomAnnouncementBanner.tsx","label":"RoomAnnouncementBanner.tsx","language":"tsx","summary":"'use client';","exports":["RoomAnnouncementBanner"],"tokenCount":563,"lineCount":38,"degree":1},{"id":46,"path":"src/components/room/RoomChat.tsx","label":"RoomChat.tsx","language":"tsx","summary":"'use client';","exports":["RoomChat"],"tokenCount":2711,"lineCount":222,"degree":1},{"id":47,"path":"src/components/room/RoomControlCenter.tsx","label":"RoomControlCenter.tsx","language":"tsx","summary":"\"use client\";","exports":["RoomControlCenter"],"tokenCount":9673,"lineCount":1331,"degree":1},{"id":48,"path":"src/components/room/RoomEntryPrompts.tsx","label":"RoomEntryPrompts.tsx","language":"tsx","summary":"'use client';","exports":["RoomEntryPrompts"],"tokenCount":777,"lineCount":51,"degree":9},{"id":49,"path":"src/components/room/RoomNotifications.tsx","label":"RoomNotifications.tsx","language":"tsx","summary":"'use client';","exports":["RoomNotifications"],"tokenCount":376,"lineCount":39,"degree":2},{"id":50,"path":"src/components/room/RoomRealtimeProvider.tsx","label":"RoomRealtimeProvider.tsx","language":"tsx","summary":"'use client';","exports":["RoomRealtimeValue","RoomRealtimeProvider","useRoomRealtime"],"tokenCount":236,"lineCount":33,"degree":1},{"id":51,"path":"src/components/room/StudyStage.tsx","label":"StudyStage.tsx","language":"tsx","summary":"'use client';","exports":["getTimerRemaining","StudyMiniTimer","StudyStage"],"tokenCount":7841,"lineCount":626,"degree":1},{"id":52,"path":"src/components/room/StudySubTimer.tsx","label":"StudySubTimer.tsx","language":"tsx","summary":"'use client';","exports":["StudySubTimer"],"tokenCount":2842,"lineCount":291,"degree":1},{"id":53,"path":"src/components/ui/CurrentAccountControls.tsx","label":"CurrentAccountControls.tsx","language":"tsx","summary":"'use client';","exports":["AccountView","CurrentAccountControls"],"tokenCount":949,"lineCount":114,"degree":1},{"id":54,"path":"src/components/ui/FlippingWords.tsx","label":"FlippingWords.tsx","language":"tsx","summary":"'use client';","exports":["FlippingWords"],"tokenCount":712,"lineCount":91,"degree":1},{"id":55,"path":"src/components/ui/FloatingDock.tsx","label":"FloatingDock.tsx","language":"tsx","summary":"'use client';","exports":["FloatingDockItem","FloatingDock"],"tokenCount":1215,"lineCount":123,"degree":2},{"id":56,"path":"src/components/ui/InternalTopbar.tsx","label":"InternalTopbar.tsx","language":"tsx","summary":"'use client';","exports":["InternalTopbar"],"tokenCount":236,"lineCount":37,"degree":8},{"id":57,"path":"src/components/ui/OmniFileUpload.tsx","label":"OmniFileUpload.tsx","language":"tsx","summary":"'use client';","exports":["OmniFileUpload"],"tokenCount":505,"lineCount":58,"degree":1},{"id":58,"path":"src/components/ui/OmniFooter.tsx","label":"OmniFooter.tsx","language":"tsx","summary":"interface FooterLink {","exports":["OmniFooter"],"tokenCount":559,"lineCount":66,"degree":1},{"id":59,"path":"src/components/ui/OmniIcon.tsx","label":"OmniIcon.tsx","language":"tsx","summary":"export type OmniIconName =","exports":["OmniIconName","OmniIcon"],"tokenCount":2215,"lineCount":75,"degree":1},{"id":60,"path":"src/components/ui/OmniLogo.tsx","label":"OmniLogo.tsx","language":"tsx","summary":"export default function OmniLogo({ href = '/', compact = false }: { href?: string; compact?: boolean }) {","exports":["OmniLogo"],"tokenCount":105,"lineCount":10,"degree":1},{"id":61,"path":"src/hooks/usePrivateChat.ts","label":"usePrivateChat.ts","language":"ts","summary":"export type ChatMessageDecryptionStatus = 'decrypted' | 'undecryptable';","exports":["ChatMessageDecryptionStatus","PrivateChatStatus","ChatMessage","usePrivateChat"],"tokenCount":1622,"lineCount":221,"degree":2},{"id":62,"path":"src/hooks/useRoomPresence.ts","label":"useRoomPresence.ts","language":"ts","summary":"'use client';","exports":["RoomPresenceUser","RoomPresenceValue","useRoomPresence"],"tokenCount":426,"lineCount":57,"degree":1},{"id":63,"path":"src/hooks/useRoomSync.ts","label":"useRoomSync.ts","language":"ts","summary":"'use client';","exports":["SyncEventType","SyncEvent","RoomMediaState","TimerState","RoomSyncValue","RoomMessageEvent","RoomControlEvent","useRoomSync"],"tokenCount":5208,"lineCount":618,"degree":3},{"id":64,"path":"src/lib/account-deletion.ts","label":"account-deletion.ts","language":"ts","summary":"export const ACCOUNT_DELETION_CONFIRMATION = 'DELETE MY ACCOUNT';","exports":["ACCOUNT_DELETION_CONFIRMATION"],"tokenCount":14,"lineCount":1,"degree":1},{"id":65,"path":"src/lib/auth.ts","label":"auth.ts","language":"ts","summary":"export const DEFAULT_AUTH_REDIRECT = '/home';","exports":["getSafeRedirectPath","getLoginPath","isAuthRequiredPath"],"tokenCount":332,"lineCount":52,"degree":1},{"id":66,"path":"src/lib/current-account.ts","label":"current-account.ts","language":"ts","summary":"export interface CurrentAccount {","exports":["CurrentAccount"],"tokenCount":409,"lineCount":52,"degree":1},{"id":67,"path":"src/lib/encryption.ts","label":"encryption.ts","language":"ts","summary":"export interface DeviceIdentity {","exports":["DeviceIdentity","getDeviceIdentity","generateKeyPair","exportPublicKey","deriveSharedKey","encryptMessage","decryptMessage","exportPrivateKey","importPrivateKey"],"tokenCount":1436,"lineCount":179,"degree":2},{"id":68,"path":"src/lib/focus-lock.ts","label":"focus-lock.ts","language":"ts","summary":"export const FOCUS_LOCK_STORAGE_KEY = 'omnilume_focus_lock';","exports":["FocusLockState","readFocusLock","activateFocusLock","clearFocusLock","formatCountdown","getRemainingSeconds"],"tokenCount":573,"lineCount":76,"degree":9},{"id":69,"path":"src/lib/minimized-rooms.ts","label":"minimized-rooms.ts","language":"ts","summary":"export type MinimizedRoom = {","exports":["MinimizedRoom","minimizeRoom","restoreMinimizedRoom","getMinimizedRoomIds"],"tokenCount":211,"lineCount":30,"degree":1},{"id":70,"path":"src/lib/profile-validation.ts","label":"profile-validation.ts","language":"ts","summary":"export const PROFILE_GENDERS = [","exports":["ProfileGender","PostVisibility","ProfileInput","NormalizedProfileInput","normalizeUsername","validateProfileInput","assertUuid","assertPostVisibility"],"tokenCount":857,"lineCount":98,"degree":1},{"id":71,"path":"src/lib/room-lifecycle.ts","label":"room-lifecycle.ts","language":"ts","summary":"export type RoomLifecycleRow = {","exports":["RoomLifecycleRow","isRoomExpired","roomExpirySeconds","getRoomLifecycle","assertActiveRoom"],"tokenCount":500,"lineCount":51,"degree":1},{"id":72,"path":"src/lib/storage.ts","label":"storage.ts","language":"ts","summary":"export interface StorageUploadProgress {","exports":["StorageUploadProgress","uploadFileWithProgress"],"tokenCount":753,"lineCount":87,"degree":1},{"id":73,"path":"src/proxy.ts","label":"proxy.ts","language":"ts","summary":"function redirectWithSessionCookies(url: URL, sessionResponse: NextResponse) {","exports":["proxy"],"tokenCount":669,"lineCount":88,"degree":0},{"id":74,"path":"src/utils/supabase/admin.ts","label":"admin.ts","language":"ts","summary":"createClient as createSupabaseClient,","exports":["createAdminClient"],"tokenCount":285,"lineCount":49,"degree":3},{"id":75,"path":"src/utils/supabase/client.ts","label":"client.ts","language":"ts","summary":"type BrowserClient = ReturnType<typeof createBrowserClient>;","exports":["createClient"],"tokenCount":92,"lineCount":16,"degree":2},{"id":76,"path":"src/utils/supabase/server.ts","label":"server.ts","language":"ts","summary":"export async function createClient() {","exports":["createClient"],"tokenCount":178,"lineCount":28,"degree":1},{"id":77,"path":"tailwind.config.ts","label":"tailwind.config.ts","language":"ts","summary":"const config: Config = {","exports":[],"tokenCount":98,"lineCount":14,"degree":2},{"id":78,"path":"tmp/pdfs/build_omnilume_docs.py","label":"build_omnilume_docs.py","language":"py","summary":"OUT = r'C:\\Projects\\omnilume1-project\\output\\pdf'","exports":["esc","P","bullets","fill_for","badge","on_page","make_doc","tbl","card","two","cover","canonical_owner","canonical_status","action_header","roadmap","guide"],"tokenCount":13685,"lineCount":219,"degree":3},{"id":79,"path":"tmp/pdfs/build_omnilume_master_v2.py","label":"build_omnilume_master_v2.py","language":"py","summary":"ROOT = Path(__file__).resolve().parents[2]","exports":["P","bullets","badge","callout","section","sub","data_table","Doc","page_decor","action"],"tokenCount":21107,"lineCount":551,"degree":1},{"id":80,"path":"tmp/pdfs/build_omnilume_roadmap.py","label":"build_omnilume_roadmap.py","language":"py","summary":"BaseDocTemplate, PageTemplate, Frame, Paragraph, Spacer, PageBreak,","exports":["P","rich","bullets","badge","callout","section","sub","table","RoadmapDocTemplate","draw_page","action"],"tokenCount":22049,"lineCount":693,"degree":2}],"edges":[{"source":35,"target":36,"kind":"sibling"},{"source":11,"target":8,"kind":"sibling"},{"source":68,"target":67,"kind":"sibling"},{"source":8,"target":11,"kind":"sibling"},{"source":67,"target":68,"kind":"sibling"},{"source":56,"target":55,"kind":"sibling"},{"source":32,"target":34,"kind":"sibling"},{"source":28,"target":46,"kind":"cochange"},{"source":28,"target":43,"kind":"cochange"},{"source":55,"target":56,"kind":"sibling"},{"source":59,"target":56,"kind":"sibling"},{"source":3,"target":11,"kind":"sibling"},{"source":66,"target":68,"kind":"sibling"},{"source":60,"target":56,"kind":"sibling"},{"source":58,"target":56,"kind":"sibling"},{"source":40,"target":41,"kind":"sibling"},{"source":7,"target":11,"kind":"sibling"},{"source":69,"target":68,"kind":"sibling"},{"source":0,"target":77,"kind":"sibling"},{"source":74,"target":75,"kind":"sibling"},{"source":10,"target":11,"kind":"sibling"},{"source":9,"target":11,"kind":"sibling"},{"source":53,"target":56,"kind":"sibling"},{"source":63,"target":61,"kind":"sibling"},{"source":61,"target":63,"kind":"sibling"},{"source":48,"target":49,"kind":"sibling"},{"source":49,"target":48,"kind":"sibling"},{"source":41,"target":40,"kind":"sibling"},{"source":42,"target":48,"kind":"sibling"},{"source":47,"target":48,"kind":"sibling"},{"source":45,"target":48,"kind":"sibling"},{"source":65,"target":68,"kind":"sibling"},{"source":77,"target":0,"kind":"sibling"},{"source":78,"target":80,"kind":"sibling"},{"source":80,"target":78,"kind":"sibling"},{"source":34,"target":32,"kind":"sibling"},{"source":2,"target":11,"kind":"sibling"},{"source":20,"target":23,"kind":"sibling"},{"source":75,"target":74,"kind":"sibling"},{"source":50,"target":48,"kind":"sibling"},{"source":54,"target":56,"kind":"sibling"},{"source":72,"target":68,"kind":"sibling"},{"source":57,"target":56,"kind":"sibling"},{"source":76,"target":74,"kind":"sibling"},{"source":12,"target":11,"kind":"sibling"},{"source":52,"target":48,"kind":"sibling"},{"source":44,"target":48,"kind":"sibling"},{"source":4,"target":11,"kind":"sibling"},{"source":64,"target":68,"kind":"sibling"},{"source":23,"target":20,"kind":"sibling"},{"source":38,"target":40,"kind":"sibling"},{"source":79,"target":78,"kind":"sibling"},{"source":62,"target":63,"kind":"sibling"},{"source":5,"target":11,"kind":"sibling"},{"source":33,"target":32,"kind":"sibling"},{"source":39,"target":40,"kind":"sibling"},{"source":70,"target":68,"kind":"sibling"},{"source":36,"target":35,"kind":"sibling"},{"source":71,"target":68,"kind":"sibling"},{"source":6,"target":11,"kind":"sibling"},{"source":51,"target":48,"kind":"sibling"},{"source":1,"target":11,"kind":"sibling"}],"truncated":false,"originalNodeCount":81,"originalEdgeCount":62}</script>
+  <script>
+    const data = JSON.parse(document.getElementById('graph-data').textContent);
+    const meta = document.getElementById('meta');
+    const warn = document.getElementById('warn');
+    meta.textContent = data.projectRoot + " · nodes=" + data.nodes.length + " · edges=" + data.edges.length;
+    if (data.truncated) {
+      warn.style.display = "block";
+      warn.textContent = "Export truncated: original nodes=" + data.originalNodeCount + ", exported nodes=" + data.nodes.length + ". Use --max-nodes to adjust.";
+    }
+
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+
+    function fitCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(canvas.clientWidth * dpr);
+      canvas.height = Math.floor(canvas.clientHeight * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    window.addEventListener('resize', () => { fitCanvas(); draw(); });
+    fitCanvas();
+
+    const nodes = data.nodes.map(n => ({ ...n, x: 0, y: 0 }));
+    const edges = data.edges;
+
+    // Simple circular layout (fast + deterministic).
+    const R = 420;
+    for (let i = 0; i < nodes.length; i++) {
+      const a = (i / Math.max(1, nodes.length)) * Math.PI * 2;
+      nodes[i].x = Math.cos(a) * R;
+      nodes[i].y = Math.sin(a) * R;
+    }
+
+    const adj = new Map();
+    const imports = new Map();
+    const dependents = new Map();
+    for (const e of edges) {
+      if (!adj.has(e.source)) adj.set(e.source, new Set());
+      if (!adj.has(e.target)) adj.set(e.target, new Set());
+      adj.get(e.source).add(e.target);
+      adj.get(e.target).add(e.source);
+
+      if ((e.kind || '') === 'import') {
+        if (!imports.has(e.source)) imports.set(e.source, new Set());
+        if (!dependents.has(e.target)) dependents.set(e.target, new Set());
+        imports.get(e.source).add(e.target);
+        dependents.get(e.target).add(e.source);
+      }
+    }
+
+    let view = { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2, k: 1 };
+    let dragging = false;
+    let last = null;
+    let selected = null;
+    let filtered = new Set(nodes.map(n => n.id));
+    let revHi = new Set();
+
+    function screenToWorld(px, py) {
+      return {
+        x: (px - view.x) / view.k,
+        y: (py - view.y) / view.k
+      };
+    }
+
+    function hitTest(px, py) {
+      const w = screenToWorld(px, py);
+      let best = null;
+      let bestD2 = 1e18;
+      for (const n of nodes) {
+        if (!filtered.has(n.id)) continue;
+        const dx = n.x - w.x;
+        const dy = n.y - w.y;
+        const d2 = dx*dx + dy*dy;
+        const r = 6 + Math.min(14, Math.floor(Math.sqrt(n.degree || 0)));
+        if (d2 <= r*r && d2 < bestD2) {
+          best = n;
+          bestD2 = d2;
+        }
+      }
+      return best;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+
+      ctx.save();
+      ctx.translate(view.x, view.y);
+      ctx.scale(view.k, view.k);
+
+      // Edges
+      ctx.lineWidth = 1 / view.k;
+      for (const e of edges) {
+        if (!filtered.has(e.source) || !filtered.has(e.target)) continue;
+        const s = nodes[e.source];
+        const t = nodes[e.target];
+        if (!s || !t) continue;
+        const edgeHiSel = selected !== null && (e.source === selected || e.target === selected);
+        const edgeHiRev = revHi.size && (revHi.has(e.source) && revHi.has(e.target));
+        if (edgeHiRev) {
+          ctx.strokeStyle = 'rgba(251, 113, 133, 0.65)';
+        } else {
+          ctx.strokeStyle = edgeHiSel ? getComputedStyle(document.documentElement).getPropertyValue('--edge-hi') : getComputedStyle(document.documentElement).getPropertyValue('--edge');
+        }
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(t.x, t.y);
+        ctx.stroke();
+      }
+
+      // Nodes
+      for (const n of nodes) {
+        if (!filtered.has(n.id)) continue;
+        const isSel = selected === n.id;
+        const isNbr = selected !== null && adj.get(selected)?.has(n.id);
+        const isRev = revHi.size && revHi.has(n.id);
+        const r = 6 + Math.min(14, Math.floor(Math.sqrt(n.degree || 0)));
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r, 0, Math.PI*2);
+        if (isSel) {
+          ctx.fillStyle = '#38bdf8';
+        } else if (isRev) {
+          ctx.fillStyle = 'rgba(251, 113, 133, 0.80)';
+        } else if (isNbr) {
+          ctx.fillStyle = 'rgba(56,189,248,0.65)';
+        } else {
+          ctx.fillStyle = 'rgba(229,231,235,0.65)';
+        }
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
+    function renderPathList(containerId, ids) {
+      const el = document.getElementById(containerId);
+      el.innerHTML = '';
+      if (!ids || !ids.length) {
+        el.textContent = '—';
+        return;
+      }
+      for (const id of ids.slice(0, 30)) {
+        const n = nodes[id];
+        if (!n) continue;
+        const a = document.createElement('a');
+        a.href = '#';
+        a.style.color = 'inherit';
+        a.style.textDecoration = 'none';
+        a.style.display = 'block';
+        a.style.padding = '2px 0';
+        a.textContent = n.path;
+        a.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          setSelection(n);
+        });
+        el.appendChild(a);
+      }
+      if (ids.length > 30) {
+        const more = document.createElement('div');
+        more.className = 'meta';
+        more.style.marginTop = '6px';
+        more.textContent = '+' + (ids.length - 30) + ' more';
+        el.appendChild(more);
+      }
+    }
+
+    function computeReverseTransitive(startId) {
+      const out = new Set();
+      const q = [startId];
+      out.add(startId);
+      while (q.length) {
+        const cur = q.pop();
+        const preds = dependents.get(cur);
+        if (!preds) continue;
+        for (const p of preds) {
+          if (out.has(p)) continue;
+          out.add(p);
+          q.push(p);
+        }
+      }
+      return out;
+    }
+
+    function setSelection(n) {
+      const p = document.getElementById('selPath');
+      const l = document.getElementById('selLang');
+      const t = document.getElementById('selTokens');
+      const lc = document.getElementById('selLines');
+      const d = document.getElementById('selDegree');
+      const s = document.getElementById('selSummary');
+      const ex = document.getElementById('exports');
+      const impEl = document.getElementById('selImports');
+      const depEl = document.getElementById('selDependents');
+      ex.innerHTML = '';
+      if (!n) {
+        selected = null;
+        revHi = new Set();
+        p.textContent = '—';
+        l.textContent = '—';
+        t.textContent = '—';
+        lc.textContent = '—';
+        d.textContent = '—';
+        s.textContent = '—';
+        impEl.textContent = '—';
+        depEl.textContent = '—';
+        draw();
+        return;
+      }
+      selected = n.id;
+      revHi = new Set();
+      p.textContent = n.path;
+      l.textContent = n.language || '—';
+      t.textContent = String(n.tokenCount ?? 0);
+      lc.textContent = String(n.lineCount ?? 0);
+      d.textContent = String(n.degree ?? 0);
+      s.textContent = n.summary || '—';
+      if (Array.isArray(n.exports) && n.exports.length) {
+        for (const e of n.exports.slice(0, 25)) {
+          const b = document.createElement('span');
+          b.className = 'badge';
+          b.textContent = e;
+          ex.appendChild(b);
+        }
+      }
+
+      const imps = Array.from(imports.get(n.id) || []).sort((a, b) => (nodes[a]?.path || '').localeCompare(nodes[b]?.path || ''));
+      const deps = Array.from(dependents.get(n.id) || []).sort((a, b) => (nodes[a]?.path || '').localeCompare(nodes[b]?.path || ''));
+      renderPathList('selImports', imps);
+      renderPathList('selDependents', deps);
+
+      draw();
+    }
+
+    canvas.addEventListener('mousedown', (ev) => {
+      dragging = true;
+      last = { x: ev.clientX, y: ev.clientY };
+    });
+    window.addEventListener('mouseup', () => { dragging = false; last = null; });
+    window.addEventListener('mousemove', (ev) => {
+      if (!dragging || !last) return;
+      view.x += (ev.clientX - last.x);
+      view.y += (ev.clientY - last.y);
+      last = { x: ev.clientX, y: ev.clientY };
+      draw();
+    });
+    canvas.addEventListener('wheel', (ev) => {
+      ev.preventDefault();
+      const scale = Math.exp(-ev.deltaY * 0.001);
+      const before = screenToWorld(ev.clientX, ev.clientY);
+      view.k = Math.min(6, Math.max(0.2, view.k * scale));
+      const after = screenToWorld(ev.clientX, ev.clientY);
+      view.x += (after.x - before.x) * view.k;
+      view.y += (after.y - before.y) * view.k;
+      draw();
+    }, { passive: false });
+    canvas.addEventListener('click', (ev) => {
+      const n = hitTest(ev.clientX, ev.clientY);
+      setSelection(n);
+    });
+
+    canvas.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      const n = hitTest(ev.clientX, ev.clientY);
+      if (!n) return;
+      setSelection(n);
+      revHi = computeReverseTransitive(n.id);
+      draw();
+    });
+
+    const q = document.getElementById('q');
+    q.addEventListener('input', () => {
+      const needle = q.value.trim().toLowerCase();
+      filtered = new Set();
+      if (!needle) {
+        for (const n of nodes) filtered.add(n.id);
+      } else {
+        for (const n of nodes) {
+          if ((n.path || '').toLowerCase().includes(needle)) filtered.add(n.id);
+        }
+      }
+      if (selected !== null && !filtered.has(selected)) setSelection(null);
+      draw();
+    });
+
+    document.getElementById('reset').addEventListener('click', () => {
+      view = { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2, k: 1 };
+      q.value = '';
+      filtered = new Set(nodes.map(n => n.id));
+      setSelection(null);
+      draw();
+    });
+
+    document.getElementById('clearHighlight').addEventListener('click', () => {
+      revHi = new Set();
+      draw();
+    });
+
+    document.getElementById('exportPng').addEventListener('click', () => {
+      const url = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'lean-ctx-graph.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+
+    draw();
+  </script>
+</body>
+</html>

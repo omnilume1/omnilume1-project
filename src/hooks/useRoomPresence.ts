@@ -18,40 +18,56 @@ export function useRoomPresence(roomId: string): RoomPresenceValue {
 
   useEffect(() => {
     let isMounted = true;
-    if (!roomId) return;
+    let presenceChannel: ReturnType<typeof supabase.channel> | null = null;
 
-    const presenceChannel = supabase.channel(`presence:${roomId}`, {
-      config: { presence: { key: roomId } },
-    });
+    if (!roomId) return () => {
+      isMounted = false;
+    };
 
-    presenceChannel
-      .on('presence', { event: 'sync' }, () => {
-        if (!isMounted) return;
-        const state = presenceChannel.presenceState();
-        const users = Object.values(state).flat() as RoomPresenceUser[];
-        setOnlineUsers(users);
-        setOnlineUserIds(users.map((u) => u.user_id));
-      })
-      .on('presence', { event: 'join' }, () => {})
-      .on('presence', { event: 'leave' }, () => {});
+    const connect = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!isMounted || !user) return;
+      setOnlineUsers([]);
+      setOnlineUserIds([]);
 
-    presenceChannel.subscribe(async (status: string) => {
-      if (status === 'SUBSCRIBED') {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
+      presenceChannel = supabase.channel(`presence:${roomId}`, {
+        config: { private: true, presence: { key: user.id } },
+      });
+
+      presenceChannel
+        .on('presence', { event: 'sync' }, () => {
+          if (!isMounted || !presenceChannel) return;
+          const state = presenceChannel.presenceState();
+          const users = Object.values(state).flat() as RoomPresenceUser[];
+          setOnlineUsers(users);
+          setOnlineUserIds(users.map((u) => u.user_id));
+        })
+        .on('presence', { event: 'join' }, () => {})
+        .on('presence', { event: 'leave' }, () => {});
+
+      presenceChannel.subscribe(async (status: string) => {
+        if (status === 'SUBSCRIBED' && presenceChannel) {
           await presenceChannel.track({
             user_id: user.id,
             online_at: new Date().toISOString(),
-          });
+          }).catch(() => undefined);
         }
-      }
-    });
+      });
+    };
+
+    void connect();
 
     return () => {
       isMounted = false;
-      presenceChannel.unsubscribe();
+      if (presenceChannel) {
+        void presenceChannel.unsubscribe();
+        void supabase.removeChannel(presenceChannel);
+      }
     };
   }, [roomId, supabase]);
 
-  return { onlineUsers, onlineUserIds };
+  return {
+    onlineUsers: roomId ? onlineUsers : [],
+    onlineUserIds: roomId ? onlineUserIds : [],
+  };
 }
