@@ -578,38 +578,38 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           )}
         </main>
 
-        {/* DRAGGABLE RESIZER HANDLE */}
-        <div
-          role="separator"
-          tabIndex={0}
-          aria-label="Resize chat panel"
-          aria-orientation="vertical"
-          aria-valuemin={MIN_SIDEBAR_WIDTH}
-          aria-valuemax={MAX_SIDEBAR_WIDTH}
-          aria-valuenow={sidebarWidth}
-          onMouseDown={() => setIsDragging(true)}
-          onDoubleClick={() => setSidebarWidth(320)}
-          onKeyDown={(event) => {
-            if (event.key === 'ArrowLeft') {
-              event.preventDefault();
-              setSidebarWidth((width) => clampSidebarWidth(width + 40));
-            } else if (event.key === 'ArrowRight') {
-              event.preventDefault();
-              setSidebarWidth((width) => clampSidebarWidth(width - 40));
-            } else if (event.key === 'Home') {
-              event.preventDefault();
-              setSidebarWidth(MIN_SIDEBAR_WIDTH);
-            } else if (event.key === 'End') {
-              event.preventDefault();
-              setSidebarWidth(MAX_SIDEBAR_WIDTH);
-            }
-          }}
-          className={`workspace-resizer z-20 ${isDragging ? 'is-resizing bg-indigo-500' : 'bg-transparent'}`}
-          title="Drag to resize chat panel"
-        />
-
         {/* DYNAMIC WIDTH SIDEBAR */}
         <aside style={{ width: `${sidebarWidth}px` }} className="workspace-side z-10 shrink-0">
+          {/* The handle lives on the chat panel so it stays anchored to the
+              stage/chat boundary while the sidebar width changes. */}
+          <div
+            role="separator"
+            tabIndex={0}
+            aria-label="Resize chat panel"
+            aria-orientation="vertical"
+            aria-valuemin={MIN_SIDEBAR_WIDTH}
+            aria-valuemax={MAX_SIDEBAR_WIDTH}
+            aria-valuenow={sidebarWidth}
+            onMouseDown={() => setIsDragging(true)}
+            onDoubleClick={() => setSidebarWidth(320)}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                setSidebarWidth((width) => clampSidebarWidth(width + 40));
+              } else if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                setSidebarWidth((width) => clampSidebarWidth(width - 40));
+              } else if (event.key === 'Home') {
+                event.preventDefault();
+                setSidebarWidth(MIN_SIDEBAR_WIDTH);
+              } else if (event.key === 'End') {
+                event.preventDefault();
+                setSidebarWidth(MAX_SIDEBAR_WIDTH);
+              }
+            }}
+            className={`workspace-resizer z-20 ${isDragging ? 'is-resizing bg-indigo-500' : ''}`}
+            title="Drag to resize chat panel"
+          />
           <div className="chat-topbar shrink-0">
             <h3 className="font-medium text-sm text-white uppercase tracking-wider">{activeTool}</h3>
           </div>
