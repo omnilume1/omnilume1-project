@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { decryptMessage } from '@/lib/encryption';
+import { isIsoTimestamp, isUuid, isValidEncryptedPayload } from '@/lib/message-limits';
+
+const PRIVATE_CHAT_PAGE_SIZE = 50;
+const DECRYPT_BATCH_SIZE = 8;
 
 export type ChatMessageDecryptionStatus = 'decrypted' | 'undecryptable';
 export type PrivateChatStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -34,6 +38,19 @@ function createUndecryptableMessage(row: EncryptedMessageRow): ChatMessage {
     ciphertext: row.ciphertext,
     iv: row.iv,
   };
+}
+
+interface MessageCursor { createdAt: string; id: string; }
+
+function isEncryptedMessageRow(value: unknown): value is EncryptedMessageRow {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Partial<EncryptedMessageRow>;
+  return isUuid(row.id)
+    && isUuid(row.sender_id)
+    && isIsoTimestamp(row.created_at)
+    && typeof row.ciphertext === 'string'
+    && typeof row.iv === 'string'
+    && isValidEncryptedPayload(row.ciphertext, row.iv);
 }
 
 const decryptPromises = new WeakMap<CryptoKey, Map<string, Promise<string>>>();
@@ -87,23 +104,97 @@ function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]) {
   return sortMessages(Array.from(messagesById.values()));
 }
 
+async function decryptRows(rows: EncryptedMessageRow[], sharedKey: CryptoKey) {
+  const decryptedMessages: ChatMessage[] = [];
+  for (let index = 0; index < rows.length; index += DECRYPT_BATCH_SIZE) {
+    const batch = rows.slice(index, index + DECRYPT_BATCH_SIZE);
+    const settledMessages = await Promise.allSettled(
+      batch.map(async (row) => ({
+        id: row.id,
+        sender_id: row.sender_id,
+        created_at: row.created_at,
+        text: await decryptMessageCached(row, sharedKey),
+        decryptionStatus: 'decrypted' as const,
+        ciphertext: row.ciphertext,
+        iv: row.iv,
+      })),
+    );
+    decryptedMessages.push(...settledMessages.map((result, batchIndex) => (
+      result.status === 'fulfilled'
+        ? result.value
+        : createUndecryptableMessage(batch[batchIndex])
+    )));
+  }
+  return decryptedMessages;
+}
+
 export function usePrivateChat(chatId: string | null, sharedKey: CryptoKey | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [status, setStatus] = useState<PrivateChatStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const supabase = createClient();
+  const oldestCursorRef = useRef<MessageCursor | null>(null);
+  const loadingOlderRef = useRef(false);
+  const generationRef = useRef(0);
+  const realtimeDecryptQueueRef = useRef(Promise.resolve());
+  const realtimeDecryptQueueLengthRef = useRef(0);
+
+  const loadOlder = useCallback(async () => {
+    const cursor = oldestCursorRef.current;
+    if (!chatId || !sharedKey || !cursor || loadingOlderRef.current || !hasMore) return;
+
+    loadingOlderRef.current = true;
+    setIsLoadingOlder(true);
+    const generation = generationRef.current;
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('messages')
+        .select('id, sender_id, created_at, ciphertext, iv')
+        .eq('chat_id', chatId)
+        .or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(PRIVATE_CHAT_PAGE_SIZE);
+      if (fetchError) throw fetchError;
+      if (generation !== generationRef.current) return;
+
+      const rawRows = data ?? [];
+      const rows = rawRows.filter(isEncryptedMessageRow);
+      const oldest = rawRows[rawRows.length - 1];
+      if (isEncryptedMessageRow(oldest)) oldestCursorRef.current = { createdAt: oldest.created_at, id: oldest.id };
+      setHasMore(rawRows.length === PRIVATE_CHAT_PAGE_SIZE && isEncryptedMessageRow(oldest));
+      const decryptedMessages = await decryptRows(rows, sharedKey);
+      if (generation === generationRef.current) {
+        setMessages((current) => mergeMessages(current, decryptedMessages));
+      }
+    } catch {
+      if (generation === generationRef.current) setError('Unable to load older encrypted messages.');
+    } finally {
+      loadingOlderRef.current = false;
+      setIsLoadingOlder(false);
+    }
+  }, [chatId, hasMore, sharedKey, supabase]);
 
   useEffect(() => {
     let cancelled = false;
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    oldestCursorRef.current = null;
+    realtimeDecryptQueueRef.current = Promise.resolve();
+    realtimeDecryptQueueLengthRef.current = 0;
 
     if (!sharedKey || !chatId) {
       return () => {
         cancelled = true;
+        generationRef.current += 1;
       };
     }
 
     const fetchHistoricalMessages = async () => {
+      setHasMore(false);
       setMessages([]);
       setStatus('loading');
       setError(null);
@@ -113,31 +204,21 @@ export function usePrivateChat(chatId: string | null, sharedKey: CryptoKey | nul
           .from('messages')
           .select('id, sender_id, created_at, ciphertext, iv')
           .eq('chat_id', chatId)
-          .order('created_at', { ascending: true });
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .limit(PRIVATE_CHAT_PAGE_SIZE);
 
         if (fetchError) throw fetchError;
 
-        const rows = (data ?? []) as EncryptedMessageRow[];
-        const settledMessages = await Promise.allSettled(
-          rows.map(async (row) => ({
-            id: row.id,
-            sender_id: row.sender_id,
-            created_at: row.created_at,
-            text: await decryptMessageCached(row, sharedKey),
-            decryptionStatus: 'decrypted' as const,
-            ciphertext: row.ciphertext,
-            iv: row.iv,
-          })),
-        );
+        const rawRows = data ?? [];
+        const rows = rawRows.filter(isEncryptedMessageRow);
+        const oldest = rawRows[rawRows.length - 1];
+        if (isEncryptedMessageRow(oldest)) oldestCursorRef.current = { createdAt: oldest.created_at, id: oldest.id };
+        setHasMore(rawRows.length === PRIVATE_CHAT_PAGE_SIZE && isEncryptedMessageRow(oldest));
+        const decryptedMessages = await decryptRows(rows, sharedKey);
 
-        const decryptedMessages = settledMessages.map((result, index) => (
-          result.status === 'fulfilled'
-            ? result.value
-            : createUndecryptableMessage(rows[index])
-        ));
-
-        if (!cancelled) {
-          setMessages((current) => mergeMessages(current, decryptedMessages));
+        if (!cancelled && generation === generationRef.current) {
+          setMessages((current) => mergeMessages(current, decryptedMessages.reverse()));
           setStatus('ready');
         }
       } catch {
@@ -156,10 +237,12 @@ export function usePrivateChat(chatId: string | null, sharedKey: CryptoKey | nul
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
         (payload: unknown) => {
-          const newPayload = (payload as { new: EncryptedMessageRow }).new;
-          void Promise.allSettled([
-            decryptMessageCached(newPayload, sharedKey),
-          ]).then(([result]) => {
+          const newPayload = (payload as { new: unknown }).new;
+          if (!isEncryptedMessageRow(newPayload)) return;
+          if (realtimeDecryptQueueLengthRef.current >= 50) return;
+          realtimeDecryptQueueLengthRef.current += 1;
+          realtimeDecryptQueueRef.current = realtimeDecryptQueueRef.current.then(async () => {
+            const result = await Promise.allSettled([decryptMessageCached(newPayload, sharedKey)]).then(([settled]) => settled);
             if (cancelled) return;
 
             const message = result.status === 'fulfilled'
@@ -175,6 +258,8 @@ export function usePrivateChat(chatId: string | null, sharedKey: CryptoKey | nul
               : createUndecryptableMessage(newPayload);
 
             setMessages((current) => mergeMessages(current, [message]));
+          }).catch(() => undefined).finally(() => {
+            realtimeDecryptQueueLengthRef.current = Math.max(0, realtimeDecryptQueueLengthRef.current - 1);
           });
         },
       )
@@ -182,6 +267,7 @@ export function usePrivateChat(chatId: string | null, sharedKey: CryptoKey | nul
 
     return () => {
       cancelled = true;
+      generationRef.current += 1;
       supabase.removeChannel(channel);
     };
   }, [chatId, sharedKey, supabase, reloadToken]);
@@ -214,6 +300,9 @@ export function usePrivateChat(chatId: string | null, sharedKey: CryptoKey | nul
     messages,
     status,
     error,
+    hasMore,
+    isLoadingOlder,
+    loadOlder,
     retry: () => setReloadToken((token) => token + 1),
     addOptimisticMessage,
     removeOptimisticMessage,
