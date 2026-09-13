@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { usePrivateChat } from '@/hooks/usePrivateChat';
 import { sendEncryptedMessage } from '@/actions/chat';
 import { encryptMessage } from '@/lib/encryption';
+import { characterLength, PRIVATE_MESSAGE_MAX_CHARS } from '@/lib/message-limits';
 
 interface PrivateChatProps {
   chatId: string;
@@ -24,17 +25,24 @@ export default function PrivateChat({ chatId, currentUserId, receiverId, sharedK
     status,
     error,
     retry,
+    hasMore,
+    isLoadingOlder,
+    loadOlder,
     addOptimisticMessage,
     removeOptimisticMessage,
   } = usePrivateChat(chatId, sharedKey);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim() || !sharedKey || isSending) return;
+    const textToSend = inputText.trim();
+    if (!textToSend || !sharedKey || isSending) return;
+    if (characterLength(textToSend) > PRIVATE_MESSAGE_MAX_CHARS) {
+      setSendError(`Messages must be no longer than ${PRIVATE_MESSAGE_MAX_CHARS} characters.`);
+      return;
+    }
 
     setIsSending(true);
     setSendError(null);
-    const textToSend = inputText;
     setInputText(''); // Clear input instantly for better UX
 
     try {
@@ -91,6 +99,8 @@ export default function PrivateChat({ chatId, currentUserId, receiverId, sharedK
 
       {/* Messages Area */}
       <div className="chat-scroller flex flex-col gap-4" aria-live="polite">
+        {hasMore && status === 'ready' && <button type="button" onClick={() => void loadOlder()} disabled={isLoadingOlder} className="mx-auto rounded-lg border border-neutral-800 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-neutral-400 transition hover:border-neutral-600 hover:text-white disabled:cursor-wait disabled:opacity-50">{isLoadingOlder ? 'Loading older messages...' : 'Load older messages'}</button>}
+        {status === 'ready' && error && <p className="mx-auto text-xs text-amber-300" role="alert">{error}</p>}
         {status === 'loading' ? (
           <div className="text-center text-xs text-neutral-500 my-auto">Loading encrypted messages...</div>
         ) : status === 'error' ? (
@@ -136,6 +146,7 @@ export default function PrivateChat({ chatId, currentUserId, receiverId, sharedK
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
+          maxLength={PRIVATE_MESSAGE_MAX_CHARS}
           placeholder="Type an encrypted message..."
           className="omni-input"
           disabled={isSending}

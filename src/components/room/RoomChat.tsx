@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { deleteMessageForEveryone } from '@/actions/chat';
 import { getRoomControlState } from '@/actions/room-controls';
+import { isIsoTimestamp, isUuid, isValidRoomMessageContent, ROOM_MESSAGE_MAX_CHARS } from '@/lib/message-limits';
+
+const ROOM_CHAT_PAGE_SIZE = 50;
 
 interface RoomChatProps {
   roomId: string;
@@ -18,6 +21,25 @@ interface RoomChatMessage {
   created_at: string;
 }
 interface RoomAnnouncementMessage { id: string; body: string; is_pinned: boolean; created_at: string; }
+interface MessageCursor { createdAt: string; id: string; }
+type RoomChatMessageUpdate = Partial<RoomChatMessage> & Pick<RoomChatMessage, 'id'>;
+
+function isRoomChatMessage(value: unknown): value is RoomChatMessage {
+  if (!value || typeof value !== 'object') return false;
+  const message = value as Partial<RoomChatMessage>;
+  return isUuid(message.id)
+    && isUuid(message.sender_id)
+    && isIsoTimestamp(message.created_at)
+    && (message.content === null || (typeof message.content === 'string' && isValidRoomMessageContent(message.content)));
+}
+
+function isRoomChatMessageUpdate(value: unknown): value is RoomChatMessageUpdate {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const message = value as Partial<RoomChatMessage>;
+  return isUuid(message.id)
+    && (message.content === undefined || message.content === null || (typeof message.content === 'string' && isValidRoomMessageContent(message.content)))
+    && (message.is_deleted === undefined || typeof message.is_deleted === 'boolean');
+}
 
 function mergeMessage(messages: RoomChatMessage[], incoming: RoomChatMessage) {
   const existingIndex = messages.findIndex((message) => message.id === incoming.id);
@@ -32,6 +54,8 @@ function mergeMessage(messages: RoomChatMessage[], incoming: RoomChatMessage) {
 
 export default function RoomChat({ roomId }: RoomChatProps) {
   const [messages, setMessages] = useState<RoomChatMessage[]>([]);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [announcements, setAnnouncements] = useState<RoomAnnouncementMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -42,6 +66,9 @@ export default function RoomChat({ roomId }: RoomChatProps) {
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const oldestCursorRef = useRef<MessageCursor | null>(null);
+  const loadingOlderRef = useRef(false);
+  const preserveScrollRef = useRef<{ height: number; top: number } | null>(null);
   const supabase = createClient();
   const { currentUserId: roomCurrentUserId, typingUsers, broadcastEvent, roomMessageEvents, roomControlVersion } = useRoomRealtime();
 
@@ -49,7 +76,16 @@ export default function RoomChat({ roomId }: RoomChatProps) {
     if (typeof window !== 'undefined') {
       const savedHidden = localStorage.getItem(`hidden_msgs_${roomId}`);
       if (savedHidden) {
-        const timer = window.setTimeout(() => setHiddenMessages(new Set(JSON.parse(savedHidden))), 0);
+        const timer = window.setTimeout(() => {
+          try {
+            const parsed = JSON.parse(savedHidden);
+            if (Array.isArray(parsed) && parsed.every((value): value is string => typeof value === 'string')) {
+              setHiddenMessages(new Set(parsed));
+            }
+          } catch {
+            // Ignore malformed local-only preferences.
+          }
+        }, 0);
         return () => window.clearTimeout(timer);
       }
     }
@@ -57,16 +93,70 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
   useEffect(() => {
     let isMounted = true;
+    oldestCursorRef.current = null;
     const setupChat = async () => {
+      setMessages([]);
+      setHasMoreMessages(false);
       const { data: { user } } = await supabase.auth.getUser();
       if (user && isMounted) setCurrentUserId(user.id);
 
-      const { data } = await supabase.from('messages').select('*').eq('room_id', roomId).order('created_at', { ascending: true });
-      if (data && isMounted) setMessages(data as RoomChatMessage[]);
+      const { data, error } = await supabase
+        .from('messages')
+        .select('id, sender_id, content, is_deleted, created_at')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(ROOM_CHAT_PAGE_SIZE);
+      if (error || !isMounted) return;
+
+      const rawPage = (data ?? []) as unknown[];
+      const page = rawPage.filter(isRoomChatMessage);
+      const oldest = rawPage[rawPage.length - 1];
+      if (isRoomChatMessage(oldest)) oldestCursorRef.current = { createdAt: oldest.created_at, id: oldest.id };
+      setHasMoreMessages(rawPage.length === ROOM_CHAT_PAGE_SIZE && isRoomChatMessage(oldest));
+      setMessages((current) => [...page].reverse().reduce(mergeMessage, current));
     };
     setupChat();
 
     return () => { isMounted = false; };
+  }, [roomId, supabase]);
+
+  const loadOlderMessages = useCallback(async () => {
+    const cursor = oldestCursorRef.current;
+    if (!cursor || loadingOlderRef.current) return;
+
+    loadingOlderRef.current = true;
+    setIsLoadingOlder(true);
+    const scroller = scrollRef.current;
+    if (scroller) preserveScrollRef.current = { height: scroller.scrollHeight, top: scroller.scrollTop };
+
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('id, sender_id, content, is_deleted, created_at')
+        .eq('room_id', roomId)
+        .or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(ROOM_CHAT_PAGE_SIZE);
+      if (error) throw error;
+
+      const rawPage = (data ?? []) as unknown[];
+      const page = rawPage.filter(isRoomChatMessage);
+      if (page.length === 0) preserveScrollRef.current = null;
+      const oldest = rawPage[rawPage.length - 1];
+      if (isRoomChatMessage(oldest)) oldestCursorRef.current = { createdAt: oldest.created_at, id: oldest.id };
+      setHasMoreMessages(rawPage.length === ROOM_CHAT_PAGE_SIZE && isRoomChatMessage(oldest));
+      if (page.length > 0) {
+        setMessages((current) => [...page].reverse().reduce(mergeMessage, current));
+      }
+    } catch {
+      preserveScrollRef.current = null;
+      setDeleteError('Unable to load older messages.');
+    } finally {
+      loadingOlderRef.current = false;
+      setIsLoadingOlder(false);
+    }
   }, [roomId, supabase]);
 
   useEffect(() => {
@@ -74,7 +164,15 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
     const timer = window.setTimeout(() => {
       setMessages((current) => roomMessageEvents.reduce((messagesForEvent, event) => {
-        return mergeMessage(messagesForEvent, event.message as unknown as RoomChatMessage);
+        if (event.kind === 'insert' && isRoomChatMessage(event.message)) {
+          return mergeMessage(messagesForEvent, event.message);
+        }
+        if (event.kind === 'update' && isRoomChatMessageUpdate(event.message)) {
+          return messagesForEvent.map((message) => message.id === event.message.id
+            ? { ...message, ...event.message }
+            : message);
+        }
+        return messagesForEvent;
       }, current));
     }, 0);
     return () => window.clearTimeout(timer);
@@ -88,8 +186,16 @@ export default function RoomChat({ roomId }: RoomChatProps) {
     return () => { active = false; };
   }, [roomId, roomControlVersion]);
 
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const preserved = preserveScrollRef.current;
+    if (preserved) {
+      scroller.scrollTop = preserved.top + (scroller.scrollHeight - preserved.height);
+      preserveScrollRef.current = null;
+      return;
+    }
+    scroller.scrollTop = scroller.scrollHeight;
   }, [messages, typingUsers]);
 
   useEffect(() => {
@@ -103,7 +209,11 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim()) return;
+    const messageText = newMessage.trim();
+    if (!isValidRoomMessageContent(messageText)) {
+      setDeleteError(`Messages must be 1-${ROOM_MESSAGE_MAX_CHARS} characters.`);
+      return;
+    }
 
     const senderId = currentUserId ?? roomCurrentUserId ?? (await supabase.auth.getUser()).data.user?.id ?? null;
     if (!senderId) {
@@ -113,12 +223,11 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
     if (!currentUserId) setCurrentUserId(senderId);
 
-    const messageText = newMessage.trim();
     setNewMessage('');
     const { data, error } = await supabase
       .from('messages')
       .insert({ room_id: roomId, sender_id: senderId, content: messageText })
-      .select('*')
+      .select('id, sender_id, content, is_deleted, created_at')
       .single();
 
     if (error || !data) {
@@ -179,6 +288,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
       {deleteError && <p className="border-b border-red-500/20 bg-red-500/5 px-4 py-2 text-xs text-red-300" role="alert">{deleteError}</p>}
 
       <div ref={scrollRef} className="chat-scroller flex flex-col gap-4">
+        {hasMoreMessages && <button type="button" onClick={() => void loadOlderMessages()} disabled={isLoadingOlder} className="mx-auto rounded-lg border border-neutral-800 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-neutral-400 transition hover:border-neutral-600 hover:text-white disabled:cursor-wait disabled:opacity-50">{isLoadingOlder ? 'Loading older messages...' : 'Load older messages'}</button>}
         {announcements.map((announcement) => <article key={`announcement-${announcement.id}`} className="rounded-xl border border-violet-300/20 bg-violet-500/10 px-3 py-3"><p className="text-[10px] font-bold uppercase tracking-[.16em] text-violet-200">{announcement.is_pinned ? 'Pinned announcement' : 'Room announcement'}</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-violet-50">{announcement.body}</p></article>)}
         {messages.length === 0 ? (
           <p className="text-xs text-neutral-500 text-center mt-10">No messages yet. Say hello!</p>
@@ -210,7 +320,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
       <div className="message-composer">
         <form onSubmit={handleSendMessage} className="flex gap-2">
-          <input type="text" value={newMessage} onChange={handleTyping} placeholder="Message the room..." className="omni-input" />
+          <input type="text" value={newMessage} onChange={handleTyping} maxLength={ROOM_MESSAGE_MAX_CHARS} placeholder="Message the room..." className="omni-input" />
           <button type="submit" disabled={!newMessage.trim()} className="omni-button omni-button-primary !min-h-0 !rounded-xl !px-3">
             {/* The corrected SVG is below without the extra </path> */}
             <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" /></svg>

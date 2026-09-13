@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/utils/supabase/client';
+import { isUuid } from '@/lib/message-limits';
 
 type BrowserSupabaseClient = ReturnType<typeof createClient>;
 type RoomChannel = ReturnType<BrowserSupabaseClient['channel']>;
@@ -186,6 +187,29 @@ type MediaEventMeta = {
   senderId?: string;
   source: 'local' | 'remote' | 'restored';
 };
+
+const MAX_SYNC_EVENT_JSON_CHARS = 64_000;
+const SYNC_EVENT_TYPES = new Set<SyncEventType>([
+  'typing', 'room_message', 'room_message_update', 'play', 'pause', 'seek', 'mute',
+  'cast', 'stop_cast', 'force_sync', 'request_sync', 'timer_start', 'timer_pause',
+  'timer_reset', 'subtitle_upload',
+]);
+
+function isSyncEventPayload(value: unknown, roomId: string): value is SyncEvent {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const event = value as Partial<SyncEvent>;
+  if (typeof event.event_id !== 'string' || event.event_id.length === 0 || event.event_id.length > 128) return false;
+  if (!isUuid(event.sender_id) || event.room_id !== roomId) return false;
+  if (typeof event.timestamp !== 'number' || !Number.isFinite(event.timestamp)) return false;
+  if (typeof event.state_version !== 'number' || !Number.isSafeInteger(event.state_version) || event.state_version < 1) return false;
+  if (typeof event.event_type !== 'string' || !SYNC_EVENT_TYPES.has(event.event_type as SyncEventType)) return false;
+  if (!event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload)) return false;
+  try {
+    return JSON.stringify(event).length <= MAX_SYNC_EVENT_JSON_CHARS;
+  } catch {
+    return false;
+  }
+}
 
 type MediaRevision = Pick<MediaEventMeta, 'eventId' | 'timestamp'>;
 
@@ -449,9 +473,9 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     }
   }, [updateTimerState]);
 
-  const handleIncomingEvent = useCallback((incoming: { payload?: Partial<SyncEvent> }) => {
+  const handleIncomingEvent = useCallback((incoming: { payload?: unknown }) => {
     const event = incoming.payload;
-    if (!event || event.room_id !== roomId || !event.event_type) return;
+    if (!isSyncEventPayload(event, roomId)) return;
     if (event.sender_id && event.sender_id === currentUserIdRef.current) return;
 
     if (event.event_type === 'typing') {

@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/server';
 import { assertActiveRoom } from '@/lib/room-lifecycle';
+import { assertEncryptedPayload } from '@/lib/message-limits';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -166,7 +167,7 @@ export async function sendEncryptedMessage({
 }) {
   assertUuid(chatId, 'chat ID');
   assertUuid(receiverId, 'receiver ID');
-  if (!ciphertext || !iv) throw new Error('Encrypted message is incomplete.');
+  assertEncryptedPayload(ciphertext, iv);
 
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
