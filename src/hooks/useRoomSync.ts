@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { isUuid } from '@/lib/message-limits';
+import { getRoomRealtimeSnapshots, saveRoomRealtimeSnapshot } from '@/actions/room-controls';
+import { isPrivateStorageUrl } from '@/lib/room-file-contract';
 
 type BrowserSupabaseClient = ReturnType<typeof createClient>;
 type RoomChannel = ReturnType<BrowserSupabaseClient['channel']>;
-type RoomChannelKind = 'general' | 'control';
+type RoomChannelKind = 'general' | 'chat' | 'study' | 'watch' | 'control';
 type RoomChannels = Record<RoomChannelKind, RoomChannel | null>;
 
 export type SyncEventType =
@@ -38,6 +40,7 @@ export type SyncEvent = {
 
 export type RoomMediaState = {
   url: string;
+  filePath?: string;
   title: string;
   subtitleUrl: string | null;
   time: number;
@@ -212,6 +215,12 @@ function isSyncEventPayload(value: unknown, roomId: string): value is SyncEvent 
 }
 
 type MediaRevision = Pick<MediaEventMeta, 'eventId' | 'timestamp'>;
+type RealtimeSnapshot = {
+  snapshot_type: 'media' | 'timer' | 'settings';
+  state_version: number | string;
+  payload: unknown;
+  updated_at: string;
+};
 
 function isMediaEvent(eventType: SyncEventType) {
   return eventType === 'cast'
@@ -225,7 +234,16 @@ function isMediaEvent(eventType: SyncEventType) {
 }
 
 function channelKindForEvent(eventType: SyncEventType): RoomChannelKind {
+  if (eventType === 'typing' || eventType === 'room_message' || eventType === 'room_message_update') return 'chat';
+  if (eventType === 'timer_start' || eventType === 'timer_pause' || eventType === 'timer_reset') return 'study';
+  if (eventType === 'request_sync') return 'watch';
   return isMediaEvent(eventType) ? 'control' : 'general';
+}
+
+function snapshotTypeForEvent(eventType: SyncEventType): 'media' | 'timer' | null {
+  if (isMediaEvent(eventType)) return 'media';
+  if (eventType === 'timer_start' || eventType === 'timer_pause' || eventType === 'timer_reset') return 'timer';
+  return null;
 }
 
 function isNewerMediaRevision(next: MediaRevision, current: MediaRevision | null) {
@@ -234,12 +252,34 @@ function isNewerMediaRevision(next: MediaRevision, current: MediaRevision | null
   return next.eventId > current.eventId;
 }
 
+function isSafeStoragePath(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= 512
+    && !value.includes('..')
+    && !value.includes('\\')
+    && !/^https?:\/\//i.test(value);
+}
+
+function sanitizeMediaPayload(payload: Record<string, unknown>) {
+  const next = { ...payload };
+  if (isPrivateStorageUrl(next.url)) delete next.url;
+  if (!isSafeStoragePath(next.filePath)) delete next.filePath;
+  if (isPrivateStorageUrl(next.subtitleUrl) || (next.subtitleUrl !== undefined && !isSafeStoragePath(next.subtitleUrl) && next.subtitleUrl !== null)) {
+    delete next.subtitleUrl;
+  }
+  return next;
+}
+
 function normalizeMediaState(value: Partial<RoomMediaState> | null | undefined): RoomMediaState | null {
-  if (!value || typeof value.url !== 'string' || !value.url) return null;
+  const url = typeof value?.url === 'string' && !isPrivateStorageUrl(value.url) ? value.url : '';
+  const filePath = isSafeStoragePath(value?.filePath) ? value?.filePath : undefined;
+  if (!value || (!url && !filePath)) return null;
   return {
-    url: value.url,
+    url,
+    filePath,
     title: typeof value.title === 'string' && value.title ? value.title : 'External Stream',
-    subtitleUrl: typeof value.subtitleUrl === 'string' ? value.subtitleUrl : null,
+    subtitleUrl: isSafeStoragePath(value.subtitleUrl) ? value.subtitleUrl : null,
     time: Math.max(0, typeof value.time === 'number' && Number.isFinite(value.time) ? value.time : 0),
     speed: Math.min(4, Math.max(0.25, typeof value.speed === 'number' && Number.isFinite(value.speed) ? value.speed : 1)),
     playing: Boolean(value.playing),
@@ -265,8 +305,10 @@ function createMediaState(
   resetSubtitle = false,
   meta?: MediaEventMeta,
 ): RoomMediaState | null {
-  const url = asString(payload.url, previous?.url ?? '');
-  if (!url) return null;
+  const filePath = isSafeStoragePath(payload.filePath) ? payload.filePath : (previous?.filePath ?? '');
+  const urlCandidate = asString(payload.url, previous?.url ?? '');
+  const url = isPrivateStorageUrl(urlCandidate) ? '' : urlCandidate;
+  if (!url && !filePath) return null;
 
   const speed = Math.min(4, Math.max(0.25, asFiniteNumber(payload.speed, previous?.speed ?? 1)));
   const time = Math.max(0, asFiniteNumber(payload.time, previous?.time ?? 0));
@@ -277,13 +319,14 @@ function createMediaState(
       : (previous?.sourceType ?? 'url');
   const subtitleUrl = resetSubtitle
     ? null
-    : typeof payload.subtitleUrl === 'string'
+    : isSafeStoragePath(payload.subtitleUrl)
       ? payload.subtitleUrl
       : (payload.subtitleUrl === null ? null : (previous?.subtitleUrl ?? null));
   const eventTimestamp = meta?.timestamp ?? Date.now();
 
   return {
     url,
+    filePath: filePath || undefined,
     title: asString(payload.title, previous?.title ?? 'External Stream'),
     subtitleUrl,
     time,
@@ -318,7 +361,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
 
   const [connectionState, setConnectionState] = useState<RoomSyncValue['connectionState']>('idle');
   const connectionStateRef = useRef<RoomSyncValue['connectionState']>('idle');
-  const channelRefs = useRef<RoomChannels>({ general: null, control: null });
+  const channelRefs = useRef<RoomChannels>({ general: null, chat: null, study: null, watch: null, control: null });
   const pendingEventsRef = useRef<Array<{ eventType: SyncEventType; payload: Record<string, unknown>; meta: MediaEventMeta }>>([]);
 
   const [typingUsers, setTypingUsers] = useState<Map<string, number>>(new Map());
@@ -337,6 +380,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   const [roomMessageEvents, setRoomMessageEvents] = useState<RoomMessageEvent[]>([]);
   const [roomControlEvents, setRoomControlEvents] = useState<RoomControlEvent[]>([]);
   const [roomControlVersion, setRoomControlVersion] = useState(0);
+  const stateVersionsRef = useRef<Record<'media' | 'timer', number>>({ media: 0, timer: 0 });
 
   const updateTimerState = useCallback((nextState: TimerState) => {
     const normalized = normalizeTimerState(nextState);
@@ -391,7 +435,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     if (eventType === 'subtitle_upload') {
       updateMediaState((current) => current ? {
         ...current,
-        subtitleUrl: asString(payload.subtitleUrl, current.subtitleUrl ?? '') || null,
+        subtitleUrl: isSafeStoragePath(payload.subtitleUrl) ? payload.subtitleUrl : null,
         controllerId: meta.senderId ?? current.controllerId,
         eventId: meta.eventId,
         eventTimestamp: meta.timestamp,
@@ -478,6 +522,12 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     if (!isSyncEventPayload(event, roomId)) return;
     if (event.sender_id && event.sender_id === currentUserIdRef.current) return;
 
+    const snapshotType = snapshotTypeForEvent(event.event_type);
+    if (snapshotType) {
+      if (event.state_version <= stateVersionsRef.current[snapshotType]) return;
+      stateVersionsRef.current[snapshotType] = event.state_version;
+    }
+
     if (event.event_type === 'typing') {
       if (event.sender_id) {
         setTypingUsers((current) => {
@@ -547,7 +597,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     setRoomControlVersion((current) => current + 1);
   }, [roomId]);
 
-  const sendEvent = useCallback((eventType: SyncEventType, payload: Record<string, unknown>, meta?: Partial<MediaEventMeta>) => {
+  const sendEvent = useCallback((eventType: SyncEventType, payload: Record<string, unknown>, meta?: Partial<MediaEventMeta>, stateVersion = 1) => {
     const channel = channelRefs.current[channelKindForEvent(eventType)];
     const senderId = currentUserIdRef.current;
     if (!channel || !senderId || connectionStateRef.current !== 'connected') return false;
@@ -559,7 +609,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       room_id: roomId,
       event_type: eventType,
       payload,
-      state_version: 1,
+      state_version: stateVersion,
     };
 
     void channel.send({ type: 'broadcast', event: 'room_action', payload: event }).catch((error: unknown) => {
@@ -576,8 +626,8 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
 
   const broadcastEvent = useCallback((eventType: SyncEventType, payload: Record<string, unknown> = {}) => {
     const eventPayload = eventType === 'cast'
-      ? { ...payload, castId: asString(payload.castId, createEventId()) }
-      : payload;
+      ? { ...sanitizeMediaPayload(payload), castId: asString(payload.castId, createEventId()) }
+      : isMediaEvent(eventType) ? sanitizeMediaPayload(payload) : payload;
     if (isMediaEvent(eventType) && !canControlMedia) return;
     const meta: MediaEventMeta = {
       eventId: createEventId(),
@@ -585,6 +635,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       senderId: currentUserIdRef.current ?? undefined,
       source: 'local',
     };
+    const snapshotType = snapshotTypeForEvent(eventType);
 
     // Update the local room state immediately. This keeps the cast responsive
     // even if the Realtime handshake is still finishing.
@@ -592,9 +643,34 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     applyTimerEvent(eventType, eventPayload);
 
     if (!roomId) return;
-    if (!sendEvent(eventType, eventPayload, meta)) {
-      pendingEventsRef.current.push({ eventType, payload: eventPayload, meta });
+    const emit = (stateVersion: number) => {
+      if (!sendEvent(eventType, eventPayload, meta, stateVersion)) {
+        // Only sync requests are safe to replay. Persistent state is saved via
+        // the authorized snapshot RPC and must never be retried as stale input.
+        if (eventType === 'request_sync') pendingEventsRef.current.push({ eventType, payload: eventPayload, meta });
+      }
+    };
+
+    if (snapshotType) {
+      // The server allocates the version while serializing the snapshot row.
+      // Broadcast only after that authoritative version is known.
+      void saveRoomRealtimeSnapshot(roomId, snapshotType, 1, { eventType, payload: eventPayload })
+        .then((result) => {
+          const authoritativeVersion = result?.state_version;
+          if (!authoritativeVersion || !Number.isSafeInteger(authoritativeVersion)) return;
+          stateVersionsRef.current[snapshotType] = Math.max(
+            stateVersionsRef.current[snapshotType],
+            authoritativeVersion,
+          );
+          emit(authoritativeVersion);
+        })
+        .catch((error: unknown) => {
+          console.error('Room snapshot write failed:', error);
+        });
+      return;
     }
+
+    emit(1);
   }, [applyMediaEvent, applyTimerEvent, canControlMedia, roomId, sendEvent]);
 
   // Keep late joiners in sync even while the host has temporarily switched to
@@ -611,7 +687,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     if (current.source === 'local' && !canControlMedia) return;
 
     sendEvent('force_sync', {
-      url: current.url,
+      ...(current.filePath ? { filePath: current.filePath } : { url: current.url }),
       subtitleUrl: current.subtitleUrl,
       title: current.title,
       time: current.time,
@@ -631,6 +707,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     const restoredMedia = normalizeMediaState(readSessionValue<Partial<RoomMediaState> | null>(mediaStorageKey(roomId), null));
     mediaStateRef.current = restoredMedia;
     lastMediaRevisionRef.current = null;
+    stateVersionsRef.current = { media: 0, timer: 0 };
     pendingEventsRef.current = [];
 
     const restoreTimer = window.setTimeout(() => {
@@ -652,6 +729,41 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   }, [roomId]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (!roomId) return () => { cancelled = true; };
+
+    void getRoomRealtimeSnapshots(roomId).then((snapshots) => {
+      if (cancelled) return;
+      (snapshots as RealtimeSnapshot[]).forEach((snapshot) => {
+        const snapshotType = snapshot.snapshot_type === 'media' || snapshot.snapshot_type === 'timer'
+          ? snapshot.snapshot_type
+          : null;
+        if (!snapshotType) return;
+        const snapshotVersion = Number(snapshot.state_version);
+        if (!Number.isSafeInteger(snapshotVersion) || snapshotVersion <= stateVersionsRef.current[snapshotType]) return;
+        const value = snapshot.payload;
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+        const record = value as Record<string, unknown>;
+        const eventType = record.eventType;
+        const payload = record.payload;
+        if (typeof eventType !== 'string' || !SYNC_EVENT_TYPES.has(eventType as SyncEventType)
+          || !payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+        stateVersionsRef.current[snapshotType] = snapshotVersion;
+        const typedEvent = eventType as SyncEventType;
+        const typedPayload = payload as Record<string, unknown>;
+        applyMediaEvent(typedEvent, typedPayload, {
+          eventId: `snapshot:${snapshotType}:${snapshotVersion}`,
+          timestamp: new Date(snapshot.updated_at).getTime(),
+          source: 'restored',
+        });
+        applyTimerEvent(typedEvent, typedPayload);
+      });
+    }).catch(() => undefined);
+
+    return () => { cancelled = true; };
+  }, [applyMediaEvent, applyTimerEvent, roomId]);
+
+  useEffect(() => {
     let isMounted = true;
     const readyChannels = new Set<RoomChannelKind>();
     const previousChannels = Object.values(channelRefs.current);
@@ -661,7 +773,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
         void supabase.removeChannel(channel);
       }
     });
-    channelRefs.current = { general: null, control: null };
+    channelRefs.current = { general: null, chat: null, study: null, watch: null, control: null };
 
     currentUserIdRef.current = null;
     pendingEventsRef.current = [];
@@ -685,6 +797,18 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       {
         kind: 'general',
         channel: supabase.channel(`sync:${roomId}`, { config: { private: true } }),
+      },
+      {
+        kind: 'chat',
+        channel: supabase.channel(`sync-chat:${roomId}`, { config: { private: true } }),
+      },
+      {
+        kind: 'study',
+        channel: supabase.channel(`sync-study:${roomId}`, { config: { private: true } }),
+      },
+      {
+        kind: 'watch',
+        channel: supabase.channel(`sync-watch:${roomId}`, { config: { private: true } }),
       },
       {
         kind: 'control',
@@ -726,7 +850,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       isMounted = false;
       window.clearTimeout(connectingTimer);
       readyChannels.clear();
-      channelRefs.current = { general: null, control: null };
+      channelRefs.current = { general: null, chat: null, study: null, watch: null, control: null };
       connectionStateRef.current = 'idle';
       channels.forEach(({ channel }) => {
         void channel.unsubscribe();

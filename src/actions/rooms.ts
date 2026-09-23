@@ -32,6 +32,14 @@ export async function createRoom(formData: FormData) {
     throw new Error('Invalid expiration value.');
   }
 
+  const rawScheduledFor = formData.get('scheduled_for');
+  const scheduledForDate = rawScheduledFor === null || rawScheduledFor === ''
+    ? null
+    : new Date(String(rawScheduledFor));
+  if (scheduledForDate && (!Number.isFinite(scheduledForDate.getTime()) || scheduledForDate.getTime() <= Date.now())) {
+    throw new Error('Scheduled rooms require a future start time.');
+  }
+
   // Clean username (lowercase, no spaces, only alphanumeric/underscores/dots)
   const rawUsername = formData.get('username') as string;
   const username = rawUsername ? rawUsername.toLowerCase().replace(/[^a-z0-9_.]/g, '') : null;
@@ -39,7 +47,8 @@ export async function createRoom(formData: FormData) {
   // Calculate the exact death timestamp if it's a temporary room
   let expiresAt = null;
   if (expirationType !== 'permanent' && hours !== null) {
-    expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
+    const startTime = scheduledForDate?.getTime() ?? Date.now();
+    expiresAt = new Date(startTime + hours * 3600 * 1000).toISOString();
   }
 
   const roomId = randomUUID();
@@ -52,6 +61,7 @@ export async function createRoom(formData: FormData) {
       is_private: isPrivate,
       expiration_type: expirationType,
       expires_at: expiresAt,
+      scheduled_for: scheduledForDate?.toISOString() ?? null,
       created_by: user.id,
       username: username || null // Pass null if empty to avoid unique constraint errors
     });
@@ -88,6 +98,7 @@ export async function getPublicRooms() {
       room_members(count)
     `)
     .eq('is_private', false)
+    .is('scheduled_for', null)
     .or(`expires_at.is.null,expires_at.gt.${now},reopened_until.gt.${now}`)
     .order('created_at', { ascending: false });
 
@@ -127,7 +138,7 @@ export async function getMyJoinedRooms() {
 
   const { data, error } = await supabase
     .from('room_members')
-    .select('role, rooms!inner(id, name, description, username, is_private, expiration_type, expires_at, reopened_until)')
+    .select('role, rooms!inner(id, name, description, username, is_private, expiration_type, expires_at, reopened_until, scheduled_for)')
     .eq('user_id', user.id)
     .eq('join_status', 'approved');
   if (error) throw new Error(error.message);

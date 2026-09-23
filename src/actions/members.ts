@@ -15,17 +15,20 @@ export async function getRoomAccess(identifier: string) {
   
   const room = roomData[0];
 
-  // Get the user's membership status
-  const { data: member } = await supabase
-    .from('room_members')
-    .select('role, join_status')
-    .eq('room_id', room.id)
-    .eq('user_id', user.id)
-    .single();
+  // The authorization RPC is the single source of truth for guest expiry,
+  // scheduling, lock state, restrictions, and membership visibility.
+  const { data: eligibilityData, error: eligibilityError } = await supabase.rpc(
+    'get_my_room_join_eligibility',
+    { p_room_id: room.id },
+  );
+  if (eligibilityError) throw new Error(eligibilityError.message);
+  const eligibility = eligibilityData?.[0];
+  const member = eligibility?.join_status
+    ? { role: eligibility.role, join_status: eligibility.join_status }
+    : null;
 
   if (!member) {
-    const { data: eligibility } = await supabase.rpc('get_my_room_join_eligibility', { p_room_id: room.id });
-    const restrictionState = eligibility?.[0]?.state;
+    const restrictionState = eligibility?.state;
     if (restrictionState === 'blocked' || restrictionState === 'banned') {
       return { status: restrictionState, role: null, room };
     }
@@ -33,7 +36,27 @@ export async function getRoomAccess(identifier: string) {
     return { status: 'private_not_joined', role: null, room };
   }
 
-  if (member.join_status === 'approved' && isRoomExpired(room)) {
+  if (eligibility?.state === 'guest_expired') {
+    return { status: 'guest_expired', role: member.role, room };
+  }
+
+  if (eligibility?.state === 'scheduled') {
+    return { status: 'scheduled', role: member.role, room };
+  }
+
+  // Recovery-window rooms are intentionally resolvable only for the existing
+  // owner/admin recovery audience. Do not let stale approved membership fall
+  // through to the normal room shell.
+  if (
+    member.join_status === 'approved'
+    && room.expiration_type === 'recoverable'
+    && isRoomExpired(room)
+    && ['owner', 'admin'].includes(member.role ?? '')
+  ) {
+    return { status: 'recovery_window', role: member.role, room };
+  }
+
+  if (eligibility?.state === 'unavailable' && member.join_status === 'approved') {
     return { status: 'expired', role: member.role, room };
   }
 

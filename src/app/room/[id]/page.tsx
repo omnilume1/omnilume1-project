@@ -38,7 +38,7 @@ import { clearFocusLock } from '@/lib/focus-lock';
 import { isRoomExpired } from '@/lib/room-lifecycle';
 import { minimizeRoom } from '@/lib/minimized-rooms';
 
-type AccessStatus = 'loading' | 'approved' | 'pending' | 'expired' | 'not_found' | 'unauthorized' | 'public_not_joined' | 'private_not_joined' | 'blocked' | 'banned' | 'kicked';
+type AccessStatus = 'loading' | 'approved' | 'pending' | 'expired' | 'recovery_window' | 'guest_expired' | 'scheduled' | 'not_found' | 'unauthorized' | 'public_not_joined' | 'private_not_joined' | 'blocked' | 'banned' | 'kicked';
 
 type RoomData = {
   id: string;
@@ -49,6 +49,7 @@ type RoomData = {
   expiration_type: string;
   expires_at: string | null;
   reopened_until?: string | null;
+  scheduled_for?: string | null;
   is_group?: boolean;
 };
 
@@ -104,6 +105,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [featureFlags, setFeatureFlags] = useState<Record<RoomFeature, boolean>>(DEFAULT_FEATURE_FLAGS);
   const [canManageMembers, setCanManageMembers] = useState(false);
   const [canControlMedia, setCanControlMedia] = useState(false);
+  const [presenceRefreshVersion, setPresenceRefreshVersion] = useState(0);
   const [controlCenterTab, setControlCenterTab] = useState<'user-control' | 'profile' | null>(null);
   const [controlCenterMemberId, setControlCenterMemberId] = useState<string | null>(null);
 
@@ -236,7 +238,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   }, [roomData]);
 
   useEffect(() => {
-    if (accessStatus === 'not_found' || accessStatus === 'pending' || accessStatus === 'expired' || accessStatus === 'unauthorized' || accessStatus === 'public_not_joined' || accessStatus === 'private_not_joined' || accessStatus === 'blocked' || accessStatus === 'banned' || accessStatus === 'kicked' || isExpired) {
+    if (accessStatus === 'not_found' || accessStatus === 'pending' || accessStatus === 'expired' || accessStatus === 'recovery_window' || accessStatus === 'guest_expired' || accessStatus === 'scheduled' || accessStatus === 'unauthorized' || accessStatus === 'public_not_joined' || accessStatus === 'private_not_joined' || accessStatus === 'blocked' || accessStatus === 'banned' || accessStatus === 'kicked' || isExpired) {
       clearFocusLock();
     }
   }, [accessStatus, isExpired]);
@@ -334,7 +336,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const roomIsExpired = accessStatus === 'expired' || isExpired;
   const realtimeRoomId = accessStatus === 'approved' && !roomIsExpired ? (roomData?.id ?? '') : '';
   const roomSync = useRoomSync(realtimeRoomId, userRole === 'owner' || canControlMedia);
-  const roomPresence = useRoomPresence(realtimeRoomId);
+  const roomPresence = useRoomPresence(realtimeRoomId, presenceRefreshVersion);
   useEffect(() => {
     const currentUserId = roomSync.currentUserId;
     const removed = roomSync.roomControlEvents.find((event) => event.subjectUserId === currentUserId && ((event.eventType === 'membership_changed' && event.payload.action === 'kick') || (event.eventType === 'restriction_changed' && (event.payload.action === 'ban' || event.payload.action === 'block'))));
@@ -348,10 +350,11 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   }, [roomSync.currentUserId, roomSync.roomControlEvents, router]);
   const focusRoomPath = `/room/${encodeURIComponent(identifier)}`;
   const featureEnabled = (feature: RoomFeature) => featureFlags[feature] !== false;
-  const handleControlStateChange = useCallback(({ featureFlags: nextFlags, canManageMembers: nextCanManageMembers, canControlMedia: nextCanControlMedia }: { featureFlags: Partial<Record<RoomFeature, boolean>>; canManageMembers: boolean; canControlMedia: boolean }) => {
+  const handleControlStateChange = useCallback(({ featureFlags: nextFlags, canManageMembers: nextCanManageMembers, canControlMedia: nextCanControlMedia }: { featureFlags: Partial<Record<RoomFeature, boolean>>; canManageMembers: boolean; canControlMedia: boolean; isGhostMode: boolean }) => {
     setFeatureFlags({ ...DEFAULT_FEATURE_FLAGS, ...nextFlags });
     setCanManageMembers(nextCanManageMembers);
     setCanControlMedia(nextCanControlMedia);
+    setPresenceRefreshVersion((version) => version + 1);
   }, []);
 
   const handleLeave = async () => {
@@ -408,6 +411,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   if (accessStatus === 'loading') return <div className="omni-state-screen text-sm text-neutral-500">Verifying secure access...</div>;
   if (accessStatus === 'not_found') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl">❌ Space Not Found</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Explore</Link></div>;
   if (accessStatus === 'pending') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-amber-500">⏳ Waiting for Approval</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
+  if (accessStatus === 'scheduled') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-violet-300">⏰ This room is scheduled</h2><p className="mt-2 text-sm text-neutral-500">The room will open at {roomData?.scheduled_for ? new Date(roomData.scheduled_for).toLocaleString() : 'its scheduled time'}.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
+  if (accessStatus === 'guest_expired') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-amber-400">Guest access has expired</h2><p className="mt-2 text-sm text-neutral-500">Ask a room manager for a new invitation if you need access again.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
   if (accessStatus === 'kicked') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-red-400">You were kicked from this room.</h2><p className="mt-2 text-sm text-neutral-500">Your active room session has ended.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Rooms</Link></div>;
   if (accessStatus === 'blocked' || accessStatus === 'banned') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-red-400">You have been blocked from this room.</h2><p className="mt-2 text-sm text-neutral-500">Room access is not available for this account.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Rooms</Link></div>;
   if (accessStatus === 'unauthorized' || accessStatus === 'public_not_joined' || accessStatus === 'private_not_joined') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-red-500">🔒 Access Restricted</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Go to Explore to Join</Link></div>;
@@ -449,7 +454,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     );
   }
 
-  if ((accessStatus === 'expired' || isExpired) && roomData) {
+  if ((accessStatus === 'expired' || accessStatus === 'recovery_window' || isExpired) && roomData) {
     const isIrreversible = roomData.expiration_type === 'irreversible';
     const recoveryCopy = recoveryStatus === 'pending'
       ? 'Recovery request pending review.'

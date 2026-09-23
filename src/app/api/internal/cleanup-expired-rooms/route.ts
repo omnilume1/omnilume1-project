@@ -11,10 +11,17 @@ type ExpiredMedia = {
   id: string;
   room_id: string | null;
   file_url: string;
+  storage_path: string | null;
+  subtitle_path: string | null;
 };
 
 type ExpiredRoom = {
   id: string;
+};
+
+type PendingRoomFile = {
+  id: string;
+  object_path: string;
 };
 
 function getAdminClient() {
@@ -92,7 +99,9 @@ function getRoomStoragePath(fileUrl: string, roomId: string) {
   }
 
   const normalizedCandidate = candidate.replace(/^\/+/, '');
-  return normalizedCandidate.startsWith(expectedPrefix)
+  return !normalizedCandidate.includes('..')
+    && !normalizedCandidate.includes('\\')
+    && normalizedCandidate.startsWith(expectedPrefix)
     ? normalizedCandidate
     : null;
 }
@@ -160,7 +169,7 @@ async function removeStorageFiles(
 async function cleanupExpiredMedia(supabase: SupabaseClient, now: string) {
   const { data, error } = await supabase
     .from('temporary_media')
-    .select('id, room_id, file_url')
+    .select('id, room_id, file_url, storage_path, subtitle_path')
     .lte('expires_at', now)
     .limit(MEDIA_BATCH_SIZE);
 
@@ -172,13 +181,33 @@ async function cleanupExpiredMedia(supabase: SupabaseClient, now: string) {
   const failures: string[] = [];
 
   for (const media of (data ?? []) as ExpiredMedia[]) {
+    const { data: existingJob, error: existingJobError } = await supabase
+      .from('temporary_media_cleanup_jobs')
+      .select('attempts')
+      .eq('media_id', media.id)
+      .maybeSingle();
+    if (existingJobError) throw new Error(existingJobError.message);
+    const attempts = (existingJob?.attempts ?? 0) + 1;
+    const { error: jobError } = await supabase
+      .from('temporary_media_cleanup_jobs')
+      .upsert({
+        media_id: media.id,
+        status: 'pending',
+        attempts,
+        last_error: null,
+        last_attempt_at: now,
+        updated_at: now,
+      }, { onConflict: 'media_id' });
+    if (jobError) throw new Error(jobError.message);
+
     try {
       if (media.room_id) {
-        const storagePath = getRoomStoragePath(media.file_url, media.room_id);
+        const storagePath = getRoomStoragePath(media.storage_path ?? media.file_url, media.room_id);
 
-        if (storagePath) {
-          await removeStorageFiles(supabase, [storagePath]);
-        }
+        const subtitlePath = media.subtitle_path
+          ? getRoomStoragePath(media.subtitle_path, media.room_id)
+          : null;
+        await removeStorageFiles(supabase, [storagePath, subtitlePath].filter((path): path is string => Boolean(path)));
       }
 
       const { error: deleteError } = await supabase
@@ -192,16 +221,51 @@ async function cleanupExpiredMedia(supabase: SupabaseClient, now: string) {
 
       removed += 1;
     } catch (cleanupError) {
-      failures.push(
-        `temporary_media:${media.id}:${
-          cleanupError instanceof Error
-            ? cleanupError.message
-            : 'cleanup failed'
-        }`,
-      );
+      const message = cleanupError instanceof Error ? cleanupError.message : 'cleanup failed';
+      await supabase
+        .from('temporary_media_cleanup_jobs')
+        .update({
+          status: 'failed',
+          attempts,
+          last_error: message.slice(0, 1_000),
+          last_attempt_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('media_id', media.id);
+      failures.push(`temporary_media:${media.id}:${message}`);
     }
   }
 
+  return { removed, failures };
+}
+
+// Permanent files are never selected by temporary-media expiry. This retry
+// queue only finishes an explicit, authorized permanent-file deletion.
+async function cleanupPendingRoomFiles(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from('room_files')
+    .select('id, object_path')
+    .eq('retention_state', 'delete_pending')
+    .limit(MEDIA_BATCH_SIZE);
+  if (error) throw new Error(error.message);
+
+  let removed = 0;
+  const failures: string[] = [];
+  for (const file of (data ?? []) as PendingRoomFile[]) {
+    try {
+      await removeStorageFiles(supabase, [file.object_path]);
+      const { error: completeError } = await supabase.rpc('complete_room_file_delete', {
+        p_file_id: file.id,
+        p_error: null,
+      });
+      if (completeError) throw new Error(completeError.message);
+      removed += 1;
+    } catch (cleanupError) {
+      const message = cleanupError instanceof Error ? cleanupError.message : 'cleanup failed';
+      await supabase.rpc('complete_room_file_delete', { p_file_id: file.id, p_error: message });
+      failures.push(`room_file:${file.id}:${message}`);
+    }
+  }
   return { removed, failures };
 }
 
@@ -225,6 +289,27 @@ async function cleanupIrreversibleRooms(
   const failures: string[] = [];
 
   for (const room of (data ?? []) as ExpiredRoom[]) {
+    // Persist intent before destructive storage work so a failed worker run is
+    // visible and retried on the next authorized cleanup invocation.
+    const { data: existingJob, error: existingJobError } = await supabase
+      .from('room_cleanup_jobs')
+      .select('attempts')
+      .eq('room_id', room.id)
+      .maybeSingle();
+    if (existingJobError) throw new Error(existingJobError.message);
+    const attempts = (existingJob?.attempts ?? 0) + 1;
+    const { error: jobError } = await supabase
+      .from('room_cleanup_jobs')
+      .upsert({
+        room_id: room.id,
+        status: 'pending',
+        attempts,
+        last_error: null,
+        updated_at: now,
+        last_attempt_at: now,
+      }, { onConflict: 'room_id' });
+    if (jobError) throw new Error(jobError.message);
+
     try {
       const storagePaths = await listStorageFiles(supabase, room.id);
       await removeStorageFiles(supabase, storagePaths);
@@ -244,12 +329,19 @@ async function cleanupIrreversibleRooms(
 
       removed += 1;
     } catch (cleanupError) {
+      const message = cleanupError instanceof Error ? cleanupError.message : 'cleanup failed';
+      await supabase
+        .from('room_cleanup_jobs')
+        .update({
+          status: 'failed',
+          attempts,
+          last_error: message.slice(0, 1_000),
+          updated_at: new Date().toISOString(),
+          last_attempt_at: new Date().toISOString(),
+        })
+        .eq('room_id', room.id);
       failures.push(
-        `room:${room.id}:${
-          cleanupError instanceof Error
-            ? cleanupError.message
-            : 'cleanup failed'
-        }`,
+        `room:${room.id}:${message}`,
       );
     }
   }
@@ -276,13 +368,15 @@ async function cleanupExpiredRooms(request: Request) {
   try {
     const now = new Date().toISOString();
     const media = await cleanupExpiredMedia(supabase, now);
+    const files = await cleanupPendingRoomFiles(supabase);
     const rooms = await cleanupIrreversibleRooms(supabase, now);
-    const failures = [...media.failures, ...rooms.failures];
+    const failures = [...media.failures, ...files.failures, ...rooms.failures];
 
     return NextResponse.json(
       {
         ok: failures.length === 0,
         expiredMediaRemoved: media.removed,
+        pendingRoomFilesRemoved: files.removed,
         irreversibleRoomsRemoved: rooms.removed,
         failures,
       },

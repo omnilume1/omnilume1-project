@@ -9,6 +9,7 @@ import {
   revokeRoomInvite,
   setRoomRolePermission,
   setRoomMemberRole,
+  setRoomGhostMode,
   transferRoomOwnership,
   updateRoomAnnouncement,
   updateRoomControls,
@@ -159,6 +160,7 @@ export default function RoomControlCenter({
     featureFlags: Partial<Record<Feature, boolean>>;
     canManageMembers: boolean;
     canControlMedia: boolean;
+    isGhostMode: boolean;
   }) => void;
   requestedTab?: Tab | null;
   selectedMemberId?: string | null;
@@ -191,6 +193,7 @@ export default function RoomControlCenter({
   const [profileName, setProfileName] = useState("");
   const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
   const [profileBio, setProfileBio] = useState("");
+  const [isGhostMode, setIsGhostMode] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(
     selectedMemberId ?? null,
   );
@@ -244,6 +247,7 @@ export default function RoomControlCenter({
       setProfileName(nextProfile?.display_name ?? "");
       setProfileAvatarUrl(nextProfile?.avatar_url ?? "");
       setProfileBio(nextProfile?.bio ?? "");
+      setIsGhostMode(state.myPresenceMode?.is_ghost_mode === true);
       onStateChange({
         featureFlags: nextSettings.feature_flags,
         canManageMembers:
@@ -262,6 +266,7 @@ export default function RoomControlCenter({
               permission.capability === "watch_control" &&
               permission.allowed,
           ),
+        isGhostMode: state.myPresenceMode?.is_ghost_mode === true,
       });
       setError(null);
     } catch (loadError) {
@@ -320,6 +325,7 @@ export default function RoomControlCenter({
           isOwner || nextPermissions.some((permission) => permission.role === currentUserRole && permission.capability === "manage_members" && permission.allowed),
         canControlMedia:
           isOwner || nextPermissions.some((permission) => permission.role === currentUserRole && permission.capability === "watch_control" && permission.allowed),
+        isGhostMode,
       });
     };
 
@@ -1269,6 +1275,23 @@ export default function RoomControlCenter({
                       </p>
                     </div>
                     <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <label className="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-neutral-300">
+                        <span><strong className="text-white">Ghost Mode</strong><br /><span className="text-xs text-neutral-500">Hide your presence and identity from ordinary members. Owners and admins can still audit presence.</span></span>
+                        <input
+                          type="checkbox"
+                          checked={isGhostMode}
+                          disabled={working === "ghost-mode"}
+                          onChange={(event) => {
+                            const next = event.target.checked;
+                            void run(
+                              "ghost-mode",
+                              () => setRoomGhostMode(roomId, next).then(() => undefined),
+                              next ? "Ghost Mode enabled." : "Ghost Mode disabled.",
+                            );
+                          }}
+                          className="mt-1 h-4 w-4 accent-violet-400"
+                        />
+                      </label>
                       <label className="block text-sm font-medium text-white">
                         Display name
                         <input
