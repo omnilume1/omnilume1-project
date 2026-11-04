@@ -1,5 +1,5 @@
--- Query 09: post-apply verification for 20261105090000 (D5, D6) and
--- 20261105100000 (D8). Read-only. 11 rows.
+-- Query 09: post-apply verification for 20261105090000 (D5, D6),
+-- 20261105100000 (D8) and 20261105110000 (D9). Read-only. 12 rows.
 -- Run this file by itself after `supabase db push`. Every row must report
 -- `ok`. Any other status means the deployed catalog does not match the
 -- reviewed migration.
@@ -75,4 +75,13 @@ SELECT 'd8_subtitle_rpc_execute_authenticated_only',
        CASE WHEN has_function_privilege('authenticated', 'public.set_temporary_media_subtitle(uuid, text)'::regprocedure, 'EXECUTE')
              AND NOT has_function_privilege('anon', 'public.set_temporary_media_subtitle(uuid, text)'::regprocedure, 'EXECUTE')
             THEN 'ok' ELSE 'FAIL' END
+UNION ALL
+-- D9 (20261105110000): authors can read their own posts.
+SELECT 'd9_posts_select_includes_author',
+       CASE WHEN EXISTS (
+         SELECT 1 FROM pg_policies
+         WHERE schemaname = 'public' AND tablename = 'posts' AND policyname = 'posts_select_visible'
+           AND qual LIKE '(auth.uid() = author_id) OR%'
+           AND qual LIKE '%can_view_post(author_id, visibility)%'
+       ) THEN 'ok' ELSE 'FAIL' END
 ORDER BY check_name;

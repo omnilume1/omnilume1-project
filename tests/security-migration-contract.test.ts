@@ -134,6 +134,19 @@ test('no current function regex escapes a dot with a doubled backslash', () => {
   assert.deepEqual(offenders, []);
 });
 
+test('post authors can read their own posts, so create and soft-delete can return rows', () => {
+  // PostgREST mutations use RETURNING, which must pass the SELECT policy (D9).
+  const definitions = statements.filter(({ statement }) => /^(CREATE|ALTER) POLICY "posts_select_visible" ON public\.posts/i.test(statement));
+  const latest = definitions[definitions.length - 1];
+  assert.ok(latest, 'No posts_select_visible definition found.');
+  assert.match(latest.statement, /auth\.uid\(\) = author_id OR/, `${latest.file} hides authors' own posts from them`);
+  const profiles = readFileSync(resolve(process.cwd(), 'src', 'actions', 'profiles.ts'), 'utf8');
+  // With authors able to see deleted rows, every reader must filter them out.
+  const postReads = [...profiles.matchAll(/\.from\('posts'\)\s*\.select\([\s\S]*?;/g)].map((match) => match[0]);
+  assert.ok(postReads.length > 0);
+  for (const read of postReads) assert.match(read, /\.is\('deleted_at', null\)/, `post read without deleted_at filter: ${read.slice(0, 80)}`);
+});
+
 test('room chat is delivered by RLS-filtered Postgres Changes, never Broadcast', () => {
   const read = (...parts: string[]) => readFileSync(resolve(process.cwd(), ...parts), 'utf8');
   const sync = read('src', 'hooks', 'useRoomSync.ts');

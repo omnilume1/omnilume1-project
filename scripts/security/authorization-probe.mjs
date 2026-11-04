@@ -24,8 +24,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const mode = process.argv[2];
-if (mode !== 'anon' && mode !== 'full') {
-  console.error('Usage: node scripts/security/authorization-probe.mjs <anon|full>');
+if (mode !== 'anon' && mode !== 'full' && mode !== 'routes') {
+  console.error('Usage: node scripts/security/authorization-probe.mjs <anon|full|routes [baseUrl]>');
   process.exit(2);
 }
 
@@ -142,6 +142,19 @@ async function mirrorRoomSubscriptions(client, roomId, log) {
   const statuses = await Promise.all(channels.map(joinChannel));
   if (statuses[2] === 'SUBSCRIBED') await presence.track({ user_id: userId, online_at: new Date().toISOString() }).catch(() => undefined);
   return { channels, statuses };
+}
+
+// Phase 2: the same room topics joined as PUBLIC channels (no private flag),
+// recording every Broadcast and every presence state they see.
+async function openPublicListeners(client, roomId, log) {
+  const now = () => Date.now();
+  const channels = ['sync', 'sync-control', 'presence'].map((kind) => {
+    const channel = client.channel(`${kind}:${roomId}`, { config: { private: false } });
+    channel.on('broadcast', { event: '*' }, (message) => log.push({ at: now(), kind: 'broadcast', topic: kind, event: message.event }));
+    if (kind === 'presence') channel.on('presence', { event: 'sync' }, () => log.push({ at: now(), kind: 'presence', keys: Object.keys(channel.presenceState()) }));
+    return channel;
+  });
+  return { channels, statuses: await Promise.all(channels.map(joinChannel)) };
 }
 
 function jwtLifetimeSeconds(accessToken) {
@@ -267,6 +280,31 @@ async function fullPhase() {
     const noteRow = Array.isArray(note.data) ? note.data[0] : note.data;
     if (note.error || !noteRow?.id) blocked('T5', 'study-note fixture', codeOf(note));
 
+    // ---- Phase 2: public-channel bypass. "Allow public access" is enabled,
+    // so B (not a member) subscribes to the room topics WITHOUT private:true.
+    // These listeners stay open for the whole run (non-member, member,
+    // removed). A publishes only on the private topics. Any delivery here
+    // means the public and private topics are not isolated.
+    // Separate connections: one client cannot join the same topic twice, and
+    // A and B join these topics privately later in the run.
+    const publicB = await signIn('B', creds[1].email, creds[1].password);
+    const publisherA = await signIn('A', creds[0].email, creds[0].password);
+    extraClients.push(publicB.client, publisherA.client);
+    const publicLog = [];
+    const publicListener = await openPublicListeners(publicB.client, R1, publicLog);
+    for (const channel of publicListener.channels) channels.push([publicB.client, channel]);
+    info('P2', 'public (non-private) joins of sync/sync-control/presence for R1', publicListener.statuses.join('/'));
+    const ownerPrivateSync = await subscribe(publisherA.client, `sync:${R1}`);
+    const ownerPrivatePresence = publisherA.client.channel(`presence:${R1}`, { config: { private: true, presence: { key: A.id } } });
+    const ownerPresenceStatus = await joinChannel(ownerPrivatePresence);
+    channels.push([publisherA.client, ownerPrivateSync.channel], [publisherA.client, ownerPrivatePresence]);
+    if (ownerPresenceStatus === 'SUBSCRIBED') await ownerPrivatePresence.track({ user_id: A.id, online_at: new Date().toISOString() }).catch(() => undefined);
+    await ownerPrivateSync.channel.send({ type: 'broadcast', event: 'room_action', payload: { event_id: randomUUID(), sender_id: A.id, timestamp: Date.now(), room_id: R1, event_type: 'typing', payload: {}, state_version: 1 } });
+    await ownerPrivateSync.channel.send({ type: 'broadcast', event: 'qa-probe', payload: { n: 0 } });
+    await sleep(3_000);
+    record('P2', 'non-member public subscriber receives no private room Broadcast', !publicLog.some((entry) => entry.kind === 'broadcast'), `entries=${publicLog.length}`);
+    record('P2', 'non-member public presence does not see members on the private topic', !publicLog.some((entry) => entry.kind === 'presence' && entry.keys.includes(A.id)));
+
     // ---- T6 / T8 / T5: B is authenticated but not a member of R1.
     const r2Message = await B.client.from('messages').insert({ room_id: R2, sender_id: B.id, content: 'qa r2 probe' });
     const r2Read = await B.client.from('messages').select('id').eq('room_id', R2);
@@ -334,6 +372,47 @@ async function fullPhase() {
     record('T6', 'member B without watch_control cannot upload media', Boolean(memberUpload.error), codeOf(memberUpload));
     await B.client.storage.from(BUCKET).remove([mediaPath]);
     record('T6', 'member B without watch_control cannot delete media', await objectExists(A.client, mediaPath));
+
+    // ---- D8: subtitle bound to its media row (20261105100000).
+    const subtitlePath = `${R1}/subtitles/${randomUUID()}.vtt`;
+    const subtitleUpload = await A.client.storage.from(BUCKET).upload(subtitlePath, new Blob(['WEBVTT\n\n00:00.000 --> 00:01.000\nqa\n'], { type: 'text/vtt' }), { contentType: 'text/vtt', upsert: false });
+    const attach = mediaId ? await A.client.rpc('set_temporary_media_subtitle', { p_media_id: mediaId, p_subtitle_path: subtitlePath }) : { error: { code: 'no_media' } };
+    record('D8', 'owner attaches a valid <room>/subtitles/<uuid>.vtt to its media', !subtitleUpload.error && !attach.error, `${codeOf(subtitleUpload)}/${codeOf(attach)}`);
+    const badAttach = mediaId ? await A.client.rpc('set_temporary_media_subtitle', { p_media_id: mediaId, p_subtitle_path: `${R2}/subtitles/${randomUUID()}.vtt` }) : { error: { code: 'no_media' } };
+    record('D8', 'subtitle path from another room is rejected', Boolean(badAttach.error), codeOf(badAttach));
+    const memberAttach = mediaId ? await B.client.rpc('set_temporary_media_subtitle', { p_media_id: mediaId, p_subtitle_path: subtitlePath }) : { error: { code: 'no_media' } };
+    record('D8', 'member without watch_control cannot attach subtitles', Boolean(memberAttach.error), codeOf(memberAttach));
+    const memberSubtitleRow = await B.client.from('temporary_media').select('subtitle_path').eq('id', mediaId).maybeSingle();
+    const memberSubtitleUrl = memberSubtitleRow.data?.subtitle_path ? await B.client.storage.from(BUCKET).createSignedUrl(memberSubtitleRow.data.subtitle_path, 60) : { error: { code: 'no_subtitle' } };
+    record('D8', 'member resolves the subtitle under RLS (resolveRoomMedia path)', memberSubtitleRow.data?.subtitle_path === subtitlePath && !memberSubtitleUrl.error, `${codeOf(memberSubtitleRow)}/${codeOf(memberSubtitleUrl)}`);
+
+    // ---- D6: `files` deletion through room_file_owned_by_caller (20261105090000).
+    const tinyPdf = () => new Blob(['%PDF-1.4\n%qa\n'], { type: 'application/pdf' });
+    const registerFile = async (actor, label) => {
+      const path = `${R1}/files/${randomUUID()}.pdf`;
+      const upload = await actor.client.storage.from(BUCKET).upload(path, tinyPdf(), { contentType: 'application/pdf', upsert: false });
+      const registered = upload.error ? upload : await actor.client.rpc('register_room_file', {
+        p_room_id: R1, p_object_path: path, p_original_name: `${label}.pdf`, p_normalized_name: `${label}.pdf`, p_mime_type: 'application/pdf', p_size_bytes: tinyPdf().size, p_metadata: {},
+      });
+      const row = Array.isArray(registered.data) ? registered.data[0] : registered.data;
+      return { path, id: row?.id ?? null, code: codeOf(registered) };
+    };
+    const ownerFile = await registerFile(A, 'qa-owner-file');
+    const memberFile = await registerFile(B, 'qa-member-file');
+    const memberFileForOwner = await registerFile(B, 'qa-member-file-2');
+    const formerUploaderFile = await registerFile(B, 'qa-member-file-3');
+    record('D6', 'owner and member upload and register room files', [ownerFile, memberFile, memberFileForOwner, formerUploaderFile].every((file) => file.id), [ownerFile, memberFile, memberFileForOwner, formerUploaderFile].map((file) => file.code).join('/'));
+    await B.client.storage.from(BUCKET).remove([ownerFile.path]);
+    record('D6', 'member cannot delete a file owned by someone else', await objectExists(A.client, ownerFile.path));
+    const beginOwn = memberFile.id ? await B.client.rpc('begin_room_file_delete', { p_file_id: memberFile.id }) : { error: { code: 'no_file' } };
+    const removeOwn = await B.client.storage.from(BUCKET).remove([memberFile.path]);
+    const ownGone = !(await objectExists(A.client, memberFile.path));
+    const completeOwn = memberFile.id ? await B.client.rpc('complete_room_file_delete', { p_file_id: memberFile.id, p_error: null }) : { error: { code: 'no_file' } };
+    record('D6', 'file owner deletes own file (begin, storage delete, complete)', !beginOwn.error && !removeOwn.error && ownGone && !completeOwn.error, `${codeOf(beginOwn)}/${removeOwn.error ? `${codeOf(removeOwn)} ${removeOwn.error.message}` : 'ok'}/gone=${ownGone}/${codeOf(completeOwn)}`);
+    const ownerRemoves = await A.client.storage.from(BUCKET).remove([memberFileForOwner.path]);
+    record('D6', 'room owner deletes a member file (owner/admin branch)', !ownerRemoves.error && !(await objectExists(A.client, memberFileForOwner.path)), ownerRemoves.error ? `${codeOf(ownerRemoves)} ${ownerRemoves.error.message}` : 'ok');
+    const crossRoom = await B.client.storage.from(BUCKET).remove([`${R1}/files/../../${R2}/media/${randomUUID()}.mp4`, ownerFile.path]);
+    record('D6', 'cross-room and traversal deletes change nothing', await objectExists(A.client, ownerFile.path), codeOf(crossRoom));
 
     // ---- T7 realtime while a member.
     const received = [];
@@ -524,6 +603,14 @@ async function fullPhase() {
     record('D7', 'removed connection cannot sign the media object', Boolean(hostileSigned.error) || !hostileSigned.data?.signedUrl, codeOf(hostileSigned));
     const hostileMessages = await hostile.client.from('messages').select('id').eq('room_id', R1);
     record('D7', 'removed connection cannot fetch room messages', deniedOrEmpty(hostileMessages), `${codeOf(hostileMessages)} rows=${rowsOf(hostileMessages)}`);
+    const hostileSubtitle = await hostile.client.storage.from(BUCKET).createSignedUrl(subtitlePath, 60);
+    record('D8', 'removed member cannot sign the subtitle', Boolean(hostileSubtitle.error) || !hostileSubtitle.data?.signedUrl, codeOf(hostileSubtitle));
+    // Accepted design (owner decision 2026-11-05): an uploader keeps the right
+    // to delete their own file after leaving, like begin_room_file_delete.
+    await hostile.client.storage.from(BUCKET).remove([formerUploaderFile.path]);
+    info('D6', 'former uploader deletes own file after removal (accepted design)', `deleted=${!(await objectExists(A.client, formerUploaderFile.path))}`);
+    record('P2', 'public subscriber received nothing during non-member, member and removed phases', !publicLog.some((entry) => entry.kind === 'broadcast'), `broadcast=${publicLog.filter((entry) => entry.kind === 'broadcast').length}`);
+    record('P2', 'public presence never exposed private-topic members', !publicLog.some((entry) => entry.kind === 'presence' && (entry.keys.includes(A.id) || entry.keys.includes(B.id))), `presence syncs=${publicLog.filter((entry) => entry.kind === 'presence').length}`);
     const residual = [...new Set(hostileAfter.map((entry) => {
       if (entry.kind === 'broadcast') return `${entry.topic}:${entry.payload?.event_type}{${Object.keys(entry.payload?.payload ?? {}).sort().join(',')}}`;
       if (entry.kind === 'presence') return `presence:{${entry.keys.length} member key(s)}`;
@@ -563,6 +650,130 @@ async function fullPhase() {
       await sleep(4_000);
       record('T7', 'existing subscription stops after the former member refreshes its token', !received.includes(3), `received=${JSON.stringify(received)}`);
     }
+
+    // ---- Actions 02/04: profile RLS, privacy projection, follows, posts.
+    const one = (res) => (Array.isArray(res.data) ? res.data[0] : res.data) ?? null;
+    const ownProfile = await A.client.from('profiles').select('id').eq('id', A.id);
+    record('A02', 'user reads own base profile row', rowsOf(ownProfile) === 1, codeOf(ownProfile));
+    const otherProfile = await A.client.from('profiles').select('id').eq('id', B.id);
+    record('A02', 'user cannot read another base profile row', deniedOrEmpty(otherProfile), `${codeOf(otherProfile)} rows=${rowsOf(otherProfile)}`);
+    const otherProfileWrite = await A.client.from('profiles').update({ bio: 'qa tamper' }).eq('id', B.id).select('id');
+    record('A02', 'user cannot update another profile', deniedOrEmpty(otherProfileWrite), `${codeOf(otherProfileWrite)} rows=${rowsOf(otherProfileWrite)}`);
+    const privateColumns = await A.client.from('public_profiles').select('date_of_birth').limit(1);
+    record('A04', 'public projection does not expose date of birth', Boolean(privateColumns.error), codeOf(privateColumns));
+    const bPrivacy = one(await B.client.from('profiles').select('is_private').eq('id', B.id));
+    const projectionBefore = await A.client.from('public_profiles').select('id').eq('id', B.id);
+    const alreadyFollower = one(await A.client.rpc('is_accepted_follower', { p_follower_id: A.id, p_following_id: B.id })) === true;
+    if (bPrivacy?.is_private && !alreadyFollower) {
+      record('A04', 'private profile hidden from non-followers', rowsOf(projectionBefore) === 0, `rows=${rowsOf(projectionBefore)}`);
+    } else {
+      info('A04', 'private-profile projection check skipped', `is_private=${bPrivacy?.is_private} alreadyFollower=${alreadyFollower}`);
+    }
+    const directFollow = await A.client.from('follows').insert({ follower_id: A.id, following_id: B.id, status: 'accepted' });
+    record('A04', 'direct follows insert denied (RPC only)', Boolean(directFollow.error), codeOf(directFollow));
+    const followRequest = await A.client.rpc('request_follow', { p_target_id: B.id });
+    const followRow = one(followRequest);
+    record('A04', 'A requests to follow B', !followRequest.error && Boolean(followRow?.id), `${codeOf(followRequest)} ${followRow?.status ?? ''}`);
+    if (followRow?.status === 'pending') {
+      const selfAccept = await A.client.rpc('respond_to_follow_request', { p_follow_id: followRow.id, p_decision: 'accepted' });
+      record('A04', 'requester cannot accept own follow request', Boolean(selfAccept.error), codeOf(selfAccept));
+      const accept = await B.client.rpc('respond_to_follow_request', { p_follow_id: followRow.id, p_decision: 'accepted' });
+      record('A04', 'private target accepts the follow request', !accept.error && one(accept)?.status === 'accepted', codeOf(accept));
+    }
+    const isFollower = one(await A.client.rpc('is_accepted_follower', { p_follower_id: A.id, p_following_id: B.id }));
+    record('A04', 'A is now an accepted follower of B', isFollower === true);
+    const projectionAfter = await A.client.from('public_profiles').select('id').eq('id', B.id);
+    record('A04', 'accepted follower sees the private profile projection', rowsOf(projectionAfter) === 1, codeOf(projectionAfter));
+
+    // Same call shapes as src/actions/profiles.ts createPost/deletePost
+    // (insert/update ... select), which PostgREST runs with RETURNING (D9).
+    const postFixtures = {};
+    const postCodes = {};
+    for (const visibility of ['profile', 'followers', 'public']) {
+      const created = await B.client.from('posts').insert({ author_id: B.id, content: `qa ${visibility} post`, visibility, media_url: null }).select('id, visibility').single();
+      postFixtures[visibility] = created.data?.id ?? null;
+      postCodes[visibility] = codeOf(created);
+    }
+    record('A04', 'author creates posts with each visibility (createPost shape)', Object.values(postFixtures).every(Boolean), Object.entries(postCodes).map(([key, value]) => `${key}:${value}`).join(' '));
+    const ownPosts = new Set(((await B.client.from('posts').select('id').eq('author_id', B.id).is('deleted_at', null)).data ?? []).map((row) => row.id));
+    record('A04', 'author reads all own posts', Object.values(postFixtures).filter(Boolean).every((id) => ownPosts.has(id)));
+    const visible = new Set(((await A.client.from('posts').select('id').eq('author_id', B.id).is('deleted_at', null)).data ?? []).map((row) => row.id));
+    const expectPublic = bPrivacy?.is_private === false;
+    record('A04', 'follower sees profile and followers posts', Boolean(postFixtures.profile && postFixtures.followers) && visible.has(postFixtures.profile) && visible.has(postFixtures.followers));
+    if (postFixtures.public) record('A04', `public post visibility follows profile privacy (${expectPublic ? 'visible' : 'hidden for private author'})`, visible.has(postFixtures.public) === expectPublic);
+    const anyPost = postFixtures.profile ?? postFixtures.public;
+    if (anyPost) {
+      const tamperPost = await A.client.from('posts').update({ content: 'qa tamper' }).eq('id', anyPost).select('id');
+      record('A04', 'non-author cannot edit a post', deniedOrEmpty(tamperPost), `${codeOf(tamperPost)} rows=${rowsOf(tamperPost)}`);
+      const deletePost = await A.client.from('posts').delete().eq('id', anyPost).select('id');
+      record('A04', 'non-author cannot delete a post', deniedOrEmpty(deletePost), `${codeOf(deletePost)} rows=${rowsOf(deletePost)}`);
+    }
+    const created = Object.values(postFixtures).filter(Boolean);
+    const softDeletes = [];
+    for (const id of created) {
+      softDeletes.push(await B.client.from('posts').update({ deleted_at: new Date().toISOString() }).eq('id', id).eq('author_id', B.id).is('deleted_at', null).select('id').maybeSingle());
+    }
+    const afterDelete = await A.client.from('posts').select('id').in('id', created);
+    record('A04', 'author soft-deletes posts (deletePost shape) and readers lose them', softDeletes.every((res) => !res.error && res.data) && rowsOf(afterDelete) === 0, `${softDeletes.map(codeOf).join('/')} visible=${rowsOf(afterDelete)}`);
+    // Until D9 is applied, soft delete is impossible; remove fixtures with posts_delete_own.
+    const leftovers = await B.client.from('posts').delete().eq('author_id', B.id).like('content', 'qa %').is('deleted_at', null).select('id');
+    if (rowsOf(leftovers) > 0) info('A04', 'fixture posts hard-deleted because soft delete failed', `${rowsOf(leftovers)}`);
+
+    // ---- T5 message-request roles (precondition: A follows B, accepted).
+    const firstRequest = await A.client.rpc('send_message_request', { p_recipient_id: B.id, p_message: 'qa probe request' });
+    const requestRow = Array.isArray(firstRequest.data) ? firstRequest.data[0] : firstRequest.data;
+    if (firstRequest.error || !requestRow?.id) {
+      blocked('T5', 'message-request fixture (A follows B)', firstRequest.error ? `${codeOf(firstRequest)} ${firstRequest.error.message}` : 'no row');
+    } else {
+      for (const [actor, name, label] of [
+        [A, 'accept_message_request', 'requester cannot accept'],
+        [A, 'reject_message_request', 'requester cannot reject'],
+        [B, 'cancel_message_request', 'recipient cannot cancel'],
+      ]) {
+        const res = await actor.client.rpc(name, { p_request_id: requestRow.id });
+        // cancel_message_request returns false (no exception) for a non-requester.
+        record('T5', `message request: ${label}`, Boolean(res.error) || res.data === false, res.error ? codeOf(res) : `returned ${res.data}`);
+      }
+      const stillPending = await A.client.from('message_requests').select('status').eq('id', requestRow.id).single();
+      record('T5', 'message request: post-check still pending', stillPending.data?.status === 'pending', codeOf(stillPending));
+      const directUpdate = await B.client.from('message_requests').update({ status: 'accepted' }).eq('id', requestRow.id).select('id');
+      record('T5', 'message request: direct status update denied', Boolean(directUpdate.error) || rowsOf(directUpdate) === 0, `${codeOf(directUpdate)} rows=${rowsOf(directUpdate)}`);
+      const reject = await B.client.rpc('reject_message_request', { p_request_id: requestRow.id });
+      const rejected = await A.client.from('message_requests').select('status').eq('id', requestRow.id).single();
+      record('T5', 'message request: recipient rejects', !reject.error && rejected.data?.status === 'rejected', `${codeOf(reject)} ${rejected.data?.status ?? ''}`);
+      const secondRequest = await A.client.rpc('send_message_request', { p_recipient_id: B.id, p_message: 'qa probe request 2' });
+      const secondRow = Array.isArray(secondRequest.data) ? secondRequest.data[0] : secondRequest.data;
+      if (secondRequest.error || !secondRow?.id) {
+        info('T5', 'message request: re-send after rejection', `${codeOf(secondRequest)} ${secondRequest.error?.message ?? ''}`);
+      } else {
+        const cancel = await A.client.rpc('cancel_message_request', { p_request_id: secondRow.id });
+        record('T5', 'message request: requester cancels', !cancel.error, codeOf(cancel));
+      }
+    }
+
+    // ---- Action 04 friends (after message requests: friends cannot send them).
+    const directFriendship = await A.client.from('friendships').insert({ user_one: A.id < B.id ? A.id : B.id, user_two: A.id < B.id ? B.id : A.id });
+    record('A04', 'direct friendships insert denied (RPC only)', Boolean(directFriendship.error), codeOf(directFriendship));
+    const friendRequest = await A.client.rpc('request_friend', { p_recipient_id: B.id });
+    const friendRow = one(friendRequest);
+    if (friendRequest.error || !friendRow?.id) {
+      blocked('A04', 'friend-request fixture', `${codeOf(friendRequest)} ${friendRequest.error?.message ?? ''}`);
+    } else {
+      const selfFriendAccept = await A.client.rpc('respond_to_friend_request', { p_request_id: friendRow.id, p_decision: 'accepted' });
+      record('A04', 'requester cannot accept own friend request', Boolean(selfFriendAccept.error), codeOf(selfFriendAccept));
+      const friendAccept = await B.client.rpc('respond_to_friend_request', { p_request_id: friendRow.id, p_decision: 'accepted' });
+      const nowFriends = one(await A.client.rpc('is_current_friend', { p_user_one: A.id, p_user_two: B.id }));
+      record('A04', 'recipient accepts and the friendship exists', !friendAccept.error && nowFriends === true, codeOf(friendAccept));
+      const blockedRequest = await A.client.rpc('send_message_request', { p_recipient_id: B.id, p_message: 'qa probe request 3' });
+      record('A04', 'friends cannot open a message request (already friends)', Boolean(blockedRequest.error), codeOf(blockedRequest));
+      const unfriend = await A.client.rpc('remove_friend', { p_other_user_id: B.id });
+      const stillFriends = one(await A.client.rpc('is_current_friend', { p_user_one: A.id, p_user_two: B.id }));
+      record('A04', 'remove_friend ends the friendship', !unfriend.error && stillFriends === false, codeOf(unfriend));
+    }
+    // Keep the intended standing fixture: A follows B (accepted).
+    const followAgain = one(await A.client.rpc('request_follow', { p_target_id: B.id }));
+    if (followAgain?.status === 'pending') await B.client.rpc('respond_to_follow_request', { p_follow_id: followAgain.id, p_decision: 'accepted' });
+    info('A04', 'standing fixture after run', `A follows B accepted=${one(await A.client.rpc('is_accepted_follower', { p_follower_id: A.id, p_following_id: B.id }))}`);
 
     // ---- T4 notification isolation via the normal recovery lifecycle.
     const R3 = await createRoom(A, { tag, suffix: 'r3', type: 'recoverable', expiresInMs: 15_000 });
@@ -611,9 +822,41 @@ async function fullPhase() {
   }
 }
 
+// Action 02: unauthenticated route boundary against a running app
+// (`npx next start` locally, or a Preview URL). No credentials are used.
+async function routesPhase(base) {
+  const origin = new URL(base).origin;
+  const get = (path) => fetch(new URL(path, base), { redirect: 'manual' });
+  for (const path of ['/home', '/messages', '/create-room', '/room', `/room/${randomUUID()}`, '/room-settings', '/profile/setup']) {
+    const response = await get(path);
+    const location = response.headers.get('location');
+    const target = location ? new URL(location, base) : null;
+    const next = target?.searchParams.get('next') ?? '';
+    record('A02', `unauthenticated ${path} redirects to login`, response.status >= 300 && response.status < 400 && target?.origin === origin && target.pathname === '/login' && new URL(next, base).origin === origin, `${response.status} ${target ? target.pathname : '-'}`);
+  }
+  for (const path of ['/login', '/forgot-password', '/auth/update-password', '/']) {
+    const response = await get(path);
+    record('A02', `public ${path} is reachable`, response.status === 200, String(response.status));
+  }
+  // A destination is safe when it resolves to this origin, whatever text it contains.
+  for (const next of ['https://evil.example/x', '//evil.example/x', '/\\evil.example', '/%5Cevil.example', '/%2F%2Fevil.example', `/${'a'.repeat(3000)}`]) {
+    const response = await get(`/auth/callback?next=${encodeURIComponent(next)}`);
+    const location = response.headers.get('location');
+    const target = location ? new URL(location, base) : null;
+    const carried = target?.searchParams.get('next');
+    const safe = response.status >= 300 && response.status < 400 && target?.origin === origin
+      && (carried === null || carried === '' || new URL(carried, base).origin === origin);
+    record('A02', `callback keeps next same-origin (${next.slice(0, 22)}${next.length > 22 ? '…' : ''})`, safe, `${response.status} ${target ? target.pathname : '-'}`);
+  }
+}
+
 try {
-  await anonPhase();
-  if (mode === 'full') await fullPhase();
+  if (mode === 'routes') {
+    await routesPhase(process.argv[3] ?? 'http://localhost:3000');
+  } else {
+    await anonPhase();
+    if (mode === 'full') await fullPhase();
+  }
 } catch (error) {
   blocked('harness', 'run', error instanceof Error ? error.message : String(error));
 }

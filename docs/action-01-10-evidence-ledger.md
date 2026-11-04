@@ -669,6 +669,149 @@ text. During a mixed rollout, old tabs also cannot play new mediaId-only casts.
 - The Realtime "Allow public access" setting; channel close at JWT `exp`;
   load behaviour of Postgres Changes.
 
+## Final verification and close-out run (2026-11-05)
+
+### Inputs
+
+| Input | State | Owner / next step |
+| --- | --- | --- |
+| `20261105090000`, `20261105100000` applied | **Confirmed**: `migration list --linked` shows both locally and remotely | — |
+| QA accounts A and B | Available (private secret files; never printed) | — |
+| "A follows B, accepted" | **Was not true**: the database held no follow, friendship or friend request between them (`send_message_request` raised "not connected through a follow relationship"). The probe now creates it through `request_follow`. Standing fixture after the run: A follows B, accepted; no friendship. | — |
+| Vercel Preview URL | **BLOCKED: not supplied** | Owner: you. Provide the URL and the commit it was built from. |
+| Specs for Actions 03 and 05–10 (`docs/specs/`) | **BLOCKED: directory does not exist** | Owner: you. Add the original action prompts. |
+
+### Phase 1: post-migration verification
+
+- Query 09: the 11 D5/D6/D8 rows are all `ok`. The new 12th row (D9) is
+  `FAIL` until `20261105110000` is applied.
+- `node scripts/security/authorization-probe.mjs full` (final run):
+  **149 pass, 3 fail, 0 blocked, 9 info.** The 3 failures are D9 (below).
+  - T4: the recovery decision creates the notification; the recipient reads
+    it and marks it read; an unrelated user cannot read, mark or reassign it.
+    **PASS** (D5 verified).
+  - D6: owner/member file upload and registration; a member cannot delete
+    another user's file; a file owner deletes their own file through
+    `begin` → storage delete → `complete`; the room owner deletes a member
+    file; cross-room and traversal deletes change nothing; the owner deletes
+    Watch media. **PASS.**
+  - D8: the owner attaches a valid subtitle; a subtitle path from another room
+    is rejected; a member without `watch_control` cannot attach; a member
+    resolves the subtitle under RLS; a removed member cannot sign it.
+    **PASS.**
+  - T5 message requests: the requester cannot accept or reject; the
+    recipient's cancel returns `false` and changes nothing; a direct status
+    update is denied; the recipient rejects; the requester cancels; friends
+    cannot open a request. **PASS.**
+  - D6 decision, measured: a **former uploader cannot delete** their own file
+    after removal. The storage SELECT policy hides the object, so the delete
+    matches nothing. Storage deletion already requires current access, so no
+    change is recommended. Unmeasured: `begin_room_file_delete` can still mark
+    the former uploader's row `delete_pending`.
+
+### Phase 2: public-channel bypass
+
+A separate connection for B joined `sync:`, `sync-control:` and `presence:` for
+R1 **without** `private: true` and stayed joined while B was a non-member, a
+member and a removed member. A published on the private topics throughout.
+
+- Public joins: `CHANNEL_ERROR` / `CHANNEL_ERROR` / `NO_RESPONSE`.
+- Broadcasts received: **0** in every phase. Presence syncs exposing members:
+  **0**.
+- **PASS: the topics are isolated.** "Allow public access" stays enabled. It
+  is still required by the public `messages_inbox`, `chat_<id>` and
+  `personal_message_notifications_*` Postgres Changes channels, which are
+  RLS-filtered.
+
+### New defect D9 (Action 04): post author visibility
+
+| | |
+| --- | --- |
+| Classification | CONFIRMED DEFECT (medium, functional; fails closed) |
+| Root cause | `posts_select_visible` = `deleted_at IS NULL AND can_view_post(...)`, and `can_view_post` has no "author sees own post" clause. PostgREST runs every insert/update with RETURNING, which requires the new row to pass the SELECT policy. |
+| Reproduced (disposable account B) | `createPost('followers')` → `42501`; the author reads 0 of their own followers-only posts; `deletePost` (soft delete) → `42501`; count-only updates also → `42501`. A `public` post by a private author would fail the same way. |
+| Fix | `20261105110000_action04_post_author_visibility_repair.sql`, **prepared, NOT applied, needs approval.** One `ALTER POLICY`: `auth.uid() = author_id OR (deleted_at IS NULL AND can_view_post(...))`. Every app read already filters `deleted_at IS NULL` (enforced by a contract test). Other readers keep the previous rule. |
+| Regression test | "post authors can read their own posts, so create and soft-delete can return rows" (fails on `007` without the fix). Query 09 row `d9_posts_select_includes_author`. |
+| Pending cleanup | One followers-only probe post ("qa debug followers plain") on QA account B, visible only to QA account A. Neither account can delete it until D9 is applied; after that, B can delete it normally. No admin access to production data was used. |
+
+### Phase 3: requirement audit
+
+**Action 01** (spec: `docs/action-01-foundation-and-evidence.md`): its own
+definition of done is COMPLETE, as documented. Handed-off gates:
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Private-room isolation | VERIFIED | T1/T8 probes: non-member, former member and anon |
+| Independent two-user testing | VERIFIED (API); browser BLOCKED | Probe uses two independent accounts and sessions |
+| Watch/presence/reconnect | VERIFIED (API, D7 observer + feed re-read); browser BLOCKED | D7 probe |
+| Lifecycle/recovery | VERIFIED: recoverable room reaches `recovery-window`; recovery request, rejection and notification. UNVERIFIED: denial of member data after expiry, 7-day reopen approval, permanent conversion | T4 |
+| Cron/cleanup | BLOCKED | Needs the Preview URL and `CRON_SECRET` status (owner: you) |
+| SSR token refresh | BLOCKED | Authenticated browser session (owner: you) |
+| E2EE runtime | BLOCKED | Two-identity browser (owner: you) |
+| Schema alignment | VERIFIED | `migration list`; catalog queries 01–09 |
+| Duplicate realtime paths / legacy `room_messages` | VERIFIED (static) | Inventory in "D5/D6 review and D7" |
+
+**Action 02** (spec: `docs/action-02-authentication-and-identity.md`):
+**PARTIAL.**
+
+| Requirement | Result | Evidence |
+| --- | --- | --- |
+| Google OAuth entry point | VERIFIED (rendered) | Built-in browser on a local `next start`: "Continue with Google" present, no console errors |
+| Google OAuth runtime | BLOCKED | Provider configuration and a person's Google sign-in (owner: you) |
+| Password compatibility | Auth API VERIFIED (probe signs in by password); app UI BLOCKED | Probe |
+| Protected routes | VERIFIED | `authorization-probe.mjs routes`: 7 protected routes → `/login` with a same-origin `next` |
+| Safe redirects (callback) | VERIFIED | External, protocol-relative, backslash, encoded-backslash, encoded-`//` and oversized `next` values stay same-origin |
+| Public auth pages | VERIFIED | `/login`, `/forgot-password`, `/auth/update-password`, `/` → 200 |
+| Profile gate (incomplete → setup, complete → app) | BLOCKED | Authenticated browser (owner: you) |
+| Authenticated profile RLS | VERIFIED | A02 probe: own row readable; another user's row unreadable and unwritable |
+| Account switching, password-recovery email, production SSR refresh | BLOCKED | Browser/email/production (owner: you) |
+
+**Action 04** (spec: `docs/action-04-profiles-privacy-follows-friends-posts.md`):
+**PARTIAL (D9 open).**
+
+| Requirement | Result | Evidence |
+| --- | --- | --- |
+| Private columns not in the public projection | VERIFIED | `date_of_birth` → `42703` |
+| Projection visible to accepted followers | VERIFIED | A04 probe |
+| Private profile hidden from non-followers / pending follow path | UNVERIFIED | QA account B is public (`is_private=false`); needs B set to private for one run (owner decision) |
+| Follows and friends are RPC-only; self-accept denied; accept/remove transitions | VERIFIED | A04 probe |
+| Posts: create every visibility, author reads own, soft delete | **FAIL (D9)** | Fix prepared |
+| Posts: non-author cannot edit or delete; follower sees profile and public posts | VERIFIED | A04 probe |
+| Message requests | VERIFIED | T5 probe |
+| Account deletion runtime | UNVERIFIED | Destructive; needs a dedicated third disposable account and your decision on Google re-authentication |
+| Profile/social UI (`src/components/profile/*`) | BLOCKED | Authenticated browser (owner: you) |
+
+**Actions 03 and 05–10:** requirement-level audit **BLOCKED (specs missing)**.
+Evidence recorded so far:
+- **03:** catalog verified, D1–D3 and D5–D8 fixed and verified, D9 pending.
+- **05:** T1/T2 verified (API).
+- **06:** recovery decision verified; reopen/permanent/expiry runtime and Cron unverified.
+- **07:** D7 verified with a hostile client; browser unverified.
+- **08:** chat capability, delivery and notification isolation verified. The scope of replies, reactions, mentions, pins, edits and DND is unknown without the spec.
+- **09:** preference scoping covered by unit tests only.
+- **10:** T6/D6/D8/F1 verified (API); browser upload unverified.
+
+### Phase 4: browser
+
+- Verified: the unauthenticated login page renders (built-in browser, local
+  production build).
+- **BLOCKED (owner: you):** every authenticated two-identity flow. The agent
+  does not handle passwords, so you need to sign in to both browser
+  identities, or sign in to the built-in browser while I drive it. Scope: the
+  Phase 4 list in the close-out prompt.
+
+### Phase 5: deployment
+
+**BLOCKED:** no Preview URL was supplied, and Vercel Cron runs only on
+production. Needed: the Preview URL, its commit and build status, and the
+HTTP status of a manual `CRON_SECRET` call to
+`/api/internal/cleanup-expired-rooms` against an expired qa room.
+
+### Validation (this run)
+
+Typecheck PASS; lint 0 errors (13 existing warnings); unit and contract tests
+**25/25**; production build PASS; `git diff --check` PASS; probes as above.
+
 ## Dashboard extensions result (2026-11-04)
 
 | Finding | Classification | Evidence and disposition |
@@ -690,12 +833,12 @@ confirmed defect to remediate.
 | TypeScript | PASS | `npm exec tsc -- --noEmit` |
 | Lint | PASS with 13 pre-existing warnings | `npm run lint` |
 | Production build | PASS | `npm run build`; 18 routes generated |
-| Automated test suite | PASS (24 tests) | `npm run test:unit`: Broadcast contract (5), migration/source contract (8), storage contract and validation (6), auth and preferences (5). Each new guard fails on its original defect. |
+| Automated test suite | PASS (25 tests) | `npm run test:unit`: Broadcast contract (5), migration/source contract (9), storage contract and validation (6), auth and preferences (5). Each new guard fails on its original defect. |
 | Remote migrations | PASS | `npx supabase migration list --linked`; all 27 local/remote versions match |
 | Remote schema signatures | PARTIAL | `npx supabase gen types typescript --linked --schema public` confirms recovered Action 08-10 tables/RPCs, not policies or definitions |
 | Remote DB lint | PARTIAL | Dashboard confirms the reported `extensions` helpers exist; the remaining lint helper-resolution issue is unrelated to Actions 01-10 and is not a policy pass |
 | Remote catalog audit 01-07 | D1-D3 confirmed, fixed by `20261104120000` and verified | Dashboard exports 2026-11-04; query 08 re-run after the push on 2026-11-05 |
-| Two-account authorization probes | 103 pass, 3 fail (D5, D6 pending), 4 info | `scripts/security/authorization-probe.mjs full`, 2026-11-05, including the D7 hostile client |
+| Two-account authorization probes | 149 pass, 3 fail (D9 pending), 0 blocked, 9 info | `scripts/security/authorization-probe.mjs full`, 2026-11-05; plus `routes` mode 17/17 |
 | Full catalog/policy diff | BLOCKED | Linked `db dump`/`inspect` need `SUPABASE_DB_PASSWORD`; `db diff` needs Docker or Podman |
 | Local/browser multi-user | Unverified | Independent authenticated identities were not available in the current environment |
 | Vercel/production | Unverified | No deployed-commit, Cron-log, or OAuth-provider evidence obtained |
@@ -705,26 +848,24 @@ confirmed defect to remediate.
 | Action | Implementation | Static | Local browser | Multi-user | DB/security | Production | Status / next gate |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 Foundation and evidence | Verified inventory, recovery evidence, read-only audit pack (01-08) | PASS | N/A | N/A | Catalog 01-07 received and classified | Unverified | PARTIAL - query 08 export remains. |
-| 02 Authentication and identity | Fixed callback/profile-gate consistency; added unit coverage for completion and redirect safety | PASS | BLOCKED - browser automation failed before navigation | N/A | Schema/RLS unverified this run | Unverified | PARTIAL - needs provider configuration and authenticated flows. |
-| 03 Database, RLS, storage docs | `20261104120000` applied and verified; `20261105090000` prepared for D5/D6 | PASS - migration contract tests | N/A | PASS - T2, T5, T8 | PASS - D1-D3, RLS on all 30 tables; D5/D6 migration pending approval | Unverified | OPEN - approve and apply `20261105090000`, then re-run the probes. |
-| 04 Profiles, privacy, follows, friends, posts | Existing UI/actions/migrations | PASS | Unverified | Unverified | Unverified this run | Unverified | UNVERIFIED. |
+| 02 Authentication and identity | Implemented in source; login renders with Google | PASS | PASS - unauthenticated routes and redirects (17/17); rendered login | BLOCKED - Google OAuth, profile gate, switching, recovery need your sign-in | PASS - authenticated profile RLS | BLOCKED - no Preview URL | PARTIAL - provider configuration and authenticated browser runs. |
+| 03 Database, RLS, storage docs | `20261104120000`, `20261105090000`, `20261105100000` applied and verified (query 09); `20261105110000` (D9) prepared | PASS - migration contract tests | N/A | PASS - T1-T8, D6, D8, public-channel isolation | PASS except D9 pending | Unverified | BLOCKED - spec missing; apply D9. |
+| 04 Profiles, privacy, follows, friends, posts | Server, database and UI present; D9 fix prepared | PASS | BLOCKED | PASS - follows, friends, message requests, projection; FAIL - posts (D9) | FAIL - D9 pending approval | Unverified | OPEN - apply `20261105110000`; private-profile run; account-deletion decision. |
 | 05 Rooms, membership, roles, controls | Existing controls/invites/restrictions/provider wiring | PASS | Unverified | PASS - T1, T2 (direct API) | PASS | Unverified | PARTIAL - browser UI flows not driven. |
-| 06 Lifecycle, expiry, recovery, cleanup | Existing lifecycle/recovery/Cron sources; `20261105090000` reviewed, no change needed | PASS | Unverified | FAIL - D5 until applied | FAIL - D5 (fix reviewed, pending approval) | Unverified | OPEN - apply `20261105090000`, run query 09, re-run T4. |
+| 06 Lifecycle, expiry, recovery, cleanup | D5 applied | PASS | Unverified | PASS - recovery decision and notification (T4) | PASS - D5 verified | BLOCKED - Cron | PARTIAL - 7-day reopen, permanent conversion and Cron evidence; spec missing. |
 | 07 Shared realtime foundation | Chat over RLS-checked Postgres Changes; Broadcast wire contract; media resolved by protected fetch; feed-ready re-read | PASS - contract and static tests | BLOCKED - two-profile browser check not run | PASS - hostile-client D7 probe | PASS (content); metadata residual accepted | Unverified | PARTIAL - deploy; browser removal UX check. |
 | 08 Room messaging and notifications | Partial: send/history/delete/announcements/notifications and lifecycle notification RPCs exist | PASS | Unverified | T3 PASS; T4 FAIL (notifications cannot be created, D5) | PASS - D1 verified; notification policies recipient-scoped (catalog) | Unverified | PARTIAL - T4 isolation after D5 fix; replies, reactions, mentions, pins, edits and DND/mute remain unverified. |
 | 09 Adaptive room workspace | Fixed private preference scoping for the sidebar, Watch and Study panel sizes; existing feature panels preserved | PASS - dedicated unit tests, typecheck, lint warnings only | BLOCKED - browser automation could not open a local tab | N/A | N/A | Unverified | PARTIAL - presets, theme preferences and mobile proof remain. |
-| 10 Files, PDFs, media, storage lifecycle | F1 fixed; Watch media resolved by mediaId; subtitles bound to media rows (needs D8) | PASS - unit and contract tests, typecheck, lint warnings only, production build | BLOCKED - browser upload not run | T6 PASS (access control); owner delete FAIL (D6) | D6 and D8 fixes prepared, pending approval | Unverified | PARTIAL - apply `20261105090000` and `20261105100000`, deploy, browser upload with subtitle. |
+| 10 Files, PDFs, media, storage lifecycle | F1 fixed; mediaId resolution; D6 and D8 applied | PASS - unit and contract tests, typecheck, lint warnings only, production build | BLOCKED - browser upload not run | PASS - T6, D6, D8 (API) | PASS - D6/D8 verified | Unverified | PARTIAL - deploy; browser upload with subtitle; spec missing. |
 
 ## Required external access to close gates
 
-1. Approve and apply `20261105090000` (D5, D6) and `20261105100000` (D8)
-   with `supabase db push`. Run query 09 (all 11 rows must be `ok`), then
-   re-run `node scripts/security/authorization-probe.mjs full`. Decide
-   whether D6 owner deletion should require current membership.
-2. Deploy the app (F1 and D7 changes) and have open room tabs refreshed.
-   Run the two-profile browser removal check. Confirm that Realtime "Allow
-   public access" is disabled. Message-request RPC probes still need a
-   follow-relationship fixture, and a Google OAuth test client is still
-   required.
+1. Approve and apply `20261105110000` (D9). Run query 09 (all 12 rows must
+   be `ok`), re-run the full probe, then delete the leftover followers-only
+   probe post from QA account B.
+2. Add `docs/specs/action-03.md` and `05.md`–`10.md`. Sign in to two browser
+   identities for the Phase 4 flows. Configure the Google OAuth test client.
+   Decide on account-deletion re-authentication and whether QA account B may
+   be made private for one run.
 3. Vercel Preview URL/log access for the exact pushed commit, including Cron
    invocation evidence.
