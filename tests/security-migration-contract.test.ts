@@ -65,6 +65,91 @@ test('every function granted to authenticated is also revoked from anon', () => 
   assert.deepEqual(missing, [], `Supabase grants EXECUTE to anon by default; revoke it for: ${missing.join(', ')}`);
 });
 
+// Latest definition of each function, by migration filename order.
+const latestFunctionBodies = () => {
+  const bodies = new Map<string, { file: string; body: string }>();
+  const definition = /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.([a-z0-9_]+)\s*\([\s\S]*?\bAS\s+(\$[A-Za-z_]*\$)([\s\S]*?)\2/gi;
+  for (const { file, sql } of migrations) {
+    for (const match of stripComments(sql).matchAll(definition)) bodies.set(match[1], { file, body: match[3] });
+  }
+  return bodies;
+};
+
+test('no PL/pgSQL variable shadows an ON CONFLICT target column', () => {
+  // A declared variable named like a conflict column raises 42702 at runtime
+  // (20260923120000 notify_room_recovery_decision broke every recovery decision).
+  const conflicts: string[] = [];
+  for (const [name, { file, body }] of latestFunctionBodies()) {
+    const declare = body.match(/\bDECLARE\b([\s\S]*?)\bBEGIN\b/i)?.[1] ?? '';
+    const variables = new Set([...declare.matchAll(/(?:^|;)\s*([a-z_][a-z0-9_]*)\s+[a-z]/gi)].map((match) => match[1].toLowerCase()));
+    for (const target of body.matchAll(/ON\s+CONFLICT\s*\(([^)]*)\)/gi)) {
+      for (const column of target[1].split(',').map((part) => part.trim().toLowerCase())) {
+        if (variables.has(column)) conflicts.push(`${name} (${file}): ${column}`);
+      }
+    }
+  }
+  assert.deepEqual(conflicts, []);
+});
+
+test('no current policy reads a table that client roles cannot select', () => {
+  // Policy subqueries run with the caller's privileges. Reading a table revoked
+  // from authenticated fails the whole statement (20260923140000 storage DELETE).
+  const unreadable = new Set<string>();
+  for (const { statement } of statements) {
+    const revoke = statement.match(/^REVOKE ALL ON TABLE (.+?) FROM (.+)$/i);
+    if (revoke && /\bauthenticated\b/i.test(revoke[2])) {
+      for (const table of revoke[1].matchAll(/public\.([a-z0-9_]+)/g)) unreadable.add(table[1]);
+    }
+    const grant = statement.match(/^GRANT [^]*?\bSELECT\b[^]*? ON TABLE (.+?) TO (.+)$/i);
+    if (grant && /\bauthenticated\b/i.test(grant[2])) {
+      for (const table of grant[1].matchAll(/public\.([a-z0-9_]+)/g)) unreadable.delete(table[1]);
+    }
+  }
+
+  const latestPolicies = new Map<string, { file: string; statement: string }>();
+  for (const entry of statements) {
+    const policy = entry.statement.match(/^(CREATE|ALTER|DROP) POLICY (?:IF EXISTS )?"([^"]+)" ON ([a-z_.]+)/i);
+    if (!policy) continue;
+    const key = `${policy[3]}.${policy[2]}`;
+    if (policy[1].toUpperCase() === 'DROP') latestPolicies.delete(key);
+    else latestPolicies.set(key, entry);
+  }
+
+  const offenders: string[] = [];
+  for (const [key, { file, statement }] of latestPolicies) {
+    for (const reference of statement.matchAll(/\b(?:FROM|JOIN)\s+public\.([a-z0-9_]+)/gi)) {
+      if (unreadable.has(reference[1])) offenders.push(`${key} (${file}) reads public.${reference[1]}`);
+    }
+  }
+  assert.ok(unreadable.has('room_files'), 'Expected room_files to be revoked from authenticated.');
+  assert.deepEqual(offenders, []);
+});
+
+test('app code registers Watch media through the RPC on contract storage paths', () => {
+  const sourceRoot = resolve(process.cwd(), 'src');
+  const sourceFiles = (directory: string): string[] =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) return sourceFiles(path);
+      return /\.(ts|tsx)$/.test(entry.name) ? [path] : [];
+    });
+
+  // The CRON_SECRET-gated cleanup route is the only service-role client and
+  // deletes expired rows by design. Every other module runs as the end user.
+  const serviceRoleRoute = join(sourceRoot, 'app', 'api', 'internal', 'cleanup-expired-rooms', 'route.ts');
+
+  const offenders = sourceFiles(sourceRoot).filter((file) => file !== serviceRoleRoute).flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    const problems: string[] = [];
+    // 20260923140000 revoked direct INSERT/UPDATE/DELETE on temporary_media.
+    if (/from\(\s*'temporary_media'\s*\)\s*\.\s*(insert|update|upsert|delete)\b/.test(source)) problems.push('direct temporary_media write');
+    // room_storage_path_kind treats any other second segment as read-only legacy.
+    if (/\$\{roomId\}\/(temp|sub)-/.test(source)) problems.push('legacy upload path');
+    return problems.map((problem) => `${file}: ${problem}`);
+  });
+  assert.deepEqual(offenders, []);
+});
+
 test('client roles lose TRUNCATE, TRIGGER and REFERENCES on public tables', () => {
   const remediation = migrations.find(({ sql }) =>
     /REVOKE %s ON TABLE public\.%I FROM PUBLIC, anon, authenticated/.test(sql),

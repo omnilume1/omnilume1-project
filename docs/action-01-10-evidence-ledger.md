@@ -112,7 +112,7 @@ are corrected, and query `08` covers them.
 
 ### Migration `20261104120000_action03_remote_audit_remediation.sql`
 
-**Status: prepared, NOT applied.** The migration is additive, changes no data,
+**Status: APPLIED (`supabase db push`; remote history confirmed on 2026-11-05) and VERIFIED; see "Post-deployment verification".** The migration is additive, changes no data,
 and leaves function bodies untouched. Before deployment:
 
 1. Run query `08` as a baseline and keep the export.
@@ -132,7 +132,7 @@ do by default (`seed_room_controls`). Members whose `chat` permission or the
 room's chat feature is off can no longer post. This already matches what they
 can read.
 
-### Two-user security test plan (behavior evidence; not yet run)
+### Two-user security test plan (executed 2026-11-05; results under "Post-deployment verification")
 
 Run these in a disposable staging/preview project, or in a dedicated
 `qa-<date>-<random>` room, with two browser profiles: A (owner) and B (second
@@ -149,6 +149,78 @@ tokens, signed URLs or message content.
 | T6 | Private storage | A uploads a valid room file. B (non-member) issues a storage download of the object path, `createSignedUrl`, and a `DELETE` on that path. | All denied. A's download still works. |
 | T7 | Realtime revocation | B is subscribed to `sync:<room>` and `presence:<room>`. A removes B. A broadcasts. B also tries to subscribe to a new channel. | B receives nothing new after removal, and the new subscription is rejected. |
 | T8 | Cross-room isolation | A owns room R1. B owns room R2 and is not in R1. B queries `messages`, `room_messages`, `room_members`, `study_notes` and `temporary_media` with `room_id=R1`, and subscribes to `sync:R1`. | 0 rows and the subscription is rejected. Requests B makes with R2 ids never return R1 data. |
+
+## Post-deployment verification and two-account probes (2026-11-05)
+
+### Deployment and alignment
+
+- `supabase db push` applied `20261104120000`. The user's
+  `migration list --linked` capture, and the query 08 export pasted with it,
+  were taken **before** the push: that list showed an empty remote column, and
+  the export still showed all of D1-D3. Re-run on 2026-11-05 through the linked
+  CLI, `npx supabase migration list --linked` reports
+  `20261104120000 | 20261104120000`, so local and remote history match.
+- Query 08 was re-run through `npx supabase db query --linked` (read-only)
+  after the push. Its results are the deployed-state evidence below.
+
+### D1-D3 verification
+
+| Fix | Catalog (query 08, post-push) | Behavior (real API calls) | Result |
+| --- | --- | --- | --- |
+| D1 chat capability | `messages_insert`: room branch requires the chat capability | Member insert without the `chat` permission: `42501`. Chat feature off: member `42501` and owner `42501`. Permission or feature restored: inserts succeed. Owner and member chat works normally. | **PASS** |
+| D2 anon EXECUTE | None of the five functions is listed under `anon_execute` | Anon key RPC calls to all five return `42501` (privilege denial, not a function-body error) | **PASS** |
+| D3 client table privileges | **0** `client_grant` rows (the pre-push baseline had 161) | All member/owner SELECT, INSERT and UPDATE paths exercised by T1-T8 still work | **PASS** |
+| Remaining `anon_execute` rows | 14 trigger functions (callable only as triggers) and 2 IMMUTABLE path parsers | Not applicable | UNRELATED. Accepted, and allow-listed in the contract test. |
+| RLS on 30 Action tables | `rls=true` on all 30; the 19 previously unverified tables are now confirmed | Not applicable | **PASS** (closes U1, together with the next row) |
+| Publication | `messages` and `room_control_events` present | Not applicable | **PASS** |
+
+### Two-account probe results
+
+Method: `node scripts/security/authorization-probe.mjs full`, run three times
+on 2026-11-05 with two disposable accounts supplied by the user (separate
+sessions). It made real Data API, Storage and Realtime calls with the anon key
+and each account's own session. The fixtures were new private
+`qa-2026-11-04-*` rooms (irreversible, 2-hour expiry) plus one recoverable
+15-second room per run. Last run: 88 pass, 4 fail, 0 blocked. Server actions
+were not driven through a browser. The probes test the database, storage and
+realtime boundaries that those actions rely on, and UI hiding was not counted
+as evidence.
+
+| Test | Result | Evidence |
+| --- | --- | --- |
+| T1 Member vs former member | **PASS** | While a member, B reads messages, study notes and signed media. After the owner kicks B: 0 messages, insert `42501`, no signed URL, 0 temporary media, and `list_study_notes`/`get_room_realtime_snapshots` raise. |
+| T2 Role boundaries | **PASS** | A member's calls to `set_room_member_role`, `set_room_role_permission`, `update_room_controls`, `create_room_invite`, `review_room_member` (kick owner), `transfer_room_ownership` and `create_room_announcement` all raise. Direct role escalation and room update change 0 rows, and a direct permission insert is rejected with `42501`. A post-check confirms the roles are unchanged. Owner promote/demote works. An admin can create and revoke invites but cannot kick or replace the owner. |
+| T3 Chat permission bypass | **PASS** | See D1. |
+| T4 Notification isolation | **FAIL**: notifications cannot be created (D5), so isolation is UNVERIFIED | `review_recovery_request` fails with `42702 column reference "notification_type" is ambiguous` (reproduced 3 times). No notification is produced to test against. The catalog policies remain recipient-scoped. |
+| T5 Unauthorized function calls | **PASS** (message-request RPCs not exercised) | Anon calls to the five functions return `42501`. Anon reads return 0 rows or `42501`, and anon inserts return `42501`. Non-member calls to `update_study_note`, `delete_study_note`, `save_room_whiteboard` and `begin_room_file_delete`, and an unrelated user's `review_recovery_request`, all raise. Message-request accept/reject/cancel needs a follow-relationship fixture and was not run. |
+| T6 Private storage | **PASS** for access control; **FAIL** for owner delete (D6) | A non-member's signed URL, download, upload, path traversal from its own room, and delete are all refused, and the object stays intact. A member (watch) gets a signed URL. A member without `watch_control` cannot upload or delete. An anon list returns nothing. However, the owner's delete fails: `permission denied for table room_files` (D6). |
+| T7 Realtime revocation | **FAIL** (D7) | A member receives broadcasts. Anon and non-member joins return `CHANNEL_ERROR`, and a fresh re-join after removal returns `CHANNEL_ERROR`. However, **the existing subscription keeps receiving after removal** (`received=[1,2]`, reproduced 3 times). It stops only once the client pushes a refreshed token. |
+| T8 Cross-room isolation | **PASS** | B, who owns R2 and is not in R1, reads 0 R1 messages, members, temporary media, room messages, notifications and rooms. `list_study_notes`, `get_room_realtime_snapshots`, `get_room_whiteboard` and `get_room_member_identities` all raise, and `sync:`/`presence:` joins return `CHANNEL_ERROR`. Positive control: B reads its own R2. |
+
+### Defects found by the probes
+
+| ID | Classification | Finding | Disposition |
+| --- | --- | --- | --- |
+| F1 | CONFIRMED DEFECT (high, functional, fails closed) | **Watch media, subtitles and URL-cast history have been broken since `20260923140000`.** The app still inserted into `temporary_media` directly (that grant was revoked) and uploaded to `<room>/temp-*` and `<room>/sub-*` paths. The storage policy treats those as read-only `legacy`. Production evidence: `authenticated` has no `INSERT`, and there are 0 `temporary_media` rows and 0 objects since Action 09. Probe: the legacy upload is `AccessDenied` and the direct insert `42501`. | **FIXED in app code** (no migration). Uploads now use `<room>/media/<uuid>.<ext>` and `<room>/subtitles/<uuid>.<ext>`, send contract MIME types, and register through `register_temporary_media`. Signed URLs check `watch` for media and subtitles, mirroring the storage policy. The probe confirms the new call shape is accepted in production. Regression tests are in `tests/room-file-validation.test.ts` and `tests/security-migration-contract.test.ts`. |
+| D5 | CONFIRMED DEFECT (high, functional) | **Every recovery approval and rejection fails.** `notify_room_recovery_decision` (`20260923120000`) declares a variable `notification_type` that clashes with its `ON CONFLICT` column, which raises `42702` and rolls back the review. | Migration `20261105090000` item 1 (**prepared, NOT applied; needs review/approval**). Regression test: "no PL/pgSQL variable shadows an ON CONFLICT target column". |
+| D6 | CONFIRMED DEFECT (low, functional, fails closed) | **No authenticated user can delete any `room_attachments` object.** The DELETE policy's `files` branch reads `room_files`, which clients cannot select. No current UI deletes objects; the cleanup job uses the service role. | Migration `20261105090000` item 2 (**prepared, NOT applied**) moves the check into the `room_file_owned_by_caller` SECURITY DEFINER helper, with the same policy meaning. Regression test: "no current policy reads a table that client roles cannot select". |
+| D7 | CONFIRMED DEFECT (medium, security) | **A removed member's open Realtime subscription keeps receiving.** Supabase Realtime evaluates private-channel policies at join time and re-checks only when the client sends a new token. A former member that keeps its connection and does not refresh therefore receives `room_message` broadcasts (full message content) and `cast`/`subtitle_upload` events (signed URLs, valid up to 1 hour) until its JWT expires. New joins are denied. | **Not fixed. Needs a design decision.** Options: (a) shorten the Auth JWT expiry to bound the window (Dashboard setting); (b) stop sending content and signed URLs over broadcast, sending ids instead that clients re-fetch through RLS and `getSignedStorageUrl`; (c) per-membership topic epochs that rotate on removal (needs a migration). Recommended: (a) now, plus (b). Whether an expired JWT closes the channel is UNVERIFIED (it would take 1 hour). |
+
+Probe fixtures: rooms R1/R2/R3 from each run expire on their own and are
+removed by the cleanup job. Each run left one probe media object in its R1,
+because the owner cannot delete it (D6). The cleanup job removes it when its
+`temporary_media` row expires.
+
+### Migration `20261105090000_action06_09_recovery_notice_and_storage_delete_repair.sql`
+
+**Status: prepared, NOT applied. It requires review and approval before
+`supabase db push`.** It renames the two trigger variables (the body is
+otherwise identical, and grants and the trigger binding are kept), adds
+`room_file_owned_by_caller` (SECURITY DEFINER, `search_path=''`, executable by
+authenticated and service_role only, not anon), and alters only the USING
+expression of the storage DELETE policy. After applying it, re-run
+`node scripts/security/authorization-probe.mjs full`. T4 should then pass
+end-to-end, and the "owner deletes the probe media object" check should pass.
 
 ## Dashboard extensions result (2026-11-04)
 
@@ -171,11 +243,12 @@ confirmed defect to remediate.
 | TypeScript | PASS | `npm exec tsc -- --noEmit` |
 | Lint | PASS with 13 pre-existing warnings | `npm run lint` |
 | Production build | PASS | `npm run build`; 18 routes generated |
-| Automated test suite | PASS (11 tests) | `npm run test:unit`. It includes 3 static migration contract tests in `tests/security-migration-contract.test.ts`, which fail on D1, D2 and D3 without `20261104120000` |
+| Automated test suite | PASS (17 tests) | `npm run test:unit`. It includes 6 static migration/source contract tests in `tests/security-migration-contract.test.ts` (each fails on its original defect) and 3 storage-contract tests in `tests/room-file-validation.test.ts` |
 | Remote migrations | PASS | `npx supabase migration list --linked`; all 27 local/remote versions match |
 | Remote schema signatures | PARTIAL | `npx supabase gen types typescript --linked --schema public` confirms recovered Action 08-10 tables/RPCs, not policies or definitions |
 | Remote DB lint | PARTIAL | Dashboard confirms the reported `extensions` helpers exist; the remaining lint helper-resolution issue is unrelated to Actions 01-10 and is not a policy pass |
-| Remote catalog audit 01-07 | 3 CONFIRMED DEFECTS, rest PASS (catalog) or UNVERIFIED | Dashboard exports 2026-11-04; see "Remote catalog audit results" |
+| Remote catalog audit 01-07 | D1-D3 confirmed, fixed by `20261104120000` and verified | Dashboard exports 2026-11-04; query 08 re-run after the push on 2026-11-05 |
+| Two-account authorization probes | 88 pass, 4 fail (D5, D6, D7) | `scripts/security/authorization-probe.mjs full`, 2026-11-05; see "Two-account probe results" |
 | Full catalog/policy diff | BLOCKED | Linked `db dump`/`inspect` need `SUPABASE_DB_PASSWORD`; `db diff` needs Docker or Podman |
 | Local/browser multi-user | Unverified | Independent authenticated identities were not available in the current environment |
 | Vercel/production | Unverified | No deployed-commit, Cron-log, or OAuth-provider evidence obtained |
@@ -186,23 +259,24 @@ confirmed defect to remediate.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 Foundation and evidence | Verified inventory, recovery evidence, read-only audit pack (01-08) | PASS | N/A | N/A | Catalog 01-07 received and classified | Unverified | PARTIAL - query 08 export remains. |
 | 02 Authentication and identity | Fixed callback/profile-gate consistency; added unit coverage for completion and redirect safety | PASS | BLOCKED - browser automation failed before navigation | N/A | Schema/RLS unverified this run | Unverified | PARTIAL - needs provider configuration and authenticated flows. |
-| 03 Database, RLS, storage docs | Catalog audit classified; remediation migration `20261104120000` prepared (not applied) for D1-D3 | PASS - migration contract tests | N/A | N/A | FAIL - D1, D2, D3 confirmed; 19-table RLS state UNVERIFIED | Unverified | OPEN - apply `20261104120000`, run query 08 before and after, then run T1-T8. |
+| 03 Database, RLS, storage docs | `20261104120000` applied and verified; `20261105090000` prepared for D5/D6 | PASS - migration contract tests | N/A | PASS - T2, T5, T8 | PASS - D1-D3, RLS on all 30 tables; D5/D6 migration pending approval | Unverified | OPEN - approve and apply `20261105090000`, then re-run the probes. |
 | 04 Profiles, privacy, follows, friends, posts | Existing UI/actions/migrations | PASS | Unverified | Unverified | Unverified this run | Unverified | UNVERIFIED. |
-| 05 Rooms, membership, roles, controls | Existing controls/invites/restrictions/provider wiring | PASS | Unverified | Unverified | PARTIAL recovered migration source | Unverified | UNVERIFIED. |
-| 06 Lifecycle, expiry, recovery, cleanup | Existing lifecycle/recovery/Cron sources | PASS | Unverified | Unverified | PARTIAL recovered migration source | Unverified | UNVERIFIED. |
-| 07 Shared realtime foundation | Existing shared provider and typed room sync | PASS | Unverified | Unverified | PARTIAL recovered migration source | Unverified | UNVERIFIED. |
-| 08 Room messaging and notifications | Partial: send/history/delete/announcements/notifications and lifecycle notification RPCs exist | PASS | Unverified | Unverified | FAIL - D1 room chat capability bypass (fix prepared); notification isolation PASS (catalog) | Unverified | PARTIAL - apply D1 fix and run T3/T4; replies, reactions, mentions, pins, edits and DND/mute remain unverified. |
+| 05 Rooms, membership, roles, controls | Existing controls/invites/restrictions/provider wiring | PASS | Unverified | PASS - T1, T2 (direct API) | PASS | Unverified | PARTIAL - browser UI flows not driven. |
+| 06 Lifecycle, expiry, recovery, cleanup | Existing lifecycle/recovery/Cron sources | PASS | Unverified | FAIL - D5: every recovery decision raises 42702 | FAIL - D5 (fix prepared in `20261105090000`) | Unverified | OPEN - apply D5 fix, then re-run T4. |
+| 07 Shared realtime foundation | Existing shared provider and typed room sync | PASS | Unverified | FAIL - D7: an existing subscription survives removal | Joins correctly authorized (T7 join checks PASS) | Unverified | OPEN - D7 design decision (JWT expiry and/or no sensitive broadcast payloads). |
+| 08 Room messaging and notifications | Partial: send/history/delete/announcements/notifications and lifecycle notification RPCs exist | PASS | Unverified | T3 PASS; T4 FAIL (notifications cannot be created, D5) | PASS - D1 verified; notification policies recipient-scoped (catalog) | Unverified | PARTIAL - T4 isolation after D5 fix; replies, reactions, mentions, pins, edits and DND/mute remain unverified. |
 | 09 Adaptive room workspace | Fixed private preference scoping for the sidebar, Watch and Study panel sizes; existing feature panels preserved | PASS - dedicated unit tests, typecheck, lint warnings only | BLOCKED - browser automation could not open a local tab | N/A | N/A | Unverified | PARTIAL - presets, theme preferences and mobile proof remain. |
-| 10 Files, PDFs, media, storage lifecycle | Added centralized type, extension and size validation for existing media/subtitle uploads; private upload/progress/media history/signed URLs/cleanup preserved | PASS - 3 dedicated unit tests; complete suite (8), typecheck, lint warnings only, production build | BLOCKED - browser automation could not open a local tab | Unverified | PASS (catalog) - bucket and storage policies match migrations | Unverified | PARTIAL - permanent shared files/PDF schema now recovered; runtime storage authorization (T6) remains unverified. |
+| 10 Files, PDFs, media, storage lifecycle | F1 fixed: Watch uploads, subtitles and cast history now use the Action 09 RPC and path contract | PASS - unit and contract tests, typecheck, lint warnings only, production build | BLOCKED - browser automation not run | T6 PASS (access control); owner delete FAIL (D6) | PASS (catalog); D6 fix prepared | Unverified | PARTIAL - deploy the app fix, apply D6 fix, run a browser upload. |
 
 ## Required external access to close gates
 
-1. Run `supabase/audits/action01-10/08-followup-rls-grants-publication.sql`
-   alone and export it, both before and after `20261104120000` is applied.
-   Also confirm in the Dashboard that Realtime "Allow public access" is
-   disabled. Applying the migration needs an authorized `npx supabase db push`
-   after review. Queries 01-07 were received on 2026-11-04.
-2. Two disposable authenticated accounts (separate browser profiles) and a
-   configured Google OAuth test client. Do not provide credentials in chat.
+1. Review and approve `20261105090000` (D5, D6), apply it with
+   `supabase db push`, then re-run
+   `node scripts/security/authorization-probe.mjs full` with the two
+   disposable accounts.
+2. Decide the D7 Realtime remediation. Confirm in the Dashboard that
+   Realtime "Allow public access" is disabled (still UNVERIFIED). Message-
+   request RPC probes need a follow-relationship fixture between the QA
+   accounts. A configured Google OAuth test client is still required.
 3. Vercel Preview URL/log access for the exact pushed commit, including Cron
    invocation evidence.

@@ -6,7 +6,15 @@ import { getActiveTemporaryMedia, logCastHistory, logTemporaryMedia, getSignedSt
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import { uploadFileWithProgress } from '@/lib/storage';
-import { getRoomMediaKind, roomFileExtension, validateRoomMediaUpload, validateRoomSubtitleUpload } from '@/lib/room-file-validation';
+import {
+  getRoomMediaKind,
+  roomFileExtension,
+  roomMediaStorageMimeType,
+  roomStorageObjectPath,
+  roomSubtitleStorageMimeType,
+  validateRoomMediaUpload,
+  validateRoomSubtitleUpload,
+} from '@/lib/room-file-validation';
 import { createClient } from '@/utils/supabase/client';
 
 const Player = dynamic(() => import('react-player').then((module) => module.default), { ssr: false });
@@ -415,9 +423,12 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
 
     setIsUploadingSub(true);
     try {
-      const extension = roomFileExtension(file.name);
-      const filePath = `${roomId}/sub-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
-      const { error } = await supabase.storage.from('room_attachments').upload(filePath, file, { cacheControl: '3600' });
+      const contentType = roomSubtitleStorageMimeType(file.name);
+      if (!contentType) throw new Error('Choose a VTT or SRT subtitle file.');
+      const filePath = roomStorageObjectPath(roomId, 'subtitles', crypto.randomUUID(), roomFileExtension(file.name));
+      const { error } = await supabase.storage
+        .from('room_attachments')
+        .upload(filePath, new Blob([file], { type: contentType }), { cacheControl: '3600', contentType });
       if (error) throw error;
       // Generate signed URL for subtitle (private storage)
       const result = await getSignedStorageUrl(filePath, roomId);
@@ -446,17 +457,17 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     setLocalUpload({ fileName: file.name, total: file.size, loaded: 0, percent: 0, phase: 'uploading' });
 
     try {
-      const extension = roomFileExtension(file.name);
-      const filePath = `${roomId}/temp-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
+      const mediaType = getRoomMediaKind(file);
+      const mimeType = roomMediaStorageMimeType(file);
+      if (!mediaType || !mimeType) throw new Error('Choose a supported audio or video file.');
+      const filePath = roomStorageObjectPath(roomId, 'media', crypto.randomUUID(), roomFileExtension(file.name));
       await uploadFileWithProgress(supabase, 'room_attachments', filePath, file, (progress) => {
         setLocalUpload((current) => current ? { ...current, loaded: progress.loaded, percent: progress.percent } : current);
-      });
+      }, mimeType);
 
       setLocalUpload((current) => current ? { ...current, loaded: current.total, percent: 100, phase: 'saving' } : current);
-      const mediaType = getRoomMediaKind(file);
-      if (!mediaType) throw new Error('Choose a supported audio or video file.');
       // Store file path (not public URL) for private storage compatibility
-      const result = await logTemporaryMedia(roomId, file.name, filePath, mediaType);
+      const result = await logTemporaryMedia(roomId, file.name, filePath, mediaType, { mimeType, sizeBytes: file.size });
       if (!result.success) throw new Error(result.error ?? 'Unable to save the uploaded media.');
 
       // Generate signed URL for immediate casting

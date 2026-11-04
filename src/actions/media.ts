@@ -41,31 +41,29 @@ export async function logTemporaryMedia(
   fileName: string,
   filePath: string,
   mediaType: MediaType,
+  upload?: { mimeType: string; sizeBytes: number },
 ) {
   try {
     if (!roomId || !fileName.trim() || !filePath) {
       throw new Error('Invalid media details.');
     }
     if (!['audio', 'video', 'url'].includes(mediaType)) throw new Error('Invalid media type.');
+    if (mediaType !== 'url' && !upload) throw new Error('Uploaded media requires its type and size.');
 
     const { supabase, user } = await getAuthenticatedUser();
-    const room = await assertActiveRoom(supabase, roomId);
+    await assertActiveRoom(supabase, roomId);
     await assertCanCast(supabase, roomId, user.id);
 
-    const mediaLifetimeSeconds = Math.min(
-      24 * 60 * 60,
-      roomExpirySeconds(room) ?? 24 * 60 * 60,
-    );
-    if (mediaLifetimeSeconds <= 0) throw new Error('This room has expired and is no longer active.');
-    const expiresAt = new Date(Date.now() + mediaLifetimeSeconds * 1000).toISOString();
-    // Store the file path instead of public URL for private storage compatibility
-    const { error } = await supabase.from('temporary_media').insert({
-      room_id: roomId,
-      user_id: user.id,
-      file_name: fileName.trim().slice(0, 512),
-      file_url: filePath, // Now stores file path, not URL
-      media_type: mediaType,
-      expires_at: expiresAt,
+    // Direct temporary_media writes were revoked in 20260923140000. The RPC
+    // re-checks watch_control, validates the <room>/media/<uuid>.<ext> path,
+    // MIME type and size, and derives the expiry from the room lifecycle.
+    const { error } = await supabase.rpc('register_temporary_media', {
+      p_room_id: roomId,
+      p_file_name: fileName.trim().slice(0, 512),
+      p_file_path: filePath,
+      p_media_type: mediaType,
+      p_mime_type: mediaType === 'url' ? null : upload?.mimeType ?? null,
+      p_file_size: mediaType === 'url' ? null : upload?.sizeBytes ?? null,
     });
 
     if (error) throw new Error(error.message);
@@ -108,14 +106,17 @@ export async function getSignedStorageUrl(filePath: string, roomId: string): Pro
   try {
     if (!filePath || !roomId) throw new Error('File path and room ID are required.');
 
-    const { supabase, user } = await getAuthenticatedUser();
-    const room = await assertActiveRoom(supabase, roomId);
-    await assertCapability(supabase, roomId, user.id, 'files');
-
     // Verify the file path belongs to this room
-    if (!filePath.startsWith(`${roomId}/`)) {
+    if (!filePath.startsWith(`${roomId}/`) || filePath.includes('..') || filePath.includes('\\')) {
       throw new Error('Invalid file path.');
     }
+
+    const { supabase, user } = await getAuthenticatedUser();
+    const room = await assertActiveRoom(supabase, roomId);
+    // Mirror the storage SELECT policy: Watch media and subtitles need the
+    // watch capability, and shared files need files.
+    const pathKind = filePath.slice(roomId.length + 1).split('/')[0];
+    await assertCapability(supabase, roomId, user.id, pathKind === 'media' || pathKind === 'subtitles' ? 'watch' : 'files');
 
     // Never let a signed URL outlive the room's server-side expiry.
     const roomLifetimeSeconds = roomExpirySeconds(room);

@@ -39,10 +39,55 @@ export function getRoomMediaKind(file: RoomUploadCandidate): RoomMediaKind | nul
   return null;
 }
 
+// MIME types accepted by both the room_attachments bucket and
+// register_temporary_media (migration 20260923140000). The upload is sent with
+// this type, so the browser-reported type never has to match the contract.
+const ROOM_MEDIA_STORAGE_MIME_TYPES: Record<string, string> = {
+  mp3: 'audio/mpeg',
+  flac: 'audio/flac',
+  ogg: 'audio/ogg',
+  opus: 'audio/ogg',
+  wav: 'audio/wav',
+  weba: 'audio/webm',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  ogv: 'video/ogg',
+  webm: 'video/webm',
+};
+
+const ROOM_SUBTITLE_STORAGE_MIME_TYPES: Record<string, string> = {
+  vtt: 'text/vtt',
+  srt: 'application/x-subrip',
+};
+
+export function roomMediaStorageMimeType(file: RoomUploadCandidate): string | null {
+  if (!getRoomMediaKind(file)) return null;
+  return ROOM_MEDIA_STORAGE_MIME_TYPES[roomFileExtension(file.name)] ?? null;
+}
+
+export function roomSubtitleStorageMimeType(name: string): string | null {
+  return ROOM_SUBTITLE_STORAGE_MIME_TYPES[roomFileExtension(name)] ?? null;
+}
+
+// Storage policies authorize writes only under <room>/media/ and
+// <room>/subtitles/, and register_temporary_media requires
+// <room>/media/<uuid v4>.<extension>.
+export function roomStorageObjectPath(
+  roomId: string,
+  kind: 'media' | 'subtitles',
+  objectId: string,
+  extension: string,
+) {
+  return `${roomId}/${kind}/${objectId.toLowerCase()}.${extension}`;
+}
+
 export function validateRoomMediaUpload(file: RoomUploadCandidate) {
   if (!Number.isSafeInteger(file.size) || file.size <= 0) return 'The selected file is empty.';
   if (file.size > ROOM_MEDIA_MAX_BYTES) return 'Files are capped at 50MB.';
   if (!getRoomMediaKind(file)) return 'Choose a supported audio or video file.';
+  if (!roomMediaStorageMimeType(file)) {
+    return 'Supported formats are MP3, FLAC, OGG, Opus, WAV, WEBA, MP4, M4V, OGV and WebM.';
+  }
   return null;
 }
 

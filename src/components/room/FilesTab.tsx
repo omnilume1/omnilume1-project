@@ -4,7 +4,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { getActiveTemporaryMedia, logTemporaryMedia, getSignedStorageUrl } from '@/actions/media';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { uploadFileWithProgress } from '@/lib/storage';
-import { getRoomMediaKind, roomFileExtension, validateRoomMediaUpload } from '@/lib/room-file-validation';
+import {
+  getRoomMediaKind,
+  roomFileExtension,
+  roomMediaStorageMimeType,
+  roomStorageObjectPath,
+  validateRoomMediaUpload,
+} from '@/lib/room-file-validation';
 import { createClient } from '@/utils/supabase/client';
 import OmniFileUpload from '@/components/ui/OmniFileUpload';
 
@@ -83,16 +89,16 @@ export default function FilesTab({ roomId, currentUserRole, canControlMedia = fa
     setError(null);
     setUpload({ fileName: file.name, total: file.size, loaded: 0, percent: 0, phase: 'uploading' });
     try {
-      const extension = roomFileExtension(file.name);
-      const filePath = `${roomId}/temp-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
+      const mediaType = getRoomMediaKind(file);
+      const mimeType = roomMediaStorageMimeType(file);
+      if (!mediaType || !mimeType) throw new Error('Choose a supported audio or video file.');
+      const filePath = roomStorageObjectPath(roomId, 'media', crypto.randomUUID(), roomFileExtension(file.name));
       await uploadFileWithProgress(supabase, 'room_attachments', filePath, file, (progress) => {
         setUpload((current) => current ? { ...current, loaded: progress.loaded, percent: progress.percent } : current);
-      });
+      }, mimeType);
 
       setUpload((current) => current ? { ...current, loaded: current.total, percent: 100, phase: 'saving' } : current);
-      const mediaType = getRoomMediaKind(file);
-      if (!mediaType) throw new Error('Choose a supported audio or video file.');
-      const result = await logTemporaryMedia(roomId, file.name, filePath, mediaType);
+      const result = await logTemporaryMedia(roomId, file.name, filePath, mediaType, { mimeType, sizeBytes: file.size });
       if (!result.success) throw new Error(result.error ?? 'Unable to save the uploaded media.');
       await loadMedia();
     } catch (uploadError) {
