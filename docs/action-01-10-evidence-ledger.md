@@ -54,6 +54,14 @@ Docker or Podman. Retain all Dashboard result sets from
 `supabase/audits/action01-10-remote-security-audit.sql` before treating policy,
 grant, trigger, storage, or Realtime checks as verified.
 
+The combined script was split into the read-only pack `supabase/audits/action01-10/`
+(committed in `fe082ab`): queries `01`-`07` are each a single catalog `SELECT` so a
+Dashboard export cannot silently retain only a final helper result set. The pack's
+README carries the run instructions, per-query expected configuration, and the
+separate two-account authorization checklist. Catalog output from these queries is
+still configuration evidence only; no Action 01-10 result set has been received, so
+no PASS classification is added by this split.
+
 ## Dashboard extensions result (2026-11-04)
 
 | Finding | Classification | Evidence and disposition |
@@ -100,13 +108,15 @@ confirmed defect to remediate.
 
 ## Required external access to close gates
 
-1. The missing Dashboard SQL Editor result sets from
-   `supabase/audits/action01-10-remote-security-audit.sql`: migration history,
-   RLS/policies, SECURITY DEFINER definitions/grants, constraints/indexes/
-   triggers, storage bucket/policies, Realtime publication/policies, and the
-   former-member/notification policy query. An authorized database credential
-   can supply the same read-only catalog queries. Docker/Podman is additionally
-   required only for CLI `db diff`.
+1. The missing Dashboard SQL Editor result sets from the split pack
+   `supabase/audits/action01-10/01-rls-policies.sql` through
+   `07-lifecycle-and-access-contracts.sql` (run one file at a time; see the pack
+   README): RLS/policies, SECURITY DEFINER definitions/grants, constraints/
+   indexes/triggers, storage bucket/policies, Realtime publication/policies,
+   message-request and Action 08-10 RPC signatures/grants, and the lifecycle/
+   former-member/recipient-authorization contracts. An authorized database
+   credential can supply the same read-only catalog queries. Docker/Podman is
+   additionally required only for CLI `db diff`.
 2. Two disposable authenticated accounts (separate browser profiles) and a
    configured Google OAuth test client. Do not provide credentials in chat.
 3. Vercel Preview URL/log access for the exact pushed commit, including Cron
