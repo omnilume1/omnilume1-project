@@ -36,6 +36,7 @@ import { useRoomSync } from '@/hooks/useRoomSync';
 import { useRoomPresence } from '@/hooks/useRoomPresence';
 import { clearFocusLock } from '@/lib/focus-lock';
 import { isRoomExpired } from '@/lib/room-lifecycle';
+import { roomWorkspacePreferenceKey } from '@/lib/room-workspace-preferences';
 import { minimizeRoom } from '@/lib/minimized-rooms';
 
 type AccessStatus = 'loading' | 'approved' | 'pending' | 'expired' | 'not_found' | 'unauthorized' | 'public_not_joined' | 'private_not_joined' | 'blocked' | 'banned' | 'kicked';
@@ -112,23 +113,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   // ==========================================
   const [sidebarWidth, setSidebarWidth] = useState(320); // Default 320px
   const [isDragging, setIsDragging] = useState(false);
-  const [sidebarWidthLoaded, setSidebarWidthLoaded] = useState(false);
-
-  useEffect(() => {
-    if (!roomData?.id) return;
-    const timer = window.setTimeout(() => {
-      const saved = window.localStorage.getItem(`omnilume:room:${roomData.id}:sidebar-width`);
-      const parsed = saved ? Number(saved) : NaN;
-      if (Number.isFinite(parsed)) setSidebarWidth(clampSidebarWidth(parsed));
-      setSidebarWidthLoaded(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [roomData?.id]);
-
-  useEffect(() => {
-    if (!roomData?.id || !sidebarWidthLoaded) return;
-    window.localStorage.setItem(`omnilume:room:${roomData.id}:sidebar-width`, String(sidebarWidth));
-  }, [roomData?.id, sidebarWidth, sidebarWidthLoaded]);
+  const sidebarPreferenceLoadedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -335,6 +320,25 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const realtimeRoomId = accessStatus === 'approved' && !roomIsExpired ? (roomData?.id ?? '') : '';
   const roomSync = useRoomSync(realtimeRoomId, userRole === 'owner' || canControlMedia);
   const roomPresence = useRoomPresence(realtimeRoomId);
+  const sidebarPreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'sidebar-width');
+  useEffect(() => {
+    sidebarPreferenceLoadedKeyRef.current = null;
+    const timer = window.setTimeout(() => {
+      if (!sidebarPreferenceKey) {
+        setSidebarWidth(320);
+        return;
+      }
+      const saved = window.localStorage.getItem(sidebarPreferenceKey);
+      const parsed = saved ? Number(saved) : NaN;
+      setSidebarWidth(Number.isFinite(parsed) ? clampSidebarWidth(parsed) : 320);
+      sidebarPreferenceLoadedKeyRef.current = sidebarPreferenceKey;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [sidebarPreferenceKey]);
+  useEffect(() => {
+    if (!sidebarPreferenceKey || sidebarPreferenceLoadedKeyRef.current !== sidebarPreferenceKey) return;
+    window.localStorage.setItem(sidebarPreferenceKey, String(sidebarWidth));
+  }, [sidebarPreferenceKey, sidebarWidth]);
   useEffect(() => {
     const currentUserId = roomSync.currentUserId;
     const removed = roomSync.roomControlEvents.find((event) => event.subjectUserId === currentUserId && ((event.eventType === 'membership_changed' && event.payload.action === 'kick') || (event.eventType === 'restriction_changed' && (event.payload.action === 'ban' || event.payload.action === 'block'))));

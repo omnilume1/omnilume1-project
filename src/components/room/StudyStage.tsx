@@ -178,7 +178,7 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
     handlePointerMove,
     handlePointerUp,
     handleKeyDown,
-  } = useRoomPanelResize(roomId, 'study-height', { minHeight: 360, maxHeight: 760 });
+  } = useRoomPanelResize(roomId, currentUserId, 'study-height', { minHeight: 360, maxHeight: 760 });
   const [activeTab, setActiveTab] = useState<StudyTab>('TIMER');
   const [subject, setSubject] = useState('');
   const [inputHrs, setInputHrs] = useState(0);

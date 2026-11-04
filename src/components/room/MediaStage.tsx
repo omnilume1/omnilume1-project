@@ -143,7 +143,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     handlePointerMove,
     handlePointerUp,
     handleKeyDown,
-  } = useRoomPanelResize(roomId, 'cast-height', { minHeight: 280, maxHeight: 760 });
+  } = useRoomPanelResize(roomId, currentUserId, 'cast-height', { minHeight: 280, maxHeight: 760 });
   const canCast = canControlMedia;
   const activeMediaUrl = mediaState?.url ?? null;
   const activeSubtitleUrl = mediaState?.subtitleUrl ?? null;

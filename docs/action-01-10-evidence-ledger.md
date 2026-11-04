@@ -73,7 +73,7 @@ this drift. Action 03 requires the missing migration source (or an authorized
 | 06 Lifecycle, expiry, recovery, cleanup | Existing lifecycle/recovery/Cron sources | PASS | Unverified | Unverified | PARTIAL source review | Unverified | UNVERIFIED. |
 | 07 Shared realtime foundation | Existing shared provider and typed room sync | PASS | Unverified | Unverified | PARTIAL local migration evidence | Unverified | UNVERIFIED. |
 | 08 Room messaging and notifications | Partial: send/history/delete/announcements/notifications exist | PASS | Unverified | Unverified | Unverified | Unverified | PARTIAL - replies, reactions, mentions, pins, edits, DND/mute require verified source and schema. |
-| 09 Adaptive room workspace | Partial: right sidebar resize/persistence and feature panels exist | PASS | Unverified | N/A | N/A | Unverified | PARTIAL - presets, theme preferences and mobile proof remain. |
+| 09 Adaptive room workspace | Fixed private preference scoping for the sidebar, Watch and Study panel sizes; existing feature panels preserved | PASS - 5 unit tests, typecheck, lint warnings only | BLOCKED - browser automation could not open a local tab | N/A | N/A | Unverified | PARTIAL - presets, theme preferences and mobile proof remain. |
 | 10 Files, PDFs, media, storage lifecycle | Partial: private upload/progress/media history/signed URLs/cleanup exist | PASS | Unverified | Unverified | Unverified | Unverified | PARTIAL - permanent shared files, shared PDFs, retry/cancel and metadata need schema/source confirmation. |
 
 ## Required external access to close gates
