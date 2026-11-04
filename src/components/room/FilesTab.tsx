@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { getActiveTemporaryMedia, logTemporaryMedia, getSignedStorageUrl } from '@/actions/media';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { uploadFileWithProgress } from '@/lib/storage';
+import { getRoomMediaKind, roomFileExtension, validateRoomMediaUpload } from '@/lib/room-file-validation';
 import { createClient } from '@/utils/supabase/client';
 import OmniFileUpload from '@/components/ui/OmniFileUpload';
 
@@ -73,22 +74,24 @@ export default function FilesTab({ roomId, currentUserRole, canControlMedia = fa
       setError('Only an approved room owner or admin can upload media.');
       return;
     }
-    if (file.size > 50 * 1024 * 1024) {
-      setError('Files are capped at 50MB.');
+    const validationError = validateRoomMediaUpload(file);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
     setError(null);
     setUpload({ fileName: file.name, total: file.size, loaded: 0, percent: 0, phase: 'uploading' });
     try {
-      const extension = file.name.split('.').pop()?.replace(/[^a-z0-9]/gi, '') || 'bin';
+      const extension = roomFileExtension(file.name);
       const filePath = `${roomId}/temp-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
       await uploadFileWithProgress(supabase, 'room_attachments', filePath, file, (progress) => {
         setUpload((current) => current ? { ...current, loaded: progress.loaded, percent: progress.percent } : current);
       });
 
       setUpload((current) => current ? { ...current, loaded: current.total, percent: 100, phase: 'saving' } : current);
-      const mediaType = file.type.startsWith('audio/') ? 'audio' : 'video';
+      const mediaType = getRoomMediaKind(file);
+      if (!mediaType) throw new Error('Choose a supported audio or video file.');
       const result = await logTemporaryMedia(roomId, file.name, filePath, mediaType);
       if (!result.success) throw new Error(result.error ?? 'Unable to save the uploaded media.');
       await loadMedia();

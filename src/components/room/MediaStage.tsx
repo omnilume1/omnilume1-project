@@ -6,6 +6,7 @@ import { getActiveTemporaryMedia, logCastHistory, logTemporaryMedia, getSignedSt
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import { uploadFileWithProgress } from '@/lib/storage';
+import { getRoomMediaKind, roomFileExtension, validateRoomMediaUpload, validateRoomSubtitleUpload } from '@/lib/room-file-validation';
 import { createClient } from '@/utils/supabase/client';
 
 const Player = dynamic(() => import('react-player').then((module) => module.default), { ssr: false });
@@ -405,9 +406,16 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     const file = event.target.files?.[0];
     if (!file || !canCast) return;
 
+    const validationError = validateRoomSubtitleUpload(file);
+    if (validationError) {
+      setHistoryError(validationError);
+      if (subtitleFileRef.current) subtitleFileRef.current.value = '';
+      return;
+    }
+
     setIsUploadingSub(true);
     try {
-      const extension = file.name.split('.').pop() || 'vtt';
+      const extension = roomFileExtension(file.name);
       const filePath = `${roomId}/sub-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
       const { error } = await supabase.storage.from('room_attachments').upload(filePath, file, { cacheControl: '3600' });
       if (error) throw error;
@@ -427,8 +435,9 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     const file = event.target.files?.[0];
     if (!file || !canCast || localUpload) return;
 
-    if (file.size > 50 * 1024 * 1024) {
-      setHistoryError('Files are capped at 50MB.');
+    const validationError = validateRoomMediaUpload(file);
+    if (validationError) {
+      setHistoryError(validationError);
       if (localFileRef.current) localFileRef.current.value = '';
       return;
     }
@@ -437,14 +446,15 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     setLocalUpload({ fileName: file.name, total: file.size, loaded: 0, percent: 0, phase: 'uploading' });
 
     try {
-      const extension = file.name.split('.').pop()?.replace(/[^a-z0-9]/gi, '') || 'bin';
+      const extension = roomFileExtension(file.name);
       const filePath = `${roomId}/temp-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
       await uploadFileWithProgress(supabase, 'room_attachments', filePath, file, (progress) => {
         setLocalUpload((current) => current ? { ...current, loaded: progress.loaded, percent: progress.percent } : current);
       });
 
       setLocalUpload((current) => current ? { ...current, loaded: current.total, percent: 100, phase: 'saving' } : current);
-      const mediaType = file.type.startsWith('audio/') ? 'audio' : 'video';
+      const mediaType = getRoomMediaKind(file);
+      if (!mediaType) throw new Error('Choose a supported audio or video file.');
       // Store file path (not public URL) for private storage compatibility
       const result = await logTemporaryMedia(roomId, file.name, filePath, mediaType);
       if (!result.success) throw new Error(result.error ?? 'Unable to save the uploaded media.');
