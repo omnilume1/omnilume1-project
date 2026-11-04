@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server';
 import {
   DEFAULT_AUTH_REDIRECT,
+  isProfileComplete,
   PROFILE_SETUP_PATH,
   getSafeRedirectPath,
 } from '@/lib/auth';
@@ -32,11 +33,11 @@ export async function GET(request: NextRequest) {
 
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('profile_completed')
+    .select('profile_completed, profile_details_completed')
     .eq('id', user.id)
     .maybeSingle();
 
-  if (profileError || profile?.profile_completed !== true) {
+  if (profileError || !isProfileComplete(profile)) {
     const setupUrl = new URL(PROFILE_SETUP_PATH, request.url);
     setupUrl.searchParams.set('next', nextPath);
     return NextResponse.redirect(setupUrl);

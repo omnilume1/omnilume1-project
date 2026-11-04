@@ -66,7 +66,7 @@ this drift. Action 03 requires the missing migration source (or an authorized
 | Action | Implementation | Static | Local browser | Multi-user | DB/security | Production | Status / next gate |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 Foundation and evidence | Verified inventory updated | PASS | N/A | N/A | Remote inventory PARTIAL | Unverified | PARTIAL - complete remote migration source is required for a reliable Action 03 handoff. |
-| 02 Authentication and identity | Existing; targeted consistency verification in progress | PASS | Unverified | N/A | Schema/RLS unverified this run | Unverified | UNVERIFIED - needs provider configuration and authenticated flows. |
+| 02 Authentication and identity | Fixed callback/profile-gate consistency; added unit coverage for completion and redirect safety | PASS | BLOCKED - browser automation failed before navigation | N/A | Schema/RLS unverified this run | Unverified | PARTIAL - needs provider configuration and authenticated flows. |
 | 03 Database, RLS, storage docs | Existing migrations/policies, but local is behind remote | PARTIAL | N/A | N/A | BLOCKED by migration drift and DB password | Unverified | BLOCKED. |
 | 04 Profiles, privacy, follows, friends, posts | Existing UI/actions/migrations | PASS | Unverified | Unverified | Unverified this run | Unverified | UNVERIFIED. |
 | 05 Rooms, membership, roles, controls | Existing controls/invites/restrictions/provider wiring | PASS | Unverified | Unverified | PARTIAL source review | Unverified | UNVERIFIED. |
