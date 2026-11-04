@@ -1,7 +1,7 @@
 # OmniLume Actions 01-10 Evidence Ledger
 
 **Recorded:** 2026-11-04
-**Branch / audit HEAD:** `feature/action-05-room-controls-ui` at `5f4ab0b`
+**Branch / audit evidence baseline:** `feature/action-05-room-controls-ui` at `2f708ee`
 **Scope:** Actions 01-10 only. Existing E2EE remains unchanged; no application
 Ghost Mode or member-menu "Block from room" option is introduced. The recovered
 historical migration source includes already-deployed presence definitions but
@@ -45,11 +45,27 @@ or repaired. Linked type generation confirms the deployed Action 08-10 tables
 and RPC signatures (`message_requests`, `room_files`, snapshots, cleanup jobs,
 study notes, PDF annotations, whiteboards, and their RPCs) exist remotely.
 
-The effective catalog remains only partially verified: `db dump`/`inspect`
-require `SUPABASE_DB_PASSWORD`, while `db diff` additionally requires Docker or
-Podman. Run `supabase/audits/action01-10-remote-security-audit.sql` in the
-Supabase Dashboard SQL Editor and retain its result before treating policy,
+The effective catalog remains only partially verified. The Dashboard export
+received on 2026-11-04 contains only the script's final `extensions` helper
+result set; it proves those helper functions exist but contains no Action 01-10
+RLS, grant, trigger, storage, publication, or authorization results. `db dump`/
+`inspect` require `SUPABASE_DB_PASSWORD`, while `db diff` additionally requires
+Docker or Podman. Retain all Dashboard result sets from
+`supabase/audits/action01-10-remote-security-audit.sql` before treating policy,
 grant, trigger, storage, or Realtime checks as verified.
+
+## Dashboard extensions result (2026-11-04)
+
+| Finding | Classification | Evidence and disposition |
+| --- | --- | --- |
+| `_query(text)`, `_db_privs()`, `_get_func_privs(text, text)`, all five returned `_get_rel_owner` overloads, `ok(boolean)`, `ok(boolean, text)`, and `plan(integer)` | Confirmed PASS | The Dashboard catalog export lists every helper signature that the linked CLI lint previously reported as absent. |
+| `_array_to_sorted_string(name[], text)` | Pre-existing unrelated issue | It exists, but the lint error searched for `_array_to_sorted_string(text[], unknown)`. This is a helper argument-type mismatch, not an OmniLume migration object. |
+| Remaining `extensions` lint failures | Pre-existing unrelated issue; root cause UNVERIFIED | No Action 01-10 migration, application source, or test source references any of the returned helper names. The export rules out simple absence; function definition/settings and extension-version output are still needed to distinguish a search-path/runtime resolution issue from an extension-version mismatch. |
+| Action 01-10 RLS, grants, SECURITY DEFINER settings, constraints, storage, Realtime, lifecycle/final-member denial, and recipient isolation | Unverified | The supplied export contains none of the corresponding audit query result sets and no independent authenticated authorization probes. |
+
+No confirmed Action 01-10 application or migration security defect was found by
+this result set. No production migration is prepared because there is no
+confirmed defect to remediate.
 
 ## Baseline evidence
 
@@ -62,7 +78,7 @@ grant, trigger, storage, or Realtime checks as verified.
 | Automated test suite | Missing | No test script or test directory existed at baseline |
 | Remote migrations | PASS | `npx supabase migration list --linked`; all 27 local/remote versions match |
 | Remote schema signatures | PARTIAL | `npx supabase gen types typescript --linked --schema public` confirms recovered Action 08-10 tables/RPCs, not policies or definitions |
-| Remote DB lint | PARTIAL | Ran read-only. Errors are confined to unrelated `extensions` test-helper functions; this is not an Action 01-10 policy pass |
+| Remote DB lint | PARTIAL | Dashboard confirms the reported `extensions` helpers exist; the remaining lint helper-resolution issue is unrelated to Actions 01-10 and is not a policy pass |
 | Full catalog/policy diff | BLOCKED | Linked `db dump`/`inspect` need `SUPABASE_DB_PASSWORD`; `db diff` needs Docker or Podman |
 | Local/browser multi-user | Unverified | Independent authenticated identities were not available in the current environment |
 | Vercel/production | Unverified | No deployed-commit, Cron-log, or OAuth-provider evidence obtained |
@@ -71,9 +87,9 @@ grant, trigger, storage, or Realtime checks as verified.
 
 | Action | Implementation | Static | Local browser | Multi-user | DB/security | Production | Status / next gate |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 Foundation and evidence | Verified inventory and recovery evidence updated | PASS | N/A | N/A | Remote inventory PARTIAL | Unverified | PARTIAL - Dashboard catalog output remains required. |
+| 01 Foundation and evidence | Verified inventory, recovery evidence, and read-only audit script updated | PASS | N/A | N/A | Remote inventory PARTIAL | Unverified | PARTIAL - Dashboard catalog output remains required. |
 | 02 Authentication and identity | Fixed callback/profile-gate consistency; added unit coverage for completion and redirect safety | PASS | BLOCKED - browser automation failed before navigation | N/A | Schema/RLS unverified this run | Unverified | PARTIAL - needs provider configuration and authenticated flows. |
-| 03 Database, RLS, storage docs | Reconciled exact migration sources and confirmed remote schema signatures | PASS | N/A | N/A | PARTIAL - catalog definitions/RLS/storage still blocked | Unverified | PARTIAL - execute the read-only Dashboard audit and authorization probes. |
+| 03 Database, RLS, storage docs | Reconciled exact migration sources and confirmed remote schema signatures | PASS | N/A | N/A | PARTIAL - only unrelated extensions helper result supplied | Unverified | PARTIAL - retain all Dashboard audit result sets and execute authorization probes. |
 | 04 Profiles, privacy, follows, friends, posts | Existing UI/actions/migrations | PASS | Unverified | Unverified | Unverified this run | Unverified | UNVERIFIED. |
 | 05 Rooms, membership, roles, controls | Existing controls/invites/restrictions/provider wiring | PASS | Unverified | Unverified | PARTIAL recovered migration source | Unverified | UNVERIFIED. |
 | 06 Lifecycle, expiry, recovery, cleanup | Existing lifecycle/recovery/Cron sources | PASS | Unverified | Unverified | PARTIAL recovered migration source | Unverified | UNVERIFIED. |
@@ -84,10 +100,13 @@ grant, trigger, storage, or Realtime checks as verified.
 
 ## Required external access to close gates
 
-1. Dashboard SQL Editor output from
-   `supabase/audits/action01-10-remote-security-audit.sql`, or an authorized
-   database credential for the same read-only catalog queries. Docker/Podman is
-   additionally required only for CLI `db diff`.
+1. The missing Dashboard SQL Editor result sets from
+   `supabase/audits/action01-10-remote-security-audit.sql`: migration history,
+   RLS/policies, SECURITY DEFINER definitions/grants, constraints/indexes/
+   triggers, storage bucket/policies, Realtime publication/policies, and the
+   former-member/notification policy query. An authorized database credential
+   can supply the same read-only catalog queries. Docker/Podman is additionally
+   required only for CLI `db diff`.
 2. Two disposable authenticated accounts (separate browser profiles) and a
    configured Google OAuth test client. Do not provide credentials in chat.
 3. Vercel Preview URL/log access for the exact pushed commit, including Cron
