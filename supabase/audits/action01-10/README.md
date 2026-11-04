@@ -28,6 +28,14 @@ impersonate users, invoke RPCs, or change production data/schema/history.
 | `05-realtime-contract.sql` | `supabase_realtime` publication, Postgres Changes membership, and Broadcast/Presence policies | `message_requests`, `private_chats`, and `friendships` appear in the publication. `realtime.messages` policies parse topics and gate lifecycle/member/capability access. |
 | `06-message-and-action08-10-rpcs.sql` | Migration 019 and Actions 08-10 RPC existence, signatures, grants, bodies, plus message-request table controls | All expected RPCs are present. RPC grants exclude `PUBLIC`; direct `message_requests` mutation grants to `authenticated` must be absent. |
 | `07-lifecycle-and-access-contracts.sql` | Lifecycle, former-member, and recipient-isolation functions and policy contracts | Definitions/policies use active-access, approved-member, or room-capability checks. Notification policies must scope reads/updates to the recipient. |
+| `08-followup-rls-grants-publication.sql` | Follow-up for the 2026-11-04 export gaps: compact RLS state, residual client table privileges, anon function EXECUTE, publication membership for every subscribed table, and the `messages` insert room branch | Every table reports `rls=true`. After `20261104120000` is applied: no `client_grant` rows, none of the five remediated functions under `anon_execute`, and `messages_insert` reports that the room branch requires the chat capability. Run it before applying (baseline) and again after. |
+
+Query 08 returns plain text columns so a long row cannot truncate the export.
+The 2026-11-04 export of query 01 stopped partway through the
+`recovery_requests` row, so the RLS state of the remaining tables comes only
+from query 08. Query 01's target list used to name `room_restrictions`
+instead of `room_member_restrictions` and omitted `room_control_events`; both
+are now corrected.
 
 ## Interpretation rules
 
