@@ -125,6 +125,33 @@ test('no current policy reads a table that client roles cannot select', () => {
   assert.deepEqual(offenders, []);
 });
 
+test('no current function regex escapes a dot with a doubled backslash', () => {
+  // In a $$ body '\\.' matches a literal backslash plus any character, which
+  // rejected every valid subtitle path (D8, 20260923140000).
+  const offenders = [...latestFunctionBodies()]
+    .filter(([, { body }]) => /\\\\\./.test(body))
+    .map(([name, { file }]) => `${name} (${file})`);
+  assert.deepEqual(offenders, []);
+});
+
+test('room chat is delivered by RLS-filtered Postgres Changes, never Broadcast', () => {
+  const read = (...parts: string[]) => readFileSync(resolve(process.cwd(), ...parts), 'utf8');
+  const sync = read('src', 'hooks', 'useRoomSync.ts');
+  for (const event of ['INSERT', 'UPDATE']) {
+    assert.match(
+      sync,
+      new RegExp(`postgres_changes', \\{ event: '${event}', schema: 'public', table: 'messages', filter: \`room_id=eq\\.\\$\\{roomId\\}\` \\}`),
+      `useRoomSync must subscribe to ${event} on public.messages for the room`,
+    );
+  }
+  // DELETE events are not RLS-filtered by Postgres Changes.
+  assert.doesNotMatch(sync, /event: '(DELETE|\*)', schema: 'public', table: 'messages'/);
+  assert.doesNotMatch(read('src', 'components', 'room', 'RoomChat.tsx'), /broadcastEvent\('room_message/);
+  // Every Broadcast leaves through the wire contract.
+  assert.match(sync, /const wirePayload = toRoomBroadcastPayload\(eventType, eventPayload\)/);
+  assert.match(sync, /const payload = toRoomBroadcastPayload\(event\.event_type, event\.payload\)/);
+});
+
 test('app code registers Watch media through the RPC on contract storage paths', () => {
   const sourceRoot = resolve(process.cwd(), 'src');
   const sourceFiles = (directory: string): string[] =>

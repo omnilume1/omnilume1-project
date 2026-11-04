@@ -70,7 +70,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
   const loadingOlderRef = useRef(false);
   const preserveScrollRef = useRef<{ height: number; top: number } | null>(null);
   const supabase = createClient();
-  const { currentUserId: roomCurrentUserId, typingUsers, broadcastEvent, roomMessageEvents, roomControlVersion } = useRoomRealtime();
+  const { currentUserId: roomCurrentUserId, typingUsers, broadcastEvent, roomMessageEvents, roomControlVersion, connectionGeneration } = useRoomRealtime();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -120,6 +120,28 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
     return () => { isMounted = false; };
   }, [roomId, supabase]);
+
+  // Postgres Changes does not replay rows committed before the feed became
+  // ready: neither the gap after the initial fetch nor time spent
+  // disconnected. Each time the feed is (re)confirmed, re-read the newest page
+  // through RLS. mergeMessage de-duplicates by id, so nothing is shown twice.
+  useEffect(() => {
+    if (connectionGeneration < 1) return;
+    let active = true;
+    void (async () => {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('id, sender_id, content, is_deleted, created_at')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(ROOM_CHAT_PAGE_SIZE);
+      if (!active || error) return;
+      const page = ((data ?? []) as unknown[]).filter(isRoomChatMessage);
+      if (page.length > 0) setMessages((current) => [...page].reverse().reduce(mergeMessage, current));
+    })();
+    return () => { active = false; };
+  }, [connectionGeneration, roomId, supabase]);
 
   const loadOlderMessages = useCallback(async () => {
     const cursor = oldestCursorRef.current;
@@ -236,9 +258,10 @@ export default function RoomChat({ roomId }: RoomChatProps) {
       return;
     }
 
+    // Other members receive the row through RLS-checked Postgres Changes, not
+    // Broadcast, so chat text never reaches a stale or removed connection.
     const createdMessage = data as RoomChatMessage;
     setMessages((current) => mergeMessage(current, createdMessage));
-    broadcastEvent('room_message', { message: createdMessage as unknown as Record<string, unknown> });
   };
 
   const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -268,10 +291,8 @@ export default function RoomChat({ roomId }: RoomChatProps) {
         return;
       }
 
+      // The soft-delete UPDATE reaches other members through Postgres Changes.
       setMessages(prev => prev.map(msg => msg.id === msgId ? { ...msg, is_deleted: true, content: '🚫 This message was deleted' } : msg));
-      broadcastEvent('room_message_update', {
-        message: { id: msgId, is_deleted: true, content: 'This message was deleted', file_url: null },
-      });
     } catch {
       setDeleteError('Unable to delete message.');
     } finally {

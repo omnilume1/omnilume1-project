@@ -90,22 +90,67 @@ async function signIn(label, email, password) {
   return { client, id: data.user.id, label };
 }
 
-function subscribe(client, topic, onEvent) {
+// Measured behavior that is neither pass nor fail (for example transport-level
+// residuals that a design decision accepts).
+function info(test, check, detail = '') {
+  results.push({ test, check, pass: 'info', detail });
+  console.log(`INFO  ${test}  ${check}${detail ? `  [${detail}]` : ''}`);
+}
+
+function joinChannel(channel) {
   return new Promise((done) => {
-    const channel = client.channel(topic, { config: { private: true, broadcast: { self: false } } });
-    if (onEvent) channel.on('broadcast', { event: 'qa-probe' }, (message) => onEvent(message.payload));
     let settled = false;
     const finish = (status) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      done({ channel, status });
+      done(status);
     };
     const timer = setTimeout(() => finish('NO_RESPONSE'), 10_000);
     channel.subscribe((status) => {
       if (['SUBSCRIBED', 'CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) finish(status);
     });
   });
+}
+
+async function subscribe(client, topic, onEvent) {
+  const channel = client.channel(topic, { config: { private: true, broadcast: { self: false } } });
+  if (onEvent) channel.on('broadcast', { event: 'qa-probe' }, (message) => onEvent(message.payload));
+  return { channel, status: await joinChannel(channel) };
+}
+
+// Opens exactly the room subscriptions the app opens (useRoomSync and
+// useRoomPresence) and records everything delivered. Used for both the
+// hostile removed connection and the remaining-member observer.
+async function mirrorRoomSubscriptions(client, roomId, log) {
+  const now = () => Date.now();
+  const userId = (await client.auth.getUser()).data.user?.id;
+  const general = client.channel(`sync:${roomId}`, { config: { private: true } });
+  general.on('broadcast', { event: 'room_action' }, (message) => log.push({ at: now(), kind: 'broadcast', topic: 'sync', payload: message.payload }));
+  for (const event of ['INSERT', 'UPDATE']) {
+    general.on('postgres_changes', { event, schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, (change) => log.push({ at: now(), kind: 'chat', eventType: change.eventType, row: change.new }));
+  }
+  general.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_control_events', filter: `room_id=eq.${roomId}` }, (change) => log.push({ at: now(), kind: 'control', row: change.new }));
+  // Postgres Changes becomes active only when Realtime sends this system
+  // message, some time after SUBSCRIBED.
+  general.on('system', {}, (message) => log.push({ at: now(), kind: 'system', extension: message?.extension, status: message?.status }));
+  const control = client.channel(`sync-control:${roomId}`, { config: { private: true } });
+  control.on('broadcast', { event: 'room_action' }, (message) => log.push({ at: now(), kind: 'broadcast', topic: 'sync-control', payload: message.payload }));
+  const presence = client.channel(`presence:${roomId}`, { config: { private: true, presence: { key: userId } } });
+  presence.on('presence', { event: 'sync' }, () => log.push({ at: now(), kind: 'presence', keys: Object.keys(presence.presenceState()) }));
+  const channels = [general, control, presence];
+  const statuses = await Promise.all(channels.map(joinChannel));
+  if (statuses[2] === 'SUBSCRIBED') await presence.track({ user_id: userId, online_at: new Date().toISOString() }).catch(() => undefined);
+  return { channels, statuses };
+}
+
+function jwtLifetimeSeconds(accessToken) {
+  try {
+    const claims = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8'));
+    return claims.exp - claims.iat;
+  } catch {
+    return null;
+  }
 }
 
 async function anonPhase() {
@@ -184,6 +229,10 @@ async function fullPhase() {
   }
 
   const [A, B] = await Promise.all(creds.map((cred) => signIn(cred.label, cred.email, cred.password)));
+  // D: JWT lifetime bounds how long a non-refreshing removed connection keeps
+  // its Realtime join (measured, never changed by this script).
+  const { data: sessionData } = await A.client.auth.getSession();
+  info('D7', 'access-token lifetime (exp - iat)', `${jwtLifetimeSeconds(sessionData.session?.access_token ?? '') ?? 'unknown'} s`);
   if (A.id === B.id) throw new Error('Accounts A and B must be different users.');
 
   const tag = `qa-${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
@@ -193,6 +242,7 @@ async function fullPhase() {
   console.log(`fixture rooms R1=${R1} (owner A) R2=${R2} (owner B)`);
 
   const channels = [];
+  const extraClients = [];
   try {
     // ---- Fixtures in R1 created by the owner through normal APIs.
     const ownerMessage = await A.client.from('messages').insert({ room_id: R1, sender_id: A.id, content: 'qa owner probe' });
@@ -211,6 +261,7 @@ async function fullPhase() {
       p_room_id: R1, p_file_name: 'qa-probe.mp4', p_file_path: mediaPath, p_media_type: 'video', p_mime_type: 'video/mp4', p_file_size: tinyMedia().size,
     });
     record('F1', 'register_temporary_media accepts the fixed app call shape', !registered.error, codeOf(registered));
+    const mediaId = (Array.isArray(registered.data) ? registered.data[0] : registered.data)?.id ?? null;
 
     const note = await A.client.rpc('create_study_note', { p_room_id: R1, p_scope: 'room', p_title: 'qa probe', p_content: 'qa probe' });
     const noteRow = Array.isArray(note.data) ? note.data[0] : note.data;
@@ -355,8 +406,72 @@ async function fullPhase() {
     const demote = await A.client.rpc('set_room_member_role', { p_room_id: R1, p_target_user_id: B.id, p_role: 'member' });
     record('T2', 'owner demotes B back to member', !demote.error, codeOf(demote));
 
+    // ---- D7 setup. HOSTILE: a separate raw connection for B that mirrors the
+    // app's room subscriptions, never refreshes its token and ignores removal
+    // events. OBSERVER: an independent connection for the remaining member.
+    // A publishes through the app's real wire contract module.
+    const contract = await import(new URL('../../src/lib/room-broadcast-contract.ts', import.meta.url).href);
+    const marker = `qa-d7-${randomUUID().slice(0, 8)}`;
+    const hostile = await signIn('B', creds[1].email, creds[1].password);
+    const observer = await signIn('A', creds[0].email, creds[0].password);
+    extraClients.push(hostile.client, observer.client);
+    const hostileLog = [];
+    const observerLog = [];
+    const subscribedAt = Date.now();
+    const hostileSubs = await mirrorRoomSubscriptions(hostile.client, R1, hostileLog);
+    const observerSubs = await mirrorRoomSubscriptions(observer.client, R1, observerLog);
+    const feedReady = (log) => log.find((entry) => entry.kind === 'system' && entry.extension === 'postgres_changes' && entry.status === 'ok');
+    for (let waited = 0; waited < 20_000 && !(feedReady(hostileLog) && feedReady(observerLog)); waited += 250) await sleep(250);
+    info('D7', 'Postgres Changes ready after channel join (hostile/observer)', `${feedReady(hostileLog) ? feedReady(hostileLog).at - subscribedAt : 'never'} ms / ${feedReady(observerLog) ? feedReady(observerLog).at - subscribedAt : 'never'} ms`);
+    for (const channel of hostileSubs.channels) channels.push([hostile.client, channel]);
+    for (const channel of observerSubs.channels) channels.push([observer.client, channel]);
+    record('D7', 'hostile and observer connections join sync, sync-control and presence', [...hostileSubs.statuses, ...observerSubs.statuses].every((status) => status === 'SUBSCRIBED'), `${hostileSubs.statuses.join('/')} | ${observerSubs.statuses.join('/')}`);
+    const ownerControl = await subscribe(A.client, `sync-control:${R1}`);
+    channels.push([A.client, ownerControl.channel]);
+
+    const MEDIA_EVENTS = new Set(['cast', 'stop_cast', 'subtitle_upload', 'force_sync', 'play', 'pause', 'seek', 'mute']);
+    const sendRoomAction = async (eventType, fullPayload = {}) => {
+      // Exactly what useRoomSync.broadcastEvent sends: the full local payload
+      // reduced to the wire contract.
+      const wire = contract.toRoomBroadcastPayload(eventType, fullPayload);
+      if (!wire) throw new Error(`contract rejected ${eventType}`);
+      const channel = MEDIA_EVENTS.has(eventType) ? ownerControl.channel : ownerChannel.channel;
+      await channel.send({
+        type: 'broadcast',
+        event: 'room_action',
+        payload: { event_id: randomUUID(), sender_id: A.id, timestamp: Date.now(), room_id: R1, event_type: eventType, payload: wire, state_version: 1 },
+      });
+    };
+    const playback = (extra = {}) => ({
+      // The publisher's full local state, including protected fields the
+      // contract must strip.
+      url: `https://example.invalid/storage/v1/object/sign/room_attachments/${marker}.mp4?token=${marker}`,
+      title: `${marker} private title`,
+      subtitleUrl: `https://example.invalid/${marker}.vtt`,
+      mediaId,
+      castId: randomUUID(),
+      controllerId: A.id,
+      sourceType: 'upload',
+      time: 3,
+      speed: 1,
+      playing: true,
+      muted: false,
+      volume: 1,
+      ...extra,
+    });
+    const SENSITIVE = new RegExp(`${marker}|https?:|/storage/v1/|token=|/media/|/subtitles/`, 'i');
+
+    const beforeMessage = await A.client.from('messages').insert({ room_id: R1, sender_id: A.id, content: `${marker} before removal` }).select('id').single();
+    await sendRoomAction('cast', playback());
+    await sleep(3_000);
+    record('D7', 'positive control: member connection receives chat through Postgres Changes', hostileLog.some((entry) => entry.kind === 'chat' && entry.row?.id === beforeMessage.data?.id), `chat events=${hostileLog.filter((entry) => entry.kind === 'chat').length}`);
+    record('D7', 'positive control: observer receives the same chat row', observerLog.some((entry) => entry.kind === 'chat' && entry.row?.id === beforeMessage.data?.id));
+    record('D7', 'positive control: member connection receives the cast by mediaId', hostileLog.some((entry) => entry.kind === 'broadcast' && entry.payload?.event_type === 'cast' && entry.payload?.payload?.mediaId === mediaId));
+    record('D7', 'Broadcast carries no title or URL even to current members', !SENSITIVE.test(JSON.stringify(hostileLog.filter((entry) => entry.kind === 'broadcast'))));
+
     // ---- T1 / T7 removal.
     const kick = await A.client.rpc('review_room_member', { p_room_id: R1, p_target_user_id: B.id, p_action: 'kick', p_reason: '' });
+    const kickedAt = Date.now();
     record('T1', 'owner removes B', !kick.error, codeOf(kick));
     const formerRead = await B.client.from('messages').select('id').eq('room_id', R1);
     record('T1', 'former member reads no R1 messages', deniedOrEmpty(formerRead), `${codeOf(formerRead)} rows=${rowsOf(formerRead)}`);
@@ -371,10 +486,64 @@ async function fullPhase() {
       record('T1', `former member ${name} denied`, deniedOrEmpty(res), `${codeOf(res)} rows=${rowsOf(res)}`);
     }
 
+    // ---- D7: keep generating every room event after the removal.
     await sleep(2_000);
+    const afterMessage = await A.client.from('messages').insert({ room_id: R1, sender_id: A.id, content: `${marker} after removal` }).select('id').single();
+    const softDelete = await A.client.from('messages').update({ is_deleted: true, content: '🚫 This message was deleted' }).eq('id', beforeMessage.data?.id).select('id');
+    for (const [eventType, payload] of [
+      ['cast', playback()],
+      ['play', playback({ time: 5 })],
+      ['pause', playback({ time: 6, playing: false })],
+      ['seek', playback({ time: 40 })],
+      ['mute', playback({ muted: true, volume: 0 })],
+      ['subtitle_upload', { mediaId, subtitleUrl: `https://example.invalid/${marker}.vtt` }],
+      ['force_sync', playback({ time: 41 })],
+      ['timer_start', { subject: 'qa timer', endTime: Date.now() + 60_000, remaining: 60, duration: 60, sessionId: randomUUID(), ownerId: A.id, startedAt: Date.now(), segmentStartedAt: Date.now(), elapsedSeconds: 0, completed: false }],
+      ['typing', { sender_id: A.id }],
+      ['request_sync', {}],
+    ]) {
+      await sendRoomAction(eventType, payload);
+    }
+    await sleep(5_000);
+
+    const hostileAfter = hostileLog.filter((entry) => entry.at >= kickedAt);
+    const observerAfter = observerLog.filter((entry) => entry.at >= kickedAt);
+    record('D7', 'removed connection receives no chat rows (insert or soft-delete)', !hostileAfter.some((entry) => entry.kind === 'chat'), `chat=${hostileAfter.filter((entry) => entry.kind === 'chat').length}`);
+    record('D7', 'removed connection receives no message text, titles, URLs or storage paths', !SENSITIVE.test(JSON.stringify(hostileAfter)), `${hostileAfter.length} payloads inspected`);
+    const countChat = (id, eventType) => observerAfter.filter((entry) => entry.kind === 'chat' && entry.row?.id === id && entry.eventType === eventType).length;
+    record('D7', 'remaining member receives the new chat row exactly once', !afterMessage.error && countChat(afterMessage.data?.id, 'INSERT') === 1, `count=${countChat(afterMessage.data?.id, 'INSERT')}`);
+    record('D7', 'remaining member receives the soft-delete update exactly once', !softDelete.error && countChat(beforeMessage.data?.id, 'UPDATE') === 1, `count=${countChat(beforeMessage.data?.id, 'UPDATE')}`);
+    const observedTypes = new Set(observerAfter.filter((entry) => entry.kind === 'broadcast').map((entry) => entry.payload?.event_type));
+    record('D7', 'remaining member receives every Watch, timer, typing and sync event', ['cast', 'play', 'pause', 'seek', 'mute', 'subtitle_upload', 'force_sync', 'timer_start', 'typing', 'request_sync'].every((type) => observedTypes.has(type)), [...observedTypes].join(','));
+    const resolvedRow = await observer.client.from('temporary_media').select('id, storage_path').eq('id', mediaId).eq('room_id', R1).maybeSingle();
+    const resolvedUrl = resolvedRow.data?.storage_path ? await observer.client.storage.from(BUCKET).createSignedUrl(resolvedRow.data.storage_path, 60) : { error: { code: 'no_row' } };
+    record('D7', 'remaining member resolves the mediaId under RLS (resolveRoomMedia path)', Boolean(resolvedRow.data) && !resolvedUrl.error, `${codeOf(resolvedRow)}/${codeOf(resolvedUrl)}`);
+    const hostileResolve = await hostile.client.from('temporary_media').select('id, storage_path').eq('id', mediaId);
+    record('D7', 'removed connection cannot resolve the mediaId', deniedOrEmpty(hostileResolve), `${codeOf(hostileResolve)} rows=${rowsOf(hostileResolve)}`);
+    const hostileSigned = await hostile.client.storage.from(BUCKET).createSignedUrl(mediaPath, 60);
+    record('D7', 'removed connection cannot sign the media object', Boolean(hostileSigned.error) || !hostileSigned.data?.signedUrl, codeOf(hostileSigned));
+    const hostileMessages = await hostile.client.from('messages').select('id').eq('room_id', R1);
+    record('D7', 'removed connection cannot fetch room messages', deniedOrEmpty(hostileMessages), `${codeOf(hostileMessages)} rows=${rowsOf(hostileMessages)}`);
+    const residual = [...new Set(hostileAfter.map((entry) => {
+      if (entry.kind === 'broadcast') return `${entry.topic}:${entry.payload?.event_type}{${Object.keys(entry.payload?.payload ?? {}).sort().join(',')}}`;
+      if (entry.kind === 'presence') return `presence:{${entry.keys.length} member key(s)}`;
+      if (entry.kind === 'control') return `room_control_events:${entry.row?.event_type}(subject=self:${entry.row?.subject_user_id === B.id})`;
+      return entry.kind;
+    }))].sort();
+    info('D7', 'residual metadata still delivered to the removed, non-refreshing connection', residual.join(' | ') || 'none');
+
+    const lateJoiner = await signIn('A', creds[0].email, creds[0].password);
+    extraClients.push(lateJoiner.client);
+    const lateRead = await lateJoiner.client.from('messages').select('id, is_deleted').eq('room_id', R1);
+    const lateRows = lateRead.data ?? [];
+    record('D7', 'late joiner reads the current chat state through RLS', lateRows.some((row) => row.id === afterMessage.data?.id) && lateRows.some((row) => row.id === beforeMessage.data?.id && row.is_deleted === true), `${codeOf(lateRead)} rows=${lateRows.length}`);
+
+    // Transport level (not a content leak): an already-joined Broadcast
+    // subscription survives removal until token refresh. Accepted residual;
+    // see the epoch-rotation evaluation in the ledger.
     await ownerChannel.channel.send({ type: 'broadcast', event: 'qa-probe', payload: { n: 2 } });
     await sleep(4_000);
-    record('T7', 'former member stops receiving on the existing subscription', !received.includes(2), `received=${JSON.stringify(received)}`);
+    info('T7', 'existing Broadcast subscription after removal (transport level)', `still delivers=${received.includes(2)}`);
     // A second channel for the same topic on one client never gets a join
     // reply, so the re-join probe uses a separate signed-in client.
     const freshB = await signIn('B', creds[1].email, creds[1].password);
@@ -438,7 +607,7 @@ async function fullPhase() {
     console.log('cleanup: rooms and any remaining temporary media expire through the normal cleanup job');
   } finally {
     for (const [client, channel] of channels) await client.removeChannel(channel);
-    await Promise.all([A.client.auth.signOut({ scope: 'local' }), B.client.auth.signOut({ scope: 'local' })]);
+    await Promise.all([A.client, B.client, ...extraClients].map((client) => client.auth.signOut({ scope: 'local' })));
   }
 }
 
@@ -451,5 +620,7 @@ try {
 
 const failed = results.filter((result) => result.pass === false).length;
 const blockedCount = results.filter((result) => result.pass === null).length;
-console.log(`\nsummary: ${results.length - failed - blockedCount} pass, ${failed} fail, ${blockedCount} blocked`);
+const passed = results.filter((result) => result.pass === true).length;
+const infoCount = results.filter((result) => result.pass === 'info').length;
+console.log(`\nsummary: ${passed} pass, ${failed} fail, ${blockedCount} blocked, ${infoCount} info`);
 process.exit(failed > 0 ? 1 : blockedCount > 0 ? 3 : 0);

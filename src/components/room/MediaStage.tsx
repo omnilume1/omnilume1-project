@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import dynamic from 'next/dynamic';
-import { getActiveTemporaryMedia, logCastHistory, logTemporaryMedia, getSignedStorageUrl } from '@/actions/media';
+import { attachRoomMediaSubtitle, getActiveTemporaryMedia, logCastHistory, logTemporaryMedia, getSignedStorageUrl } from '@/actions/media';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import { uploadFileWithProgress } from '@/lib/storage';
@@ -361,20 +361,24 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
 
     setPlayerError(null);
     setErrorUrl(null);
-    readyCastIdRef.current = null;
-    setReadyCastId(null);
     setCastInput('');
-    broadcastEvent('cast', { url: cast.url, title: cast.title, speed: 1, playing: true, sourceType: 'url' });
 
-    // Casting remains immediate even if history persistence is slow or the
-    // history table is temporarily unavailable.
+    // Register first. Members receive only the resulting media id over
+    // Broadcast and resolve the URL themselves under their own authorization,
+    // so an unregistered cast cannot be shared with the room.
     setIsCastingUrl(true);
     try {
       const result = await logCastHistory(roomId, cast.title, cast.url);
-      if (!result.success) setHistoryError(result.error ?? 'The cast started, but history could not be saved.');
-      else await loadHistory();
+      if (!result.success || !result.mediaId) {
+        setHistoryError(result.error ?? 'The cast could not be shared with the room.');
+        return;
+      }
+      readyCastIdRef.current = null;
+      setReadyCastId(null);
+      broadcastEvent('cast', { url: cast.url, title: cast.title, mediaId: result.mediaId, speed: 1, playing: true, sourceType: 'url' });
+      await loadHistory();
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : 'The cast started, but history could not be saved.');
+      setHistoryError(error instanceof Error ? error.message : 'The cast could not be shared with the room.');
     } finally {
       setIsCastingUrl(false);
     }
@@ -423,6 +427,8 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
 
     setIsUploadingSub(true);
     try {
+      const mediaId = activeMediaId;
+      if (!mediaId) throw new Error('Subtitles can be added only to media shared with the room.');
       const contentType = roomSubtitleStorageMimeType(file.name);
       if (!contentType) throw new Error('Choose a VTT or SRT subtitle file.');
       const filePath = roomStorageObjectPath(roomId, 'subtitles', crypto.randomUUID(), roomFileExtension(file.name));
@@ -430,10 +436,11 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
         .from('room_attachments')
         .upload(filePath, new Blob([file], { type: contentType }), { cacheControl: '3600', contentType });
       if (error) throw error;
-      // Generate signed URL for subtitle (private storage)
-      const result = await getSignedStorageUrl(filePath, roomId);
-      if (!result.success || !result.url) throw new Error(result.error ?? 'Unable to generate subtitle URL.');
-      broadcastEvent('subtitle_upload', { subtitleUrl: result.url });
+      // Bind the subtitle to its media row. Members re-resolve the media and
+      // receive their own signed subtitle URL; only the id is broadcast.
+      const result = await attachRoomMediaSubtitle(roomId, mediaId, filePath);
+      if (!result.success || !result.subtitleUrl) throw new Error(result.error ?? 'Unable to attach the subtitle.');
+      broadcastEvent('subtitle_upload', { mediaId, subtitleUrl: result.subtitleUrl });
     } catch (error) {
       alert(`Subtitle upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
@@ -468,7 +475,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
       setLocalUpload((current) => current ? { ...current, loaded: current.total, percent: 100, phase: 'saving' } : current);
       // Store file path (not public URL) for private storage compatibility
       const result = await logTemporaryMedia(roomId, file.name, filePath, mediaType, { mimeType, sizeBytes: file.size });
-      if (!result.success) throw new Error(result.error ?? 'Unable to save the uploaded media.');
+      if (!result.success || !result.mediaId) throw new Error(result.error ?? 'Unable to save the uploaded media.');
 
       // Generate signed URL for immediate casting
       const signedUrlResult = await getSignedStorageUrl(filePath, roomId);
@@ -477,10 +484,12 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
       }
 
       // The file is immediately available to the room and is also added to
-      // the same 24-hour history used by the Files tab.
+      // the same 24-hour history used by the Files tab. Only the media id is
+      // broadcast; the signed URL stays on this client.
       broadcastEvent('cast', {
         url: signedUrlResult.url,
         title: file.name,
+        mediaId: result.mediaId,
         sourceType: 'upload',
         speed: 1,
         playing: true,

@@ -3,28 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { isUuid } from '@/lib/message-limits';
+import { isRoomBroadcastEventType, toRoomBroadcastPayload, type RoomBroadcastEventType } from '@/lib/room-broadcast-contract';
+import { resolveRoomMedia, type ResolvedRoomMedia } from '@/actions/media';
 
 type BrowserSupabaseClient = ReturnType<typeof createClient>;
 type RoomChannel = ReturnType<BrowserSupabaseClient['channel']>;
 type RoomChannelKind = 'general' | 'control';
 type RoomChannels = Record<RoomChannelKind, RoomChannel | null>;
 
-export type SyncEventType =
-  | 'typing'
-  | 'room_message'
-  | 'room_message_update'
-  | 'play'
-  | 'pause'
-  | 'seek'
-  | 'mute'
-  | 'cast'
-  | 'stop_cast'
-  | 'force_sync'
-  | 'request_sync'
-  | 'timer_start'
-  | 'timer_pause'
-  | 'timer_reset'
-  | 'subtitle_upload';
+// Chat messages are not Broadcast events. They arrive through RLS-checked
+// Postgres Changes on public.messages (see the general channel below), so a
+// member who loses chat access stops receiving them at once.
+export type SyncEventType = RoomBroadcastEventType;
 
 export type SyncEvent = {
   event_id: string;
@@ -82,6 +72,10 @@ export type RoomSyncValue = {
   roomMessageEvents: RoomMessageEvent[];
   roomControlEvents: RoomControlEvent[];
   roomControlVersion: number;
+  // Increments each time Realtime confirms the room's Postgres Changes feed
+  // (first join and every rejoin). Rows committed before that are never
+  // replayed, so persistent views (chat) re-fetch through RLS when it changes.
+  connectionGeneration: number;
   recordMediaTime: (time: number) => void;
   broadcastEvent: (eventType: SyncEventType, payload?: Record<string, unknown>) => void;
 };
@@ -173,6 +167,17 @@ function timerStorageKey(roomId: string) {
   return `timer:${roomId}`;
 }
 
+// Called when the current user loses access to a room. Session storage is the
+// only place room media state (including signed URLs) outlives the page.
+export function clearRoomRealtimeCache(roomId: string) {
+  if (!roomId) return;
+  removeSessionValue(mediaStorageKey(roomId));
+  removeSessionValue(timerStorageKey(roomId));
+}
+
+const MEDIA_RESOLUTION_TTL_MS = 45 * 60 * 1000;
+const ROOM_MESSAGE_FIELDS = ['id', 'sender_id', 'content', 'is_deleted', 'created_at'] as const;
+
 function asFiniteNumber(value: unknown, fallback: number) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
@@ -189,11 +194,6 @@ type MediaEventMeta = {
 };
 
 const MAX_SYNC_EVENT_JSON_CHARS = 64_000;
-const SYNC_EVENT_TYPES = new Set<SyncEventType>([
-  'typing', 'room_message', 'room_message_update', 'play', 'pause', 'seek', 'mute',
-  'cast', 'stop_cast', 'force_sync', 'request_sync', 'timer_start', 'timer_pause',
-  'timer_reset', 'subtitle_upload',
-]);
 
 function isSyncEventPayload(value: unknown, roomId: string): value is SyncEvent {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -202,7 +202,7 @@ function isSyncEventPayload(value: unknown, roomId: string): value is SyncEvent 
   if (!isUuid(event.sender_id) || event.room_id !== roomId) return false;
   if (typeof event.timestamp !== 'number' || !Number.isFinite(event.timestamp)) return false;
   if (typeof event.state_version !== 'number' || !Number.isSafeInteger(event.state_version) || event.state_version < 1) return false;
-  if (typeof event.event_type !== 'string' || !SYNC_EVENT_TYPES.has(event.event_type as SyncEventType)) return false;
+  if (!isRoomBroadcastEventType(event.event_type)) return false;
   if (!event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload)) return false;
   try {
     return JSON.stringify(event).length <= MAX_SYNC_EVENT_JSON_CHARS;
@@ -337,6 +337,29 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   const [roomMessageEvents, setRoomMessageEvents] = useState<RoomMessageEvent[]>([]);
   const [roomControlEvents, setRoomControlEvents] = useState<RoomControlEvent[]>([]);
   const [roomControlVersion, setRoomControlVersion] = useState(0);
+  const [connectionGeneration, setConnectionGeneration] = useState(0);
+  // Late async work (media resolution) must not apply to a room the user has
+  // since left or been removed from.
+  const roomIdRef = useRef(roomId);
+  const mediaResolutionRef = useRef(new Map<string, { promise: Promise<ResolvedRoomMedia | null>; resolvedAt: number }>());
+
+  // One authenticated fetch per media item, shared by every event that names
+  // it. Events for the same media chain on the same promise, so they still
+  // apply in arrival order; the revision check orders different media.
+  const resolveMedia = useCallback((mediaId: string, refresh = false) => {
+    const cache = mediaResolutionRef.current;
+    const cached = cache.get(mediaId);
+    if (!refresh && cached && Date.now() - cached.resolvedAt < MEDIA_RESOLUTION_TTL_MS) return cached.promise;
+    const promise = resolveRoomMedia(roomId, mediaId)
+      .then((result) => (result.success && result.media ? result.media : null))
+      .catch(() => null);
+    const entry = { promise, resolvedAt: Date.now() };
+    cache.set(mediaId, entry);
+    void promise.then((media) => {
+      if (!media && cache.get(mediaId) === entry) cache.delete(mediaId);
+    });
+    return promise;
+  }, [roomId]);
 
   const updateTimerState = useCallback((nextState: TimerState) => {
     const normalized = normalizeTimerState(nextState);
@@ -477,57 +500,82 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     const event = incoming.payload;
     if (!isSyncEventPayload(event, roomId)) return;
     if (event.sender_id && event.sender_id === currentUserIdRef.current) return;
+    // Apply only the wire contract. Extra fields (for example a URL from a
+    // client that has not been updated yet) are ignored, never trusted.
+    const payload = toRoomBroadcastPayload(event.event_type, event.payload);
+    if (!payload) return;
 
     if (event.event_type === 'typing') {
-      if (event.sender_id) {
-        setTypingUsers((current) => {
-          const next = new Map(current);
-          next.set(event.sender_id as string, Date.now());
-          return next;
-        });
-      }
+      setTypingUsers((current) => {
+        const next = new Map(current);
+        next.set(event.sender_id, Date.now());
+        return next;
+      });
       return;
     }
 
-    if (event.event_type === 'room_message' || event.event_type === 'room_message_update') {
-      const message = (event.payload ?? {}).message;
-      if (message && typeof message === 'object' && !Array.isArray(message)) {
-        setRoomMessageEvents((current) => [
-          ...current.slice(-99),
-          {
-            kind: event.event_type === 'room_message' ? 'insert' : 'update',
-            message: message as Record<string, unknown>,
-          },
-        ]);
-      }
-      return;
-    }
-
-    const payload = (event.payload ?? {}) as Record<string, unknown>;
     if (event.event_type === 'request_sync') {
       setSyncRequestTrigger((current) => current + 1);
       return;
     }
 
-    // A playing state continues advancing while the force_sync packet is in
-    // flight. Compensate for that small network delay on the receiving side.
-    const adjustedPayload = event.event_type === 'force_sync'
-      && payload.playing === true
-      && typeof payload.time === 'number'
-      && typeof event.timestamp === 'number'
-      ? { ...payload, time: payload.time + Math.max(0, (Date.now() - event.timestamp) / 1_000) }
-      : payload;
+    if (event.event_type === 'timer_start' || event.event_type === 'timer_pause' || event.event_type === 'timer_reset') {
+      applyTimerEvent(event.event_type, payload);
+      return;
+    }
 
-    applyMediaEvent(event.event_type, adjustedPayload, {
-      eventId: typeof event.event_id === 'string' && event.event_id
-        ? event.event_id
-        : `${event.sender_id ?? 'unknown'}:${event.timestamp ?? 0}:${event.event_type}`,
-      timestamp: typeof event.timestamp === 'number' && Number.isFinite(event.timestamp) ? event.timestamp : 0,
+    const meta: MediaEventMeta = {
+      eventId: event.event_id,
+      timestamp: event.timestamp,
       senderId: event.sender_id,
       source: 'remote',
+    };
+
+    if (event.event_type === 'stop_cast') {
+      applyMediaEvent(event.event_type, payload, meta);
+      return;
+    }
+
+    // The playable URL, title and subtitle are fetched under the receiver's
+    // own authorization. A removed member's fetch fails, so nothing is applied.
+    const mediaId = payload.mediaId as string;
+    const eventRoomId = roomId;
+    void resolveMedia(mediaId, event.event_type === 'subtitle_upload').then((media) => {
+      if (!media || roomIdRef.current !== eventRoomId) return;
+      // A playing state keeps advancing while the packet and the resolution
+      // are in flight. Compensate on the receiving side, as before.
+      const time = event.event_type === 'force_sync' && payload.playing === true && typeof payload.time === 'number'
+        ? payload.time + Math.max(0, (Date.now() - event.timestamp) / 1_000)
+        : payload.time;
+      applyMediaEvent(event.event_type, {
+        ...payload,
+        ...(time === undefined ? {} : { time }),
+        url: media.url,
+        title: media.title,
+        subtitleUrl: media.subtitleUrl,
+        sourceType: media.sourceType,
+      }, meta);
     });
-    applyTimerEvent(event.event_type, adjustedPayload);
-  }, [applyMediaEvent, applyTimerEvent, roomId]);
+  }, [applyMediaEvent, applyTimerEvent, resolveMedia, roomId]);
+
+  // Persistent chat rows arrive through Postgres Changes. Realtime evaluates
+  // the messages SELECT policy (room_has_capability 'chat') for each event and
+  // each subscriber, so revocation takes effect on the next row. Room chat
+  // uses soft-delete (UPDATE). DELETE events are never subscribed: Postgres
+  // Changes does not RLS-filter them.
+  const handleRoomMessageChange = useCallback((change: { eventType?: string; new?: Record<string, unknown> }) => {
+    const row = change.new;
+    if (!row || row.room_id !== roomId) return;
+    if (change.eventType !== 'INSERT' && change.eventType !== 'UPDATE') return;
+    const message: Record<string, unknown> = {};
+    for (const field of ROOM_MESSAGE_FIELDS) {
+      if (field in row) message[field] = row[field];
+    }
+    setRoomMessageEvents((current) => [
+      ...current.slice(-99),
+      { kind: change.eventType === 'INSERT' ? 'insert' : 'update', message },
+    ]);
+  }, [roomId]);
 
   const handleRoomControlEvent = useCallback((payload: { new?: Record<string, unknown> }) => {
     const event = payload.new;
@@ -586,14 +634,25 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       source: 'local',
     };
 
-    // Update the local room state immediately. This keeps the cast responsive
-    // even if the Realtime handshake is still finishing.
+    // Update the local room state immediately with the full payload (this
+    // client already holds the URL). This keeps the cast responsive even if
+    // the Realtime handshake is still finishing.
     applyMediaEvent(eventType, eventPayload, meta);
     applyTimerEvent(eventType, eventPayload);
+    if (eventType === 'subtitle_upload' && typeof eventPayload.mediaId === 'string') {
+      mediaResolutionRef.current.delete(eventPayload.mediaId);
+    }
 
     if (!roomId) return;
-    if (!sendEvent(eventType, eventPayload, meta)) {
-      pendingEventsRef.current.push({ eventType, payload: eventPayload, meta });
+    // Only the wire contract leaves this client: never chat text, titles,
+    // URLs or storage paths (src/lib/room-broadcast-contract.ts).
+    const wirePayload = toRoomBroadcastPayload(eventType, eventPayload);
+    if (!wirePayload) {
+      console.warn(`Room ${eventType} was not shared: media events need a registered mediaId.`);
+      return;
+    }
+    if (!sendEvent(eventType, wirePayload, meta)) {
+      pendingEventsRef.current.push({ eventType, payload: wirePayload, meta });
     }
   }, [applyMediaEvent, applyTimerEvent, canControlMedia, roomId, sendEvent]);
 
@@ -610,10 +669,9 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     if (current.controllerId && current.controllerId !== currentUserIdRef.current) return;
     if (current.source === 'local' && !canControlMedia) return;
 
-    sendEvent('force_sync', {
-      url: current.url,
-      subtitleUrl: current.subtitleUrl,
-      title: current.title,
+    // Late joiners receive only the media id and playback state, then resolve
+    // the URL themselves. Media cast without a registered id is not relayed.
+    const wirePayload = toRoomBroadcastPayload('force_sync', {
       time: current.time,
       speed: current.speed,
       playing: current.playing,
@@ -624,11 +682,18 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       volume: current.volume,
       controllerId: current.controllerId,
     });
+    if (wirePayload) sendEvent('force_sync', wirePayload);
   }, [canControlMedia, sendEvent, syncRequestTrigger]);
 
   useEffect(() => {
     let isActive = true;
-    const restoredMedia = normalizeMediaState(readSessionValue<Partial<RoomMediaState> | null>(mediaStorageKey(roomId), null));
+    roomIdRef.current = roomId;
+    mediaResolutionRef.current = new Map();
+    const stored = normalizeMediaState(readSessionValue<Partial<RoomMediaState> | null>(mediaStorageKey(roomId), null));
+    // A stored state without a registered media id cannot be re-authorized,
+    // so it is dropped rather than replaying a cached URL.
+    const restoredMedia = stored?.mediaId ? stored : null;
+    if (stored && !restoredMedia) removeSessionValue(mediaStorageKey(roomId));
     mediaStateRef.current = restoredMedia;
     lastMediaRevisionRef.current = null;
     pendingEventsRef.current = [];
@@ -643,13 +708,27 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       setRoomMessageEvents([]);
       setRoomControlEvents([]);
       setRoomControlVersion(0);
+      setConnectionGeneration(0);
     }, 0);
+
+    // Refresh the restored URL under current authorization: signed URLs
+    // expire, and a user who lost access must not keep playing from cache.
+    const restoredMediaId = restoredMedia?.mediaId;
+    if (roomId && restoredMediaId) {
+      void resolveMedia(restoredMediaId, true).then((media) => {
+        if (!isActive) return;
+        updateMediaState((current) => {
+          if (!current || current.source !== 'restored' || current.mediaId !== restoredMediaId) return current;
+          return media ? { ...current, url: media.url, title: media.title, subtitleUrl: media.subtitleUrl, sourceType: media.sourceType } : null;
+        });
+      });
+    }
 
     return () => {
       isActive = false;
       window.clearTimeout(restoreTimer);
     };
-  }, [roomId]);
+  }, [resolveMedia, roomId, updateMediaState]);
 
   useEffect(() => {
     let isMounted = true;
@@ -697,6 +776,17 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       channel.on('broadcast', { event: 'room_action' }, handleIncomingEvent);
       if (kind === 'general') {
         channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_control_events', filter: `room_id=eq.${roomId}` }, handleRoomControlEvent);
+        channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, handleRoomMessageChange);
+        channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, handleRoomMessageChange);
+        // Postgres Changes starts delivering only after this system message,
+        // which arrives some time after SUBSCRIBED (and again after every
+        // rejoin). Rows committed before it are never replayed, so chat
+        // re-reads the newest page through RLS each time the feed is ready.
+        channel.on('system', {}, (message: { extension?: string; status?: string }) => {
+          if (isMounted && message?.extension === 'postgres_changes' && message.status === 'ok') {
+            setConnectionGeneration((current) => current + 1);
+          }
+        });
       }
       channel.subscribe((status: string) => {
         if (!isMounted) return;
@@ -733,7 +823,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
         void supabase.removeChannel(channel);
       });
     };
-  }, [flushPendingEvents, handleIncomingEvent, handleRoomControlEvent, roomId, supabase]);
+  }, [flushPendingEvents, handleIncomingEvent, handleRoomControlEvent, handleRoomMessageChange, roomId, supabase]);
 
   useEffect(() => {
     const typingInterval = window.setInterval(() => {
@@ -766,6 +856,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     roomMessageEvents,
     roomControlEvents,
     roomControlVersion,
+    connectionGeneration,
     recordMediaTime,
     broadcastEvent,
   };

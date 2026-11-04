@@ -32,7 +32,7 @@ import FloatingDock from '@/components/ui/FloatingDock';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import { leaveRoom, transferRoomOwnership } from '@/actions/room-controls';
 import { getRoomMembersList } from '@/actions/members';
-import { useRoomSync } from '@/hooks/useRoomSync';
+import { clearRoomRealtimeCache, useRoomSync } from '@/hooks/useRoomSync';
 import { useRoomPresence } from '@/hooks/useRoomPresence';
 import { clearFocusLock } from '@/lib/focus-lock';
 import { isRoomExpired } from '@/lib/room-lifecycle';
@@ -343,13 +343,18 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     const currentUserId = roomSync.currentUserId;
     const removed = roomSync.roomControlEvents.find((event) => event.subjectUserId === currentUserId && ((event.eventType === 'membership_changed' && event.payload.action === 'kick') || (event.eventType === 'restriction_changed' && (event.payload.action === 'ban' || event.payload.action === 'block'))));
     if (!removed) return;
+    // UX only. The server already denies a removed member's fetches and
+    // Postgres Changes; this just stops the realtime hooks (realtimeRoomId
+    // becomes empty), drops cached room media state, and leaves the room.
+    const removedRoomId = roomData?.id ?? '';
     const timer = window.setTimeout(() => {
+      clearRoomRealtimeCache(removedRoomId);
       setAccessStatus(removed.eventType === 'restriction_changed' ? 'blocked' : 'kicked');
       clearFocusLock();
       router.replace(`/explore?roomNotice=${removed.eventType === 'restriction_changed' ? 'blocked' : 'kicked'}`);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [roomSync.currentUserId, roomSync.roomControlEvents, router]);
+  }, [roomData?.id, roomSync.currentUserId, roomSync.roomControlEvents, router]);
   const focusRoomPath = `/room/${encodeURIComponent(identifier)}`;
   const featureEnabled = (feature: RoomFeature) => featureFlags[feature] !== false;
   const handleControlStateChange = useCallback(({ featureFlags: nextFlags, canManageMembers: nextCanManageMembers, canControlMedia: nextCanControlMedia }: { featureFlags: Partial<Record<RoomFeature, boolean>>; canManageMembers: boolean; canControlMedia: boolean }) => {
@@ -364,6 +369,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     setLeaveError(null);
     try {
       await leaveRoom(roomData.id);
+      clearRoomRealtimeCache(roomData.id);
       router.push('/explore');
     } catch (error) {
       setLeaveError(error instanceof Error ? error.message : 'Unable to leave this room.');
@@ -396,6 +402,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     try {
       await transferRoomOwnership(roomData.id, ownerTransferTarget);
       await leaveRoom(roomData.id);
+      clearRoomRealtimeCache(roomData.id);
       router.push('/explore');
     } catch (error) {
       setLeaveError(error instanceof Error ? error.message : 'Unable to transfer ownership and leave this room.');
