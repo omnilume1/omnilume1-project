@@ -81,7 +81,7 @@ SELECT 'd9_posts_select_includes_author',
        CASE WHEN EXISTS (
          SELECT 1 FROM pg_policies
          WHERE schemaname = 'public' AND tablename = 'posts' AND policyname = 'posts_select_visible'
-           AND qual LIKE '(auth.uid() = author_id) OR%'
+           AND qual LIKE '%(auth.uid() = author_id) OR%'
            AND qual LIKE '%can_view_post(author_id, visibility)%'
        ) THEN 'ok' ELSE 'FAIL' END
 ORDER BY check_name;

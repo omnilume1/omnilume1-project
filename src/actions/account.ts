@@ -2,7 +2,7 @@
 
 import { createAdminClient } from '@/utils/supabase/admin';
 import { createClient } from '@/utils/supabase/server';
-import { ACCOUNT_DELETION_CONFIRMATION } from '@/lib/account-deletion';
+import { ACCOUNT_DELETION_CONFIRMATION, isRecentAuthentication, sessionAuthenticatedAt } from '@/lib/account-deletion';
 
 async function requireUser() {
   const supabase = await createClient();
@@ -40,15 +40,29 @@ async function removePersonalStorage(admin: ReturnType<typeof createAdminClient>
 
 /**
  * Permanently deletes the authenticated account after an exact, deliberate
- * confirmation. Shared room attachments are preserved; the database helper
- * first transfers or removes owned rooms safely before auth-user cascades run.
+ * confirmation and a recent sign-in. Shared room attachments are preserved;
+ * the database helper first transfers or removes owned rooms safely before
+ * auth-user cascades run.
+ *
+ * A stale session gets `{ reauthRequired: true }` (a value, not a thrown error,
+ * so the client can show the sign-in step in production builds) and nothing is
+ * deleted.
  */
-export async function deleteMyAccount(confirmation: string) {
+export async function deleteMyAccount(confirmation: string): Promise<{ success: true } | { success: false; reauthRequired: true }> {
   if (confirmation !== ACCOUNT_DELETION_CONFIRMATION) {
     throw new Error(`Type ${ACCOUNT_DELETION_CONFIRMATION} to confirm account deletion.`);
   }
 
   const { supabase, user } = await requireUser();
+
+  // Read the sign-in time from the verified token of this exact session.
+  // Checked before any deletion work starts.
+  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
+  if (claimsError || !claimsData || claimsData.claims.sub !== user.id) throw new Error('Unauthorized');
+  if (!isRecentAuthentication(sessionAuthenticatedAt(claimsData.claims.amr), Date.now())) {
+    return { success: false as const, reauthRequired: true as const };
+  }
+
   const admin = createAdminClient();
 
   const { error: prepareError } = await supabase.rpc('prepare_account_deletion', {

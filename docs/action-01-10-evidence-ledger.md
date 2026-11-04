@@ -812,6 +812,197 @@ HTTP status of a manual `CRON_SECRET` call to
 Typecheck PASS; lint 0 errors (13 existing warnings); unit and contract tests
 **25/25**; production build PASS; `git diff --check` PASS; probes as above.
 
+## Requirement audit: Final Corrected Roadmap and Feature Guide (2026-11-05)
+
+**Sources (owner-designated specs):** `OmniLume_Final_Corrected_Roadmap.pdf`
+(Actions 01–18: per action "What must be fixed or built" and "Definition of
+Done") and `OmniLume_Feature_Guide.pdf` (54-feature coverage table with
+owning actions). The text was extracted locally; nothing was sent to an
+external service. Source presence was measured with code scans of `src/` and
+`supabase/migrations/`, and behaviour with the two-account probe.
+
+**Owner decisions recorded in this run:**
+- Account deletion: **Option A**. A recent sign-in is required, and it is
+  implemented (below).
+- QA accounts: free use. QA account B was made private for the probe run and
+  then restored (`is_private=false`).
+- **Steps 3 (browser) and 4 (Preview/Cron) were waived by the owner.**
+  Everything those steps would prove stays **UNVERIFIED**, not PASS: Google
+  OAuth runtime, UI flows, mobile layout, deployed build and Cron execution.
+
+**Probe (final, D9 applied):** `authorization-probe.mjs full`: **156 pass,
+0 fail, 0 blocked, 8 info.** Query 09: **12/12 ok** (the D9 check pattern was
+corrected after it gave a false `FAIL` against the applied policy). No
+visible qa posts remain.
+
+### Decision A: account deletion re-authentication (implemented)
+
+- `deleteMyAccount` reads the **verified** access-token claims (`getClaims`)
+  for the current session and requires the session's `amr` sign-in time to be
+  within **10 minutes**. The check runs before any deletion work. It fails
+  closed when the timestamp is missing, implausible or older than the window.
+- Measured on this project: the `amr` timestamp stays fixed across token
+  refresh, while `iat` advances. So an old or stolen session cannot refresh
+  its way past the check, and a fresh password or Google sign-in satisfies it.
+- A stale session receives `{ reauthRequired: true }` and nothing is deleted.
+  The dialog then offers "Sign in again", which ends the local session and
+  returns the user to the same page.
+- Tests: `tests/account-deletion.test.ts` (5) covers the window, fail-closed
+  handling, clock skew, and a static guard that the check precedes all
+  deletion work; the guard fails on the previous code.
+- Not run: an actual end-to-end deletion. It is destructive and would need a
+  third throwaway account.
+
+### Per-action audit (roadmap "must be fixed or built" + feature guide)
+
+Legend: **DONE+V** = implemented and verified at the database/API layer;
+**DONE** = implemented, runtime unverified (browser waived); **DB-ONLY** =
+database/RPC exists but no app UI or action; **MISSING** = not in source;
+**DECIDE** = needs an owner decision.
+
+**01 Foundation and Evidence: COMPLETE.** Inventory, ledger, evidence
+levels, fixture rules, the reusable probe and audit pack exist. Destructive
+tests use disposable fixtures only.
+
+**02 Authentication and Identity: DONE (runtime partly waived).**
+
+| Requirement | State |
+| --- | --- |
+| Google OAuth, callback, loading/error states | DONE (button renders; runtime waived) |
+| Safe `next` redirects; protected routes | DONE+V (routes 17/17) |
+| Profile-completion gate | DONE (unauthenticated gate verified; incomplete-profile path waived) |
+| Existing password accounts | DONE+V (Auth API sign-in) |
+| Account switching; recovery/password policy | DONE (runtime waived) |
+| Profile RLS (own row only) | DONE+V |
+| DoD "Google + legacy flows work, no duplicate users, SSR/client agree" | UNVERIFIED (waived) |
+
+**03 Database, RLS, Storage: COMPLETE (database/security layer).** Remote and
+local history match. Catalog audit 01–09 passes. D1–D9 were found, fixed and
+verified. SECURITY DEFINER search_path/grants are hardened. Storage is scoped
+by actual object path, public channels are isolated, and the probes deny
+every unauthorized path tested.
+
+**04 Profiles, Privacy, Follows, Friends, Posts: DONE+V at the
+database/API layer.**
+
+| Requirement | State |
+| --- | --- |
+| Private profile hidden from non-followers; pending follow; requester cannot self-accept | DONE+V |
+| Directional follows; RPC-only writes | DONE+V |
+| Normalized friendships; accept creates friendship; remove | DONE+V |
+| Posts: every visibility, author reads own, follower visibility, soft delete | DONE+V (after D9) |
+| Private author's `public` post hidden from followers | DONE+V (current `can_view_post` rule; confirm this is intended) |
+| Message requests (role rules) | DONE+V |
+| Account deletion with re-authentication | DONE (Decision A); runtime deletion unverified |
+| Derived age rules | **DECIDE**: no minimum age is defined in the spec or code |
+| UI matrix (DoD requires UI and database tests) | UNVERIFIED (waived) |
+
+**05 Rooms, Membership, Roles, Invitations, Control: mostly DONE+V.**
+
+| Requirement | State |
+| --- | --- |
+| Invite links/codes | DONE (Control Center + join via invite) |
+| Leave/rejoin, kick/ban/block, ownership transfer | DONE+V (T1/T2) |
+| Rules and welcome, room lock, temporary guests, announcements | DONE (Control Center UI) |
+| Control Center; granular permissions | DONE+V (T2/T3) |
+| Room-specific profiles | DONE (Control Center UI) |
+| Feature enable/disable | DONE+V (T3 chat feature) |
+| Member 3-dot actions | MISSING |
+| **Ghost Mode** | DB-ONLY (`set_room_ghost_mode`). The earlier owner scope note excluded the UI, but the roadmap and guide list it: **DECIDE** |
+| Feature guide 05/09: layout presets, owner-controlled layout, themes, presence states, bookmarks, guest identity mode | MISSING |
+| Feature guide lists "Live AI Meeting Assistant" under 05/09 | **DECIDE**: conflicts with "AI is Action 17, last"; treated as out of scope for 01–10 |
+
+**06 Lifecycle, Expiry, Recovery, Guests, Locks, Scheduling, Cleanup:
+PARTIAL.**
+
+| Requirement | State |
+| --- | --- |
+| State machine (active, expired, recovery-window, reopened, permanent, locked, scheduled, destroyed) | DONE (`room_lifecycle_state`) |
+| 24-hour recovery window; request immutability; recovery decision and notification | DONE+V (T4, D5) |
+| Exact 7-day reopen on approval; permanent conversion without fake expiry | DONE (in RPCs); runtime unverified |
+| Guests and locks | DONE |
+| Scheduled rooms | DB-ONLY (`scheduled_for`, validation trigger; no create UI) |
+| Idempotent cleanup | **GAP**: the route deletes only `irreversible` rooms. Destroyed `recoverable` rooms keep their messages, files and storage indefinitely (inaccessible, but never cleaned). **DECIDE** (production deletion behaviour). |
+| Cron execution | UNVERIFIED (waived) |
+
+**07 Shared Realtime Foundation: DONE+V (API, hostile client).** Typed
+allow-list wire contract, chat over RLS-checked Postgres Changes, revision
+ordering and dedupe, feed-ready and reconnect re-read, late-join resolution,
+removal isolation (D7), and public-topic isolation. Event types for features
+that do not exist yet (polls, Music, notes) are pending those features.
+Browser verification waived.
+
+**08 Room Messaging and Notifications: mostly MISSING.**
+
+| Requirement | State |
+| --- | --- |
+| Delete for everyone/me; history pagination; announcements | DONE |
+| Room notifications panel with read state | DONE+V (T4) |
+| Edit own messages | MISSING |
+| Replies/threads | MISSING |
+| Reactions | DB-ONLY (`message_reactions` + policies; no UI) |
+| GIFs | MISSING (**DECIDE**: needs a GIF provider and API key) |
+| Mentions | MISSING |
+| Pinned messages | MISSING |
+| Notification Center (cross-room) | MISSING (only the per-room panel exists) |
+| DND/mute | MISSING |
+| Chat unread/read state | MISSING |
+| Member 3-dot actions | MISSING |
+| Timer-owner and shared-PDF notifications | MISSING |
+
+**09 Adaptive Room Workspace: PARTIAL.**
+
+| Requirement | State |
+| --- | --- |
+| Resizable chat/sidebar, saved user-scoped panel sizes, feature visibility | DONE (unit-tested preferences) |
+| Layout presets, dashboard, themes | MISSING |
+| "No empty feature gaps" | **GAP**: the Whiteboard tab renders a "Whiteboard coming soon..." placeholder (`room/[id]/page.tsx:583-589`), although `room_whiteboards` RPCs exist |
+| Mobile rules | UNVERIFIED (waived) |
+
+**10 Files, PDFs, Media, Storage Lifecycle: PARTIAL.**
+
+| Requirement | State |
+| --- | --- |
+| Temporary media upload, register, play, signed URLs bounded by room expiry, subtitles, audio tracks | DONE+V (F1, D6, D8, T6) |
+| Upload progress (sequential multi-file) | DONE |
+| Upload retry/cancel | MISSING |
+| Permanent room files | DB-ONLY (`room_files` RPCs; no UI or action) |
+| Shared PDFs with room-wide visibility/notification; PDF annotations | DB-ONLY (`pdf_annotations` RPCs; no viewer or action) |
+| Study notes | DB-ONLY (RPCs; no UI) |
+| Metadata/artwork/lyrics/attribution | MISSING (**DECIDE**: lyrics need a licensed provider) |
+| Abandoned-upload cleanup | PARTIAL (expired temporary media cleaned; orphaned uploads not tracked) |
+
+### Backlog to finish Actions 01–10 (owner to prioritise)
+
+Rough effort, assuming one agent pass each with tests and probes. Items marked
+with migration need a reviewed migration and approval.
+
+| # | Item | Action | Effort | Needs |
+| --- | --- | --- | --- | --- |
+| 1 | Clean up destroyed recoverable rooms | 06 | S | Decision (deletes production data) |
+| 2 | Replace the whiteboard placeholder (hide it, or build the whiteboard on the existing RPCs) | 09/10 | S (hide) / L (build) | Decision |
+| 3 | Edit own messages (+ edited marker) | 08 | S | Migration |
+| 4 | Reactions UI on the existing table | 08 | M | — |
+| 5 | Replies | 08 | M | Migration |
+| 6 | Pinned messages | 08 | M | Migration |
+| 7 | Mentions + mention notifications | 08 | M | Migration |
+| 8 | Member 3-dot actions | 05/08 | S–M | — |
+| 9 | Notification Center + DND/mute + timer/PDF notifications | 08 | L | Migration |
+| 10 | Chat unread/read state | 08 | M | Migration |
+| 11 | GIFs | 08 | M | Provider and API key decision |
+| 12 | Permanent room files UI (RPCs exist) | 10 | M–L | — |
+| 13 | Shared PDFs viewer + annotations (RPCs exist; native browser viewer, no new dependency) | 10 | L | — |
+| 14 | Study notes UI (RPCs exist) | 10 | M | — |
+| 15 | Upload retry/cancel | 10 | S–M | — |
+| 16 | Scheduled room creation UI (DB exists) | 06 | S–M | — |
+| 17 | Layout presets, owner layout, themes, dashboard | 09 | L | — |
+| 18 | Presence states, bookmarks, guest identity mode | 05/09 | M each | Design detail |
+| 19 | Ghost Mode UI (DB exists) | 05/09 | S–M | Decision (earlier exclusion) |
+| 20 | Media metadata/artwork/lyrics | 10 | L | Provider decision |
+| 21 | Minimum-age rule | 04 | S | Decision |
+
+S ≈ under half a day, M ≈ about a day, L ≈ two or more days.
+
 ## Dashboard extensions result (2026-11-04)
 
 | Finding | Classification | Evidence and disposition |
@@ -833,12 +1024,12 @@ confirmed defect to remediate.
 | TypeScript | PASS | `npm exec tsc -- --noEmit` |
 | Lint | PASS with 13 pre-existing warnings | `npm run lint` |
 | Production build | PASS | `npm run build`; 18 routes generated |
-| Automated test suite | PASS (25 tests) | `npm run test:unit`: Broadcast contract (5), migration/source contract (9), storage contract and validation (6), auth and preferences (5). Each new guard fails on its original defect. |
+| Automated test suite | PASS (30 tests) | `npm run test:unit`: Broadcast contract (5), migration/source contract (9), storage contract and validation (6), account deletion (5), auth and preferences (5). |
 | Remote migrations | PASS | `npx supabase migration list --linked`; all 27 local/remote versions match |
 | Remote schema signatures | PARTIAL | `npx supabase gen types typescript --linked --schema public` confirms recovered Action 08-10 tables/RPCs, not policies or definitions |
 | Remote DB lint | PARTIAL | Dashboard confirms the reported `extensions` helpers exist; the remaining lint helper-resolution issue is unrelated to Actions 01-10 and is not a policy pass |
 | Remote catalog audit 01-07 | D1-D3 confirmed, fixed by `20261104120000` and verified | Dashboard exports 2026-11-04; query 08 re-run after the push on 2026-11-05 |
-| Two-account authorization probes | 149 pass, 3 fail (D9 pending), 0 blocked, 9 info | `scripts/security/authorization-probe.mjs full`, 2026-11-05; plus `routes` mode 17/17 |
+| Two-account authorization probes | 156 pass, 0 fail, 0 blocked, 8 info | `scripts/security/authorization-probe.mjs full`, 2026-11-05 (D9 applied, B private run); `routes` 17/17 |
 | Full catalog/policy diff | BLOCKED | Linked `db dump`/`inspect` need `SUPABASE_DB_PASSWORD`; `db diff` needs Docker or Podman |
 | Local/browser multi-user | Unverified | Independent authenticated identities were not available in the current environment |
 | Vercel/production | Unverified | No deployed-commit, Cron-log, or OAuth-provider evidence obtained |
@@ -847,25 +1038,23 @@ confirmed defect to remediate.
 
 | Action | Implementation | Static | Local browser | Multi-user | DB/security | Production | Status / next gate |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 Foundation and evidence | Verified inventory, recovery evidence, read-only audit pack (01-08) | PASS | N/A | N/A | Catalog 01-07 received and classified | Unverified | PARTIAL - query 08 export remains. |
-| 02 Authentication and identity | Implemented in source; login renders with Google | PASS | PASS - unauthenticated routes and redirects (17/17); rendered login | BLOCKED - Google OAuth, profile gate, switching, recovery need your sign-in | PASS - authenticated profile RLS | BLOCKED - no Preview URL | PARTIAL - provider configuration and authenticated browser runs. |
-| 03 Database, RLS, storage docs | `20261104120000`, `20261105090000`, `20261105100000` applied and verified (query 09); `20261105110000` (D9) prepared | PASS - migration contract tests | N/A | PASS - T1-T8, D6, D8, public-channel isolation | PASS except D9 pending | Unverified | BLOCKED - spec missing; apply D9. |
-| 04 Profiles, privacy, follows, friends, posts | Server, database and UI present; D9 fix prepared | PASS | BLOCKED | PASS - follows, friends, message requests, projection; FAIL - posts (D9) | FAIL - D9 pending approval | Unverified | OPEN - apply `20261105110000`; private-profile run; account-deletion decision. |
-| 05 Rooms, membership, roles, controls | Existing controls/invites/restrictions/provider wiring | PASS | Unverified | PASS - T1, T2 (direct API) | PASS | Unverified | PARTIAL - browser UI flows not driven. |
-| 06 Lifecycle, expiry, recovery, cleanup | D5 applied | PASS | Unverified | PASS - recovery decision and notification (T4) | PASS - D5 verified | BLOCKED - Cron | PARTIAL - 7-day reopen, permanent conversion and Cron evidence; spec missing. |
-| 07 Shared realtime foundation | Chat over RLS-checked Postgres Changes; Broadcast wire contract; media resolved by protected fetch; feed-ready re-read | PASS - contract and static tests | BLOCKED - two-profile browser check not run | PASS - hostile-client D7 probe | PASS (content); metadata residual accepted | Unverified | PARTIAL - deploy; browser removal UX check. |
-| 08 Room messaging and notifications | Partial: send/history/delete/announcements/notifications and lifecycle notification RPCs exist | PASS | Unverified | T3 PASS; T4 FAIL (notifications cannot be created, D5) | PASS - D1 verified; notification policies recipient-scoped (catalog) | Unverified | PARTIAL - T4 isolation after D5 fix; replies, reactions, mentions, pins, edits and DND/mute remain unverified. |
-| 09 Adaptive room workspace | Fixed private preference scoping for the sidebar, Watch and Study panel sizes; existing feature panels preserved | PASS - dedicated unit tests, typecheck, lint warnings only | BLOCKED - browser automation could not open a local tab | N/A | N/A | Unverified | PARTIAL - presets, theme preferences and mobile proof remain. |
-| 10 Files, PDFs, media, storage lifecycle | F1 fixed; mediaId resolution; D6 and D8 applied | PASS - unit and contract tests, typecheck, lint warnings only, production build | BLOCKED - browser upload not run | PASS - T6, D6, D8 (API) | PASS - D6/D8 verified | Unverified | PARTIAL - deploy; browser upload with subtitle; spec missing. |
+| 01 Foundation and evidence | Inventory, ledger, audit pack 01-09, two-account probe | PASS | N/A | PASS - probe | PASS | N/A | **COMPLETE** |
+| 02 Authentication and identity | All roadmap items in source | PASS | PASS - routes 17/17, rendered login | WAIVED by owner | PASS - profile RLS | WAIVED | PARTIAL - runtime DoD (Google, profile gate, switching) unverified by owner choice. |
+| 03 Database, RLS, storage docs | D1-D9 fixed; catalog 01-09 verified | PASS - contract tests | N/A | PASS - 156/156 probe | PASS | N/A (production database) | **COMPLETE** (database/security layer) |
+| 04 Profiles, privacy, follows, friends, posts | Server, database and UI; D9 applied; deletion re-auth (Decision A) | PASS | WAIVED | PASS - privacy/follow/friend/post/message-request matrix | PASS | WAIVED | PARTIAL - minimum-age decision; UI matrix waived. |
+| 05 Rooms, membership, roles, controls | Control Center, invites, roles, moderation, guests, lock, announcements | PASS | WAIVED | PASS - T1/T2/T3 | PASS | WAIVED | PARTIAL - member 3-dot actions; Ghost Mode decision; 05/09 feature-guide items missing. |
+| 06 Lifecycle, expiry, recovery, cleanup | State machine; D5 applied | PASS | WAIVED | PASS - recovery window, decision, notification | PASS | WAIVED (Cron) | PARTIAL - destroyed recoverable rooms never cleaned (decision); scheduled-room UI; 7-day/permanent runtime. |
+| 07 Shared realtime foundation | Wire contract; Postgres Changes chat; D7 | PASS | WAIVED | PASS - hostile client, observer, public-topic isolation | PASS | WAIVED | DONE at API layer; browser waived. |
+| 08 Room messaging and notifications | Send/history/delete/announcements/room notifications | PASS | WAIVED | PASS - T3/T4 | PASS | WAIVED | **MISSING features**: edit, replies, reactions UI, GIFs, mentions, pins, Notification Center, DND, unread, 3-dot, timer/PDF notifications. |
+| 09 Adaptive room workspace | Resizable panels, user-scoped sizes, feature visibility | PASS - unit tests | WAIVED | N/A | N/A | WAIVED | PARTIAL - presets, dashboard, themes missing; whiteboard placeholder. |
+| 10 Files, PDFs, media, storage lifecycle | Temporary media, subtitles, signed URLs; D6/D8 | PASS | WAIVED | PASS - T6/D6/D8/F1 | PASS | WAIVED | PARTIAL - permanent files, shared PDFs, study notes UI (database only); retry/cancel; metadata/lyrics. |
 
 ## Required external access to close gates
 
-1. Approve and apply `20261105110000` (D9). Run query 09 (all 12 rows must
-   be `ok`), re-run the full probe, then delete the leftover followers-only
-   probe post from QA account B.
-2. Add `docs/specs/action-03.md` and `05.md`–`10.md`. Sign in to two browser
-   identities for the Phase 4 flows. Configure the Google OAuth test client.
-   Decide on account-deletion re-authentication and whether QA account B may
-   be made private for one run.
+1. Prioritise the backlog in "Requirement audit" and answer its decisions:
+   destroyed recoverable-room cleanup, whiteboard placeholder, Ghost Mode,
+   GIF and lyrics providers, minimum age, and Live AI Meeting Assistant scope.
+2. Browser and Preview/Cron verification were waived by the owner on
+   2026-11-05. Those gates stay UNVERIFIED until run.
 3. Vercel Preview URL/log access for the exact pushed commit, including Cron
    invocation evidence.

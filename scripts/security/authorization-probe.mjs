@@ -256,6 +256,7 @@ async function fullPhase() {
 
   const channels = [];
   const extraClients = [];
+  let restoreBPrivacy = null;
   try {
     // ---- Fixtures in R1 created by the owner through normal APIs.
     const ownerMessage = await A.client.from('messages').insert({ room_id: R1, sender_id: A.id, content: 'qa owner probe' });
@@ -661,6 +662,14 @@ async function fullPhase() {
     record('A02', 'user cannot update another profile', deniedOrEmpty(otherProfileWrite), `${codeOf(otherProfileWrite)} rows=${rowsOf(otherProfileWrite)}`);
     const privateColumns = await A.client.from('public_profiles').select('date_of_birth').limit(1);
     record('A04', 'public projection does not expose date of birth', Boolean(privateColumns.error), codeOf(privateColumns));
+    // Owner decision 2026-11-05: QA account B is made private for this run so
+    // the private-profile and pending-follow paths are exercised; its original
+    // setting is restored afterwards (also in `finally`).
+    const originalPrivacy = one(await B.client.from('profiles').select('is_private').eq('id', B.id))?.is_private;
+    restoreBPrivacy = async () => { if (typeof originalPrivacy === 'boolean') await B.client.from('profiles').update({ is_private: originalPrivacy }).eq('id', B.id); };
+    await A.client.rpc('unfollow_user', { p_target_id: B.id });
+    const makePrivate = await B.client.from('profiles').update({ is_private: true }).eq('id', B.id).select('is_private');
+    record('A04', 'owner switches own profile to private', !makePrivate.error && one(makePrivate)?.is_private === true, codeOf(makePrivate));
     const bPrivacy = one(await B.client.from('profiles').select('is_private').eq('id', B.id));
     const projectionBefore = await A.client.from('public_profiles').select('id').eq('id', B.id);
     const alreadyFollower = one(await A.client.rpc('is_accepted_follower', { p_follower_id: A.id, p_following_id: B.id })) === true;
@@ -715,9 +724,10 @@ async function fullPhase() {
     }
     const afterDelete = await A.client.from('posts').select('id').in('id', created);
     record('A04', 'author soft-deletes posts (deletePost shape) and readers lose them', softDeletes.every((res) => !res.error && res.data) && rowsOf(afterDelete) === 0, `${softDeletes.map(codeOf).join('/')} visible=${rowsOf(afterDelete)}`);
-    // Until D9 is applied, soft delete is impossible; remove fixtures with posts_delete_own.
+    // Remove any still-visible qa fixture posts (for example from runs before
+    // D9 was applied, when soft delete was impossible) with posts_delete_own.
     const leftovers = await B.client.from('posts').delete().eq('author_id', B.id).like('content', 'qa %').is('deleted_at', null).select('id');
-    if (rowsOf(leftovers) > 0) info('A04', 'fixture posts hard-deleted because soft delete failed', `${rowsOf(leftovers)}`);
+    if (rowsOf(leftovers) > 0) info('A04', 'leftover qa fixture posts removed (posts_delete_own)', `${rowsOf(leftovers)}`);
 
     // ---- T5 message-request roles (precondition: A follows B, accepted).
     const firstRequest = await A.client.rpc('send_message_request', { p_recipient_id: B.id, p_message: 'qa probe request' });
@@ -773,7 +783,9 @@ async function fullPhase() {
     // Keep the intended standing fixture: A follows B (accepted).
     const followAgain = one(await A.client.rpc('request_follow', { p_target_id: B.id }));
     if (followAgain?.status === 'pending') await B.client.rpc('respond_to_follow_request', { p_follow_id: followAgain.id, p_decision: 'accepted' });
-    info('A04', 'standing fixture after run', `A follows B accepted=${one(await A.client.rpc('is_accepted_follower', { p_follower_id: A.id, p_following_id: B.id }))}`);
+    if (restoreBPrivacy) { await restoreBPrivacy(); restoreBPrivacy = null; }
+    const restoredPrivacy = one(await B.client.from('profiles').select('is_private').eq('id', B.id))?.is_private;
+    info('A04', 'standing fixture after run', `A follows B accepted=${one(await A.client.rpc('is_accepted_follower', { p_follower_id: A.id, p_following_id: B.id }))}; B is_private restored=${restoredPrivacy}`);
 
     // ---- T4 notification isolation via the normal recovery lifecycle.
     const R3 = await createRoom(A, { tag, suffix: 'r3', type: 'recoverable', expiresInMs: 15_000 });
@@ -817,6 +829,7 @@ async function fullPhase() {
     record('T6', 'owner (watch_control) deletes the probe media object', !cleanup.error, cleanup.error ? `${codeOf(cleanup)} ${cleanup.error.message}` : 'ok');
     console.log('cleanup: rooms and any remaining temporary media expire through the normal cleanup job');
   } finally {
+    if (restoreBPrivacy) await restoreBPrivacy().catch(() => undefined);
     for (const [client, channel] of channels) await client.removeChannel(channel);
     await Promise.all([A.client, B.client, ...extraClients].map((client) => client.auth.signOut({ scope: 'local' })));
   }

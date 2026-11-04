@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { deleteMyAccount } from '@/actions/account';
-import { ACCOUNT_DELETION_CONFIRMATION } from '@/lib/account-deletion';
+import { ACCOUNT_DELETION_CONFIRMATION, ACCOUNT_DELETION_REAUTH_WINDOW_SECONDS } from '@/lib/account-deletion';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import { createClient } from '@/utils/supabase/client';
 
@@ -17,6 +17,8 @@ export default function AccountControlActions({ className = '' }: { className?: 
   const [confirmation, setConfirmation] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [reauthRequired, setReauthRequired] = useState(false);
+  const [reauthenticating, setReauthenticating] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [dialog, setDialog] = useState<'logout' | 'delete' | null>(null);
@@ -24,16 +26,27 @@ export default function AccountControlActions({ className = '' }: { className?: 
   const canDelete = confirmation === ACCOUNT_DELETION_CONFIRMATION && !deleting;
 
   function closeDialog() {
-    if (deleting || loggingOut) return;
+    if (deleting || loggingOut || reauthenticating) return;
     setDialog(null);
     setDeleteError(null);
+    setReauthRequired(false);
     setLogoutError(null);
   }
 
   function openDeleteDialog() {
     setConfirmation('');
     setDeleteError(null);
+    setReauthRequired(false);
     setDialog('delete');
+  }
+
+  // A fresh sign-in starts a new session with a new authentication time. The
+  // user returns here and can confirm deletion within the allowed window.
+  async function signInAgain() {
+    setReauthenticating(true);
+    const returnTo = `${window.location.pathname}${window.location.search}`;
+    await createClient().auth.signOut({ scope: 'local' }).catch(() => undefined);
+    window.location.replace(`/login?next=${encodeURIComponent(returnTo)}`);
   }
 
   async function handleLogout(scope: 'local' | 'global') {
@@ -57,7 +70,13 @@ export default function AccountControlActions({ className = '' }: { className?: 
     setDeleting(true);
     setDeleteError(null);
     try {
-      await deleteMyAccount(confirmation);
+      const result = await deleteMyAccount(confirmation);
+      if (!result.success) {
+        // Nothing was deleted: the server requires a recent sign-in.
+        setReauthRequired(true);
+        setDeleting(false);
+        return;
+      }
       await createClient().auth.signOut({ scope: 'local' });
       router.replace('/');
     } catch (error) {
@@ -102,7 +121,15 @@ export default function AccountControlActions({ className = '' }: { className?: 
           <section role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" className="w-full max-w-md rounded-2xl border border-red-500/20 bg-[#111217] p-6 shadow-2xl">
             <div className="danger-zone-heading"><span className="danger-icon"><OmniIcon name="trash" size={17} /></span><div><p className="section-kicker">Permanent action</p><h2 id="delete-dialog-title">Delete Account</h2></div></div>
             <p className="mt-5 text-sm leading-6 text-neutral-300">This permanently removes your personal account data and files according to OmniLume&apos;s existing deletion policy. Shared room content continues to follow its server-side lifecycle rules.</p>
-            <p className="settings-note mt-4"><OmniIcon name="lock" size={14} /> Your authenticated session and an exact confirmation are required.</p>
+            <p className="settings-note mt-4"><OmniIcon name="lock" size={14} /> For your security you must have signed in within the last {ACCOUNT_DELETION_REAUTH_WINDOW_SECONDS / 60} minutes, and type an exact confirmation.</p>
+            {reauthRequired && (
+              <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3" role="alert">
+                <p className="text-sm leading-6 text-amber-100">Please sign in again to confirm it&apos;s you. Your account was not deleted.</p>
+                <button type="button" disabled={reauthenticating} onClick={() => void signInAgain()} className="omni-button omni-button-primary mt-3 disabled:opacity-50">
+                  {reauthenticating ? 'Signing out...' : 'Sign in again'}
+                </button>
+              </div>
+            )}
             <form onSubmit={(event) => void handleDelete(event)} className="delete-confirmation mt-5">
               <label htmlFor="delete-account-confirmation" className="form-label">Type <strong>{ACCOUNT_DELETION_CONFIRMATION}</strong> to continue</label>
               <input id="delete-account-confirmation" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className="omni-input" autoComplete="off" spellCheck={false} placeholder={ACCOUNT_DELETION_CONFIRMATION} disabled={deleting} />
