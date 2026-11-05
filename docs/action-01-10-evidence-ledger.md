@@ -1909,3 +1909,44 @@ snapshot at conversion; later room-role changes do not mirror into the group
 impossible on an active room) are deleted and pending permanent-room requests
 approved; both counts are in the conversion record. No external provider is
 needed for either action.
+
+## Action 15
+
+Database (`20261109100000_action15_conversations.sql`, applied after a
+rolled-back dry run as `authenticated`/`anon`). One type per conversation,
+derived (never stored): `private_chat_type` → personal (friends) / general
+(accepted request) / NULL (not a participant, blocked, unfriended);
+`get_my_conversations` (SECURITY INVOKER) adds groups. Unique pair index on
+`private_chats`. Restrictive `messages` policies (room rows untouched) require
+active access and the other participant as receiver; `chat_` topic requires
+active access; new `group_` topic for members. `user_blocks` + `block_user`
+(drops friendship, follows, pending requests) and a block trigger on
+message/friend requests, follows, friendships, private chats.
+`group_messages` (RLS, column-limited INSERT, sender/manager DELETE),
+`leave_group`, `remove_group_member` (owner > admin > member),
+`conversation_reads` + `mark_conversation_read`.
+**Decision:** group messages are plaintext protected by RLS like rooms;
+Personal/General stay E2EE; no group key distribution.
+
+- database-security, dry run: 21/21 — dup pair 23505, wrong receiver/spoof/
+  removed/anon 42501, unfriend → type NULL, 0 reads, topic false;
+  general→personal relabel with identical ciphertext md5; block → reads 0,
+  writes and friend request 42501; owner cannot leave.
+- database-security + multi-user, `scripts/security/conversations-probe.mjs`:
+  **42 pass, 0 fail** (subject + friend, follower, stranger, blocked, member,
+  removed member, anon) incl. live private-topic delivery/refusal, request
+  gating, read state 2→0, reclassification hash identical, no duplicates.
+  Substituted: QA credential files were not configured in this session, so
+  the probe's subject was a throw-away account (the script uses QA A when set).
+- static, `tests/conversations.test.ts` (130/130 run); lint 0 errors / 13
+  warnings (unchanged); `next build` ok.
+- local runtime / browser (2 tabs, two origins, throw-away accounts, deleted
+  after): tabs and counts, accept → General, no-key safe state, Personal E2EE
+  message decrypted on the other side, group message live, block closes the
+  other tab's open chat; 390 px: no horizontal overflow, back button. Fixed
+  during the check: converted source room listed twice under Groups; blocked
+  list empty (public_profiles hides the member → "Blocked member" fallback).
+
+Limits: unread counts refresh on inbox events (messages to me, requests,
+friendships), not on group messages; a chat created in the same tab and then
+revoked stays open until reload (RLS still refuses it).

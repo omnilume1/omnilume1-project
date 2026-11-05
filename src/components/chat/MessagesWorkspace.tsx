@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/utils/supabase/client';
 import PrivateChat from '@/components/chat/PrivateChat';
+import GroupChat from '@/components/chat/GroupChat';
+import { isPendingRequestContact } from '@/lib/conversation-model';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import {
   usePersonalMessageNotifications,
@@ -22,14 +24,24 @@ import {
   acceptMessageRequest,
   rejectMessageRequest,
   cancelMessageRequest,
+  blockUser,
+  unblockUser,
+  markConversationRead,
+  type InboxChatGroup,
   type MessageInbox,
   type InboxGeneralContact,
   type InboxGroup,
   type InboxPerson,
 } from '@/actions/messages';
 
-type TabId = 'personal' | 'groups' | 'general';
-type MemberAction = 'accept' | 'reject' | 'send' | 'cancel';
+type TabId = 'personal' | 'general' | 'groups' | 'requests';
+const TABS: Array<{ id: TabId; label: string; kicker: string }> = [
+  { id: 'personal', label: 'Personal', kicker: 'Friends · end-to-end encrypted' },
+  { id: 'general', label: 'General', kicker: 'Follow connections · end-to-end encrypted' },
+  { id: 'groups', label: 'Groups', kicker: 'Groups you belong to' },
+  { id: 'requests', label: 'Requests', kicker: 'Message requests and blocked members' },
+];
+type MemberAction = 'accept' | 'reject' | 'send' | 'cancel' | 'block' | 'unblock';
 
 interface ActiveConversation {
   contactId: string;
@@ -105,6 +117,7 @@ export default function MessagesWorkspace() {
   const [tab, setTab] = useState<TabId>('personal');
   const [query, setQuery] = useState('');
   const [active, setActive] = useState<ActiveConversation | null>(null);
+  const [activeGroup, setActiveGroup] = useState<InboxChatGroup | null>(null);
   const [chatIdOverrides, setChatIdOverrides] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<Record<string, MemberAction | undefined>>({});
   const [composerFor, setComposerFor] = useState<string | null>(null);
@@ -226,6 +239,12 @@ export default function MessagesWorkspace() {
         { event: 'UPDATE', schema: 'public', table: 'message_requests', filter: `requester_id=eq.${currentUserId}` },
         () => scheduleInboxRefresh(),
       )
+      // New personal/general messages refresh unread counts (RLS-filtered).
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${currentUserId}` },
+        () => scheduleInboxRefresh(),
+      )
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'private_chats', filter: `user_one=eq.${currentUserId}` },
@@ -283,7 +302,7 @@ export default function MessagesWorkspace() {
   }, [notice]);
 
   useEffect(() => {
-    registerContacts(inbox?.friends ?? []);
+    registerContacts([...(inbox?.friends ?? []), ...(inbox?.general ?? [])]);
   }, [inbox, registerContacts]);
 
   useEffect(() => {
@@ -291,14 +310,49 @@ export default function MessagesWorkspace() {
     return () => setActiveChat(null);
   }, [active?.chatId, setActiveChat]);
 
+  // Read state for the open private chat; refreshed with the inbox.
+  useEffect(() => {
+    if (active?.phase === 'ready' && active.chatId) void markConversationRead(active.chatId).catch(() => undefined);
+  }, [active?.phase, active?.chatId, inbox]);
+
+  // Revocation (unfriend, block, request withdrawn): once the refreshed inbox
+  // no longer lists an open conversation, close it. RLS already stops reads,
+  // writes and realtime; this keeps the UI honest.
+  useEffect(() => {
+    if (!inbox) return;
+    if (active?.chatId) {
+      // shortcut: a chat created in this tab and then revoked stays open until
+      // reload, but RLS already refuses its reads, writes and realtime.
+      const stillOpen = [...inbox.friends, ...inbox.general].some((person) => person.user_id === active.contactId
+        && (person.chat_id ?? chatIdOverrides[person.user_id] ?? null) === active.chatId);
+      if (!stillOpen) {
+        queueMicrotask(() => {
+          setActive(null);
+          setNotice({ kind: 'info', text: `The conversation with ${active.peerName} is no longer available.` });
+        });
+      }
+    }
+    if (activeGroup && !inbox.chatGroups.some((group) => group.group_id === activeGroup.group_id)) {
+      queueMicrotask(() => setActiveGroup(null));
+    }
+  }, [inbox, active, activeGroup, chatIdOverrides]);
+
+  const closeGroup = useCallback((message: string) => {
+    setActiveGroup(null);
+    setNotice({ kind: 'info', text: message });
+    scheduleInboxRefresh();
+  }, [scheduleInboxRefresh]);
+
   const setMemberBusy = (userId: string, action: MemberAction | undefined) => {
     setBusy((current) => ({ ...current, [userId]: action }));
   };
 
   const updateGeneralContact = (userId: string, update: (contact: InboxGeneralContact) => InboxGeneralContact) => {
-    setInbox((current) => (current
-      ? { ...current, general: current.general.map((contact) => (contact.user_id === userId ? update(contact) : contact)) }
-      : current));
+    setInbox((current) => {
+      if (!current) return current;
+      const all = [...current.general, ...current.requests].map((contact) => (contact.user_id === userId ? update(contact) : contact));
+      return { ...current, general: all.filter((contact) => !isPendingRequestContact(contact)), requests: all.filter(isPendingRequestContact) };
+    });
   };
 
   const beginChat = useCallback(async (contact: InboxPerson) => {
@@ -309,6 +363,7 @@ export default function MessagesWorkspace() {
     }
     const requestId = beginChatRequestRef.current + 1;
     beginChatRequestRef.current = requestId;
+    setActiveGroup(null);
     setActive({ contactId: contact.user_id, peerName, chatId: contact.chat_id ?? null, sharedKey: null, phase: 'key' });
     setNotice(null);
     try {
@@ -335,9 +390,10 @@ export default function MessagesWorkspace() {
 
   const openPersonalToast = useCallback((notification: PersonalMessageToast) => {
     dismissToast(notification.id);
-    setTab('personal');
     setQuery('');
-    const contact = inbox?.friends.find((friend) => friend.user_id === notification.senderId);
+    const friend = inbox?.friends.find((person) => person.user_id === notification.senderId);
+    const contact = friend ?? inbox?.general.find((person) => person.user_id === notification.senderId);
+    setTab(friend || !contact ? 'personal' : 'general');
     if (!contact) {
       setNotice({ kind: 'info', text: 'Refresh Personal to open this secure conversation.' });
       return;
@@ -356,18 +412,10 @@ export default function MessagesWorkspace() {
         ?? contact.chat_id
         ?? await getOrCreatePrivateChat(contact.user_id).then(unwrapAction);
       setChatIdOverrides((current) => ({ ...current, [contact.user_id]: chatId }));
-      setInbox((current) => {
-        if (!current) return current;
-        const acceptedPerson: InboxPerson = { ...contact, chat_id: chatId };
-        const friends = current.friends.some((friend) => friend.user_id === contact.user_id)
-          ? current.friends.map((friend) => friend.user_id === contact.user_id ? acceptedPerson : friend)
-          : [acceptedPerson, ...current.friends];
-        return {
-          ...current,
-          friends,
-          general: current.general.filter((candidate) => candidate.user_id !== contact.user_id),
-        };
-      });
+      // An accepted request opens a General conversation; it becomes
+      // Personal only when the pair become friends.
+      updateGeneralContact(contact.user_id, (c) => ({ ...c, chat_id: chatId, request: { ...request, status: 'accepted' } }));
+      setTab('general');
       await beginChat({ ...contact, chat_id: chatId });
       scheduleInboxRefresh();
     } catch (error: unknown) {
@@ -426,6 +474,35 @@ export default function MessagesWorkspace() {
     }
   };
 
+  const handleBlock = async (person: InboxPerson) => {
+    if (!window.confirm(`Block ${personName(person)}? This ends your friendship, follows, requests and conversations with them.`)) return;
+    setMemberBusy(person.user_id, 'block');
+    setNotice(null);
+    try {
+      await blockUser(person.user_id).then(unwrapAction);
+      if (active?.contactId === person.user_id) setActive(null);
+      setNotice({ kind: 'info', text: `${personName(person)} is blocked.` });
+      quietLoadInbox();
+    } catch (error: unknown) {
+      setNotice({ kind: 'error', text: error instanceof Error ? error.message : 'Unable to block this member.' });
+    } finally {
+      setMemberBusy(person.user_id, undefined);
+    }
+  };
+
+  const handleUnblock = async (person: InboxPerson) => {
+    setMemberBusy(person.user_id, 'unblock');
+    setNotice(null);
+    try {
+      await unblockUser(person.user_id).then(unwrapAction);
+      quietLoadInbox();
+    } catch (error: unknown) {
+      setNotice({ kind: 'error', text: error instanceof Error ? error.message : 'Unable to unblock this member.' });
+    } finally {
+      setMemberBusy(person.user_id, undefined);
+    }
+  };
+
   const handleCancelRequest = async (contact: InboxGeneralContact) => {
     const request = contact.request;
     if (!request || request.direction !== 'outgoing' || request.status !== 'pending') return;
@@ -453,6 +530,8 @@ export default function MessagesWorkspace() {
 
   const filteredFriends = useMemo(() => filterRows(inbox?.friends ?? []), [inbox, filterRows]);
   const filteredGeneral = useMemo(() => filterRows(inbox?.general ?? []), [inbox, filterRows]);
+  const filteredRequests = useMemo(() => filterRows(inbox?.requests ?? []), [inbox, filterRows]);
+  const filteredBlocked = useMemo(() => filterRows(inbox?.blocked ?? []), [inbox, filterRows]);
   const filteredGroups = useMemo(() => {
     const rows = inbox?.groups ?? [];
     const needle = query.trim().toLowerCase();
@@ -462,11 +541,16 @@ export default function MessagesWorkspace() {
       || (group.username ?? '').toLowerCase().includes(needle),
     );
   }, [inbox, query]);
+  const filteredChatGroups = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return (inbox?.chatGroups ?? []).filter((group) => !needle || group.name.toLowerCase().includes(needle));
+  }, [inbox, query]);
 
   const counts: Record<TabId, number> = {
     personal: inbox?.friends.length ?? 0,
-    groups: inbox?.groups.length ?? 0,
     general: inbox?.general.length ?? 0,
+    groups: (inbox?.groups.length ?? 0) + (inbox?.chatGroups.length ?? 0),
+    requests: inbox?.requests.filter((contact) => contact.request?.direction === 'incoming').length ?? 0,
   };
 
   const startInboxRetry = () => {
@@ -494,14 +578,71 @@ export default function MessagesWorkspace() {
         </div>
       );
     }
+    if (tab === 'requests') {
+      return (
+        <div className="empty-state">
+          <OmniIcon name="bell" size={22} />
+          <h3>No message requests</h3>
+          <p>Requests from people you follow or who follow you wait here until you accept, decline or block.</p>
+        </div>
+      );
+    }
     return (
       <div className="empty-state">
         <OmniIcon name="message" size={22} />
         <h3>No connections yet</h3>
-        <p>People who follow you or whom you follow appear here. Message requests land here too.</p>
+        <p>People who follow you or whom you follow appear here. Send them a message request to start a secure chat.</p>
       </div>
     );
   };
+
+  const renderUnread = (count: number | undefined) => (count ? (
+    <span className="chat-row-unread" aria-label={`${count >= 100 ? '99+' : count} unread messages`}>{unreadBadge(count)}</span>
+  ) : null);
+
+  const renderChatGroupRow = (group: InboxChatGroup) => {
+    const isActive = activeGroup?.group_id === group.group_id;
+    return (
+      <button
+        type="button"
+        key={group.group_id}
+        className={`chat-row ${isActive ? 'is-active' : ''}`}
+        aria-current={isActive ? 'true' : undefined}
+        onClick={() => {
+          beginChatRequestRef.current += 1;
+          setActive(null);
+          setActiveGroup(group);
+          setInbox((current) => (current ? { ...current, chatGroups: current.chatGroups.map((row) => (row.group_id === group.group_id ? { ...row, unread_count: 0 } : row)) } : current));
+        }}
+      >
+        <span className="person-avatar chat-group-avatar"><OmniIcon name="users" size={16} /></span>
+        <span className="chat-row-main">
+          <strong className="chat-row-name">{group.name}</strong>
+          <small className="chat-row-sub">{group.role === 'owner' ? 'Owner' : group.role === 'admin' ? 'Admin' : 'Member'} · Group chat</small>
+        </span>
+        {renderUnread(group.unread_count)}
+        <OmniIcon name="message" size={15} className="chat-row-action" />
+      </button>
+    );
+  };
+
+  const renderBlockedRow = (person: InboxPerson) => (
+    <div key={person.user_id} className="chat-row">
+      <PersonAvatar person={person} />
+      <span className="chat-row-main">
+        <strong className="chat-row-name">{personName(person)}</strong>
+        <small className="chat-row-sub">Blocked</small>
+      </span>
+      <button
+        type="button"
+        className="omni-button omni-button-ghost !min-h-[32px] !px-3"
+        disabled={busy[person.user_id] === 'unblock'}
+        onClick={() => void handleUnblock(person)}
+      >
+        {busy[person.user_id] === 'unblock' ? 'Unblocking…' : 'Unblock'}
+      </button>
+    </div>
+  );
 
   const renderPersonRow = (friend: InboxPerson) => {
     const isActive = active?.contactId === friend.user_id;
@@ -522,6 +663,7 @@ export default function MessagesWorkspace() {
             ) : friend.has_public_key ? 'Ready for a secure chat' : 'Waiting for secure setup'}
           </small>
         </span>
+        {renderUnread(friend.unread_count)}
         <OmniIcon name="message" size={15} className="chat-row-action" />
       </button>
     );
@@ -581,7 +723,15 @@ export default function MessagesWorkspace() {
               disabled={actionBusy === 'reject'}
               onClick={() => void handleReject(contact)}
             >
-              {actionBusy === 'reject' ? 'Rejecting…' : 'Reject'}
+              {actionBusy === 'reject' ? 'Declining…' : 'Decline'}
+            </button>
+            <button
+              type="button"
+              className="omni-button omni-button-ghost !min-h-[34px] !px-4"
+              disabled={actionBusy !== undefined}
+              onClick={() => void handleBlock(contact)}
+            >
+              {actionBusy === 'block' ? 'Blocking…' : 'Block'}
             </button>
           </div>
         </div>
@@ -612,6 +762,7 @@ export default function MessagesWorkspace() {
               {canChat ? ' · Secure conversation' : ''}
             </small>
           </span>
+          {renderUnread(contact.unread_count)}
           {request?.status === 'pending' && (
             <span className="chat-row-pill">
               {request.direction === 'outgoing' ? 'Sent' : 'Request'}
@@ -697,13 +848,25 @@ export default function MessagesWorkspace() {
       return filteredFriends.length === 0 ? renderEmpty() : <div className="messages-list-scroll">{filteredFriends.map(renderPersonRow)}</div>;
     }
     if (tab === 'groups') {
-      return filteredGroups.length === 0 ? renderEmpty() : <div className="messages-list-scroll">{filteredGroups.map(renderGroupRow)}</div>;
+      return filteredGroups.length + filteredChatGroups.length === 0 ? renderEmpty() : (
+        <div className="messages-list-scroll">{filteredChatGroups.map(renderChatGroupRow)}{filteredGroups.map(renderGroupRow)}</div>
+      );
+    }
+    if (tab === 'requests') {
+      if (filteredRequests.length + filteredBlocked.length === 0) return renderEmpty();
+      return (
+        <div className="messages-list-scroll">
+          {filteredRequests.map(renderGeneralRow)}
+          {filteredBlocked.length > 0 && <p className="section-kicker mt-3 px-2">Blocked</p>}
+          {filteredBlocked.map(renderBlockedRow)}
+        </div>
+      );
     }
     return filteredGeneral.length === 0 ? renderEmpty() : <div className="messages-list-scroll">{filteredGeneral.map(renderGeneralRow)}</div>;
   };
 
   return (
-    <div className={`messages-workspace ${active ? 'is-expanded' : 'is-collapsed'}`}>
+    <div className={`messages-workspace ${active || activeGroup ? 'is-expanded' : 'is-collapsed'}`}>
       <aside className="messages-list">
         <div className="msg-search">
           <OmniIcon name="search" size={15} />
@@ -711,12 +874,12 @@ export default function MessagesWorkspace() {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Search ${tab === 'groups' ? 'rooms' : 'chats and people'}…`}
+            placeholder={`Search ${tab === 'groups' ? 'groups' : 'chats and people'}…`}
             aria-label="Search chats and people"
           />
         </div>
         <div className="msg-tabs" role="tablist" aria-label="Message categories">
-          {(['personal', 'groups', 'general'] as TabId[]).map((id) => (
+          {TABS.map(({ id, label }) => (
             <button
               key={id}
               type="button"
@@ -725,13 +888,13 @@ export default function MessagesWorkspace() {
               className={`msg-tab ${tab === id ? 'is-active' : ''}`}
               onClick={() => setTab(id)}
             >
-              {id === 'personal' ? 'Personal' : id === 'groups' ? 'Groups' : 'General'}
+              {label}
               {counts[id] > 0 && <span className="msg-tab-count">{counts[id]}</span>}
             </button>
           ))}
         </div>
         <div className="messages-list-headline">
-          <p className="section-kicker">{tab === 'personal' ? 'Friends and personal chats' : tab === 'groups' ? 'Groups and channels' : 'Follow connections'}</p>
+          <p className="section-kicker">{TABS.find((entry) => entry.id === tab)?.kicker}</p>
           <span className="section-count">{counts[tab]}</span>
         </div>
         {notice && (
@@ -741,7 +904,21 @@ export default function MessagesWorkspace() {
       </aside>
 
       <section className="messages-pane" aria-label="Active conversation">
-        {active ? (
+        {activeGroup && currentUserId ? (
+          <>
+            <div className="lg:hidden">
+              <div className="msg-pane-topbar">
+                <button type="button" className="icon-button" aria-label="Back to conversation list" onClick={() => setActiveGroup(null)}>
+                  <OmniIcon name="arrow" size={16} className="rotate-180" />
+                </button>
+                <span className="msg-pane-title"><span className="msg-pane-name">{activeGroup.name}</span></span>
+              </div>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <GroupChat key={activeGroup.group_id} groupId={activeGroup.group_id} groupName={activeGroup.name} currentUserId={currentUserId} onRevoked={closeGroup} />
+            </div>
+          </>
+        ) : active ? (
           <>
             <div className="msg-pane-topbar">
               <button
@@ -760,6 +937,14 @@ export default function MessagesWorkspace() {
                 <span className="msg-pane-name">{active.phase === 'ready' ? active.peerName : `Starting secure chat with ${active.peerName}…`}</span>
               </span>
               <span className="msg-pane-badge"><OmniIcon name="shield" size={13} /> E2EE</span>
+              <button
+                type="button"
+                className="omni-button omni-button-ghost !min-h-[30px] !px-3 text-xs"
+                disabled={busy[active.contactId] !== undefined}
+                onClick={() => void handleBlock({ user_id: active.contactId, display_name: active.peerName, username: null, avatar_url: null, chat_id: active.chatId, has_public_key: true })}
+              >
+                {busy[active.contactId] === 'block' ? 'Blocking…' : 'Block'}
+              </button>
             </div>
             {active.phase === 'ready' && active.sharedKey && currentUserId && active.chatId ? (
               <div className="flex min-h-0 flex-1 flex-col">
