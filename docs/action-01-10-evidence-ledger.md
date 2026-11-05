@@ -1950,3 +1950,212 @@ Personal/General stay E2EE; no group key distribution.
 Limits: unread counts refresh on inbox events (messages to me, requests,
 friendships), not on group messages; a chat created in the same tab and then
 revoked stays open until reload (RLS still refuses it).
+
+## Action 16.1 + 16.2 (Stage 1: music shell, player core, global mini player)
+
+Plan: `docs/action-16-plan.md` (owner decisions 2026-11-05). No database
+change, no network calls; fixtures only (`src/lib/music-fixtures.ts`: invented
+names, colour artwork, silent clock engine).
+
+- Database / database-security: n/a (no migration, RPC or realtime). `/music`
+  and `/music/*` added to `isAuthRequiredPath`; anon browser request to
+  `/music/album/glass-harbour` → `/login?next=…`.
+- static: `tests/music-queue.test.ts` (start list, play next/add + dedupe,
+  jump, shuffle leads + restore, repeat off/all/one, back > 10 s, back from a
+  hand-queued track, clear/remove/move, silent clock) and
+  `tests/music-shell-contract.test.ts` (auth path, every `music.css` selector
+  under `.music-app`, `globals.css` untouched, DM Sans only in the music
+  layout, provider in the root layout, reduced-motion + focus-visible, no
+  hand-written `-webkit-backdrop-filter`, shortcut typing guard).
+  `npm run test:unit` 145/145; lint 0 errors / 13 warnings (unchanged
+  baseline); `next build` ok.
+- local runtime / browser (`next start`, incognito, throw-away account deleted
+  after). 1440: sidebar 260 px; pill 668×56, radius 1000 px, grid
+  184 | 358 | 106; glass `saturate(2.2) blur(16px)` + 0.5 px inner stroke; h1
+  34/40 700, padding-top 32; gutter 40; album title 26/32 700; hero art
+  270×270 r10; rows 46 px r6; Play/Shuffle 36 px r24; square art r7; shelf
+  arrows shown. Up Next 300 px slides in and the pill re-centres (150 px); Esc
+  closes panel / drawer / full screen; full screen grid 461 + 576, art 461²,
+  mesh animates only while playing. Play → LCD + current row + Media Session
+  metadata/state; Ctrl+→ next; Space toggles (ignored in the search field);
+  `/` focuses search; Ctrl+↓ volume; shuffle/repeat/volume/mute restored after
+  reload; lyrics line click seeks to 0:12 and highlights in panel and full
+  screen; track ⋯ menu (popover) opens inside the viewport, Play Next queues.
+  Global mini player: "Back to OmniLume" keeps playing on `/home`, the mini
+  player sits above the dock (bottom 798 vs dock top 814); Stop clears it and
+  Media Session state → none; Music added to the dock. 390: 52 px top bar +
+  drawer (scrim, Esc), 374×52 mini bar (Pause, Next, open full screen), h1
+  28 px. Overflow sweep, 13 music routes × {390, 1440}: no horizontal
+  overflow; unknown paths/ids render the music not-found inside the shell.
+  Fixed during the check: Lightning CSS merged the hand-written
+  `-webkit-backdrop-filter` with the standard property and kept only the
+  prefix (Chrome showed no blur).
+
+Limits: no screenshots (the preview host timed out on every snapshot, login
+page included), so evidence is computed styles and DOM state; no real audio
+yet (silent engine), so OS media keys were not exercised; Up Next reorder is
+drag or Alt+↑/↓ (no touch drag handle); the mesh backdrop uses the fixture hue
+(artwork colour sampling comes with uploads in 16.4).
+
+## Action 16.4 + 16.5 (Stage 2: uploads, 7-day storage, sharing, playlists, history)
+
+Migration `20261110100000_action16_music_library.sql` (additive): private
+bucket `music_uploads` (50 MB, audio MIME list + `image/jpeg`), one retention
+constant `music_upload_ttl()` = 7 days with `CHECK (expires_at = created_at +
+music_upload_ttl())`; tables `music_uploads`, `music_upload_shares`,
+`music_playlists`, `music_playlist_items`, `music_listening_history` (RLS on,
+`REVOKE ALL … FROM PUBLIC, anon, authenticated`, explicit grants, owner-only
+policies); storage INSERT (own flat prefix `<uid>/<uuid>.<ext|cover.jpg>`, ≤ 100
+objects) and SELECT (owner, registered + active + unexpired, or not yet
+registered) policies, no client UPDATE/DELETE; 16 SECURITY DEFINER functions with
+`search_path = ''`, `auth.uid()` null → 42501; policy helpers EXECUTE →
+`authenticated`; `register_music_upload`, `list_music_uploads_due_for_cleanup`,
+`list_music_orphan_objects`, `complete_music_upload_cleanup` → `service_role`
+only. Fixtures are gone; `/music` reads the real library (RLS selects + RPCs,
+no server actions).
+
+- database-security, dry run 1 (migration + checks in one transaction ended by
+  `RAISE`, as `service_role` / `authenticated` owner, room member, stranger /
+  `anon`): **92/92** — register only by the service role with a matching
+  object/MIME/size, caps 40 files and 300 MB (54000), duplicate id 23505, TTL
+  and path CHECKs 23514; own-prefix upload ok, other prefix / bad name / nested
+  path / anon 42501; owner reads own rows, member and stranger 0 rows; share
+  needs attestation (22023) and membership (42501); member plays only while
+  shared, revocation stops it; history deduped, owner-only; playlist items
+  only for own uploads; forced expiry → playback, share, record and object
+  read refused while the object still exists; cleanup lists it, tombstones it,
+  drops shares; orphan > 1 h listed, fresh one not; bucket private; no
+  definer without `search_path`; anon executes no music function. It also
+  found that `INSERT … RETURNING` was refused (new object not yet readable),
+  so unregistered own-prefix objects became readable → dry run 2: **16/16**
+  (RETURNING ok, other users and anon still 0 rows, expired object unreadable,
+  helpers executable by `authenticated`). Then `supabase db push` (local =
+  remote before, one migration applied). Advisors: music functions only show
+  the expected "authenticated can call a definer RPC" notice; no anon or
+  missing-policy finding.
+- database-security, live `scripts/security/music-probe.mjs`: **46 pass,
+  0 fail** (throw-away owner, room member, stranger, anon; real Storage API):
+  own-prefix upload; stranger/nested/anon upload AccessDenied; bucket refuses
+  `text/html`; users cannot call register/cleanup RPCs; 7 days exactly;
+  member/stranger cannot sign the object; share attestation/membership;
+  member playback only while shared; signed URL TTL ≤ remaining life (599 s for
+  10 min left); forced expiry refused everywhere with the object still present;
+  cleanup removes the object then tombstones the row; music objects sit flat
+  at `<uid>/` where account deletion's sweep finds them; fixtures removed.
+- static: `tests/music-lrc.test.ts` (stamps, fractions, multi-stamp, offset,
+  plain/malformed, caps, LRC round-trip), `tests/music-uploads.test.ts` (magic
+  bytes per format incl. renamed PDF/HTML, register-body validation, TTL
+  helper, cleanup storage-before-row and retry on failure with a fake client,
+  migration contract, route order: sniff before register, storage before row,
+  account deletion before the user cascade), shell contract += server pages
+  use plain-module constants. `npm run test:unit` **158/158**; lint 0 errors /
+  13 warnings (baseline); `next build` ok.
+- local runtime / browser (`next start`, incognito, throw-away account with one
+  room, deleted after with its objects; synthetic media from a scratchpad
+  script): upload of 5 files → MP3 (ID3 tags + PNG cover) and WAV (RIFF INFO
+  tags + `.lrc` sidecar) added; `broken.mp3` passed the browser tag reader but
+  the server sniff refused it (422) and its object was removed (2 objects left
+  in the prefix = audio + cover); renamed PDF refused in the browser. Cover
+  re-encoded to JPEG and served via `/api/music/uploads/<id>/cover`; hue 254
+  sampled; play → audio redirect to Storage, 206 on Range, signed-URL lifetime
+  3600 s, position advancing, Media Session playing with artwork; unknown id or
+  asset → 404. Synced `.lrc` lyrics: 4 lines, line at 0:04 active at 0:05.
+  Playlist create → page; ⋯ menu adds both songs; share dialog: Share disabled
+  until "I have the right to share" is ticked, share → stop → share; history
+  lists both plays. Forced expiry of one upload → history and playlist show it
+  dimmed "Expired" without a play button, Songs drops it, footer counts only
+  playable songs. Mini player keeps real audio playing on `/home`. Delete from
+  the menu → row tombstoned, 0 objects, 0 shares. Sweep of 15 music routes ×
+  {390, 1440}: no horizontal overflow. Fixed during the check: library
+  sections 404'd (a server page imported a constant from a `'use client'`
+  module, which arrives as a client reference → moved to `music-model.ts`, plus
+  a contract test); "Expires in 8 days" right after upload (client clock a few
+  seconds behind the DB with `ceil` → `round`); deleting the playing song now
+  stops the player; the share dialog's close button resets its state directly.
+
+Limits: the daily cron route was not run against the live project (it would
+also clean real rooms); its music step is covered by the probe (same calls)
+and the fake-client test. Uploads are visible to the owner as tombstones
+forever (no purge of `deleted` rows yet). The preview browser never runs
+rendering steps (`requestAnimationFrame` never fires), so dialog `close`
+events, screenshots and Esc-to-close could not be observed there. Hardware
+media keys and an embedded-art FLAC/M4A were not tried (no encoder on this
+machine; MP3 + WAV only). Existing probes were not re-run (QA credential files
+are not configured in this session); the migration adds bucket-scoped storage
+policies only.
+
+## Action 16 Stage 3 (presence + Listen Together, owner decisions 5 and 6)
+
+Migration `20261111100000_action16_music_presence_together.sql` (additive):
+tables `music_settings` (presence `friends`/`nobody`, default friends; owner
+SELECT only), `music_now_playing` and `music_listen_sessions` (RLS on, no
+client grants, no policies); definer helpers `music_listen_can_join` and
+`can_receive_music_listen_topic` (regex before the uuid cast; EXECUTE →
+`authenticated`), internal `music_listen_json`; RPCs `set_music_presence`,
+`set_music_now_playing` (title/artist copied from an upload the caller may
+play), `list_friends_listening` (friends only, not blocked either way,
+privacy, < 5 min old), `get_music_listen_session`, `list_music_listen_tracks`,
+`music_listen_control` (start/play/pause/seek/load/enqueue/remove/next/
+host_only/end; server-side seq, anchor and queue deltas; songs must be shared
+to that exact room/group; `next` carries the song it advances from, so several
+listeners finishing together advance once; host-only enforced in the RPC).
+Every change is pushed with `realtime.send` to the private topic
+`music_listen_<room|group>_<id>`; `realtime.messages` gets a SELECT policy for
+it and no INSERT policy, so clients cannot publish or forge state. Repair
+`20261111110000_action16_listen_queue_conflict_code.sql`: the stale-queue
+error used SQLSTATE 40001, which PostgREST retries, so the call looped (found
+by the live probe, not by the SQL dry run) → 55000.
+
+- database-security, dry run (migration + checks in one transaction ended by
+  `RAISE`, fixtures room → group, owner, member, stranger, as `authenticated`
+  and `anon`): **50/50** — member helpers/topic true, malformed and converted-
+  room topics false; sessions and now-playing tables 42501 for clients; play
+  before start P0002; start/join, load of a shared song, unshared 22023,
+  negative seek 22023; member sees the broadcast rows through the topic policy
+  and cannot INSERT into `realtime.messages`; stranger/anon refused on every
+  RPC and the topic; host-only blocks member control and toggling; queue
+  enqueue/stale remove/remove; stale `next` ignored; member cannot end while
+  the host is present; end → P0002 → takeover; host removed from the group →
+  takeover; presence visible to the friend only, hidden by `nobody`, blocks
+  and staleness; all definers pin `search_path`; anon executes nothing new.
+  Repair re-run on top of the live schema: **50/50**. Both pushed with
+  `supabase db push` (one migration each). Advisors: only the expected
+  "authenticated can call a definer RPC" notices and "RLS on, no policies" for
+  the two server-only tables (intended); no anon finding.
+- database-security, live `scripts/security/music-probe.mjs`: **72 pass,
+  0 fail** (46 Stage 2 + 26 Stage 3; throw-away owner, room member, stranger,
+  anon; real Realtime): friend sees "Listening to" with the upload title,
+  non-friend and anon do not, cannot publish a song you may not play,
+  `nobody` hides it, settings owner-only; member SUBSCRIBED to the private
+  topic, stranger/anon CHANNEL_ERROR, public channel refused; member load
+  delivered over Realtime (matching seq) while the refused channels got
+  nothing; a member's client broadcast on the topic never reached the host;
+  unshared song 22023; stranger control/read 42501; tables unreadable;
+  host-only; host pause at a position; stale queue delta 55000; stale advance
+  ignored, real advance moves the queue; ended session P0002. The probe now
+  deletes its session rows; three orphaned rows from interrupted runs (rooms
+  already deleted) were removed by hand.
+- static: `tests/music-together.test.ts` (payload validation, clock offset,
+  anchor maths, seq ordering, host-only, topic name, migration contract: SELECT-
+  only topic policy, server `realtime.send`, RLS on all three tables, no table
+  grants, definers pin `search_path`, topic regex, json builder internal,
+  repair never raises 40001; client channel `private: true`, no client send,
+  presence via RPC). `npm run test:unit` **164/164**; lint 0 errors / 13
+  warnings (baseline); `next build` ok (`/music/together` listed).
+- client: player controls route to the session while joined (play/pause/seek/
+  next/previous = restart, Play Next/Add to Queue = enqueue, closing the player
+  leaves); local audio follows the shared playhead on every state and every
+  3 s while playing (re-seek beyond 1.5 s); the provider sits in the root
+  layout so sync continues outside `/music`; "Listening to …" heartbeat every
+  2 min while playing, cleared on pause/stop; friends shown on Music Home and
+  next to members in the room/group Members tab; privacy setting in Music
+  Settings; `/music/together` page.
+
+Limits: no browser run of Listen Together or presence (two signed-in tabs were
+not driven in this session), so the follow/drift/autoplay behaviour in a real
+browser is unverified; leaving or reloading the page drops out of a session
+(join again). Friends' listening is polled every 60 s (not pushed). Session rows
+are not removed when their room is deleted (no FK on the polymorphic target;
+unreadable since membership fails). Now-playing rows stay (one per user,
+filtered by age). Presence audience is friends only: room/group members who are
+not friends see nothing. Existing probes were not re-run.

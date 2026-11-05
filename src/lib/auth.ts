@@ -54,6 +54,8 @@ export function isAuthRequiredPath(pathname: string) {
   return (
     pathname === '/home' ||
     pathname === '/messages' ||
+    pathname === '/music' ||
+    pathname.startsWith('/music/') ||
     pathname === '/create-room' ||
     pathname === '/room' ||
     pathname.startsWith('/room/') ||

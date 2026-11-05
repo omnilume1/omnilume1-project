@@ -15,6 +15,7 @@ import {
   transferRoomOwnership,
 } from "@/actions/room-controls";
 import { useRoomRealtime } from "@/components/room/RoomRealtimeProvider";
+import { useFriendsListening } from "@/hooks/useFriendsListening";
 import { OmniIcon } from "@/components/ui/OmniIcon";
 import { getRoomTrustLevels } from "@/lib/management-data";
 import { TRUST_HINTS, TRUST_LABELS, type TrustLevel } from "@/lib/room-management-model";
@@ -184,6 +185,12 @@ export default function MembersTab({
     [memberStates],
   );
   const identityByUserId = useMemo(() => new Map(identities.map((identity) => [identity.user_id, identity])), [identities]);
+  // Friends only: the RPC applies the friendship, privacy and block rules.
+  const friendsListening = useFriendsListening();
+  const listeningByUserId = useMemo(
+    () => new Map(friendsListening.map((friend) => [friend.user_id, friend.artist ? `${friend.title} — ${friend.artist}` : friend.title])),
+    [friendsListening],
+  );
   const approvedMembers = members.filter(
     (member) => member.join_status === "approved",
   );
@@ -305,6 +312,7 @@ export default function MembersTab({
                         {realMemberLabel(identity, member.user_id)}
                       </span>
                       {identity?.room_display_name && identity.room_display_name !== realMemberLabel(identity, member.user_id) && <span className="block max-w-[180px] truncate text-[10px] text-violet-200">Room name: {identity.room_display_name}</span>}
+                      {listeningByUserId.get(member.user_id) && <span className="block max-w-[180px] truncate text-[10px] text-emerald-300" title={listeningByUserId.get(member.user_id)}>♪ Listening to {listeningByUserId.get(member.user_id)}</span>}
                       <span
                         className={`text-[10px] font-bold uppercase tracking-wider ${member.role === "owner" ? "text-amber-500" : member.role === "admin" ? "text-indigo-400" : "text-neutral-500"}`}
                       >
