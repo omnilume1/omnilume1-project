@@ -181,7 +181,9 @@ export function clearRoomRealtimeCache(roomId: string) {
 }
 
 const MEDIA_RESOLUTION_TTL_MS = 45 * 60 * 1000;
-const ROOM_MESSAGE_FIELDS = ['id', 'sender_id', 'content', 'is_deleted', 'created_at'] as const;
+// Room message columns relayed from the RLS-checked Postgres Changes feed
+// (edits, pins and reaction summaries are UPDATEs of the same row).
+const ROOM_MESSAGE_FIELDS = ['id', 'sender_id', 'content', 'is_deleted', 'created_at', 'edited_at', 'reply_to_id', 'pinned_at', 'pinned_by', 'reaction_summary'] as const;
 
 function asFiniteNumber(value: unknown, fallback: number) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;

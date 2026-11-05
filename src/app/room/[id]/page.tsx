@@ -485,7 +485,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         <div className="room-actions flex items-center gap-4">
           {userRole === 'owner' && roomData?.expiration_type === 'recoverable' && !roomData.reopened_until && <button onClick={() => setShowConvertModal(true)} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition">Upgrade to Group</button>}
           {roomData.reopened_until && <button onClick={handlePermanentRequest} disabled={permanentSubmitting || permanentRequests.some((request) => request.status === 'pending')} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition disabled:cursor-wait disabled:opacity-50">{permanentSubmitting ? 'Requesting...' : 'Request Permanent Room'}</button>}
-          <NotificationBell />
+          <NotificationBell roomId={roomData.id} />
           <button type="button" onClick={() => setShowControlCenter(true)} className="room-action room-action-controls"><OmniIcon name="settings" size={14} /><span>Controls</span></button>
           <button type="button" onClick={minimizeActiveRoom} className="room-action" title="Return to Rooms without leaving"><span aria-hidden="true">—</span><span>Minimize room</span></button>
           <button type="button" onClick={() => { setLeaveError(null); setShowLeaveConfirmation(true); }} data-room-leave className="room-action room-action-leave">Leave</button>

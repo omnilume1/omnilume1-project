@@ -5,6 +5,7 @@ import { getMyNotificationPreferences, getMyNotifications, markNotificationsRead
 import {
   activeDoNotDisturb,
   adjustUnread,
+  isRoomMuted,
   markItemsRead,
   mergeNotifications,
   type NotificationItem,
@@ -114,6 +115,16 @@ export function useNotificationCenter() {
     return true;
   }, []);
 
+  // Per-room mute (the server checks membership and applies it when
+  // notifications are written; access and security notices still arrive).
+  const setRoomMuted = useCallback(async (roomId: string, muted: boolean) => {
+    const result = await setNotificationPreference(roomId, muted, null);
+    if (!result.success) { setError(result.error); return false; }
+    const prefs = await getMyNotificationPreferences();
+    if (prefs.success) setPreferences(prefs.preferences);
+    return true;
+  }, []);
+
   return {
     userId,
     items,
@@ -124,5 +135,7 @@ export function useNotificationCenter() {
     markRead,
     doNotDisturb: activeDoNotDisturb(preferences),
     setDoNotDisturb,
+    isRoomMuted: (roomId: string) => isRoomMuted(preferences, roomId),
+    setRoomMuted,
   };
 }

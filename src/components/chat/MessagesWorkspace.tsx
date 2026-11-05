@@ -15,6 +15,7 @@ import {
   deriveSharedKey,
 } from '@/lib/encryption';
 import { saveUserPublicKey, getUserPublicKey, getOrCreatePrivateChat } from '@/actions/chat';
+import { unreadBadge } from '@/lib/room-chat-model';
 import {
   getMyMessageInbox,
   sendMessageRequest,
@@ -536,6 +537,9 @@ export default function MessagesWorkspace() {
             {group.description ? ` · ${group.description}` : ''}
           </small>
         </span>
+        {group.unread_count > 0 && (
+          <span className="chat-row-unread" aria-label={`${group.unread_count >= 100 ? '99+' : group.unread_count} unread messages`}>{unreadBadge(group.unread_count)}</span>
+        )}
         <OmniIcon name="chevron" size={15} className="chat-row-action" />
       </Link>
     );

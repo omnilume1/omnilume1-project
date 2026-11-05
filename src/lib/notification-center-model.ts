@@ -142,6 +142,13 @@ export function relativeTime(iso: string, now = Date.now()) {
 }
 
 // Active do-not-disturb (global preference whose end time has not passed).
+// A per-room mute is active until its end time (or until turned off).
+export function isRoomMuted(preferences: NotificationPreference[], roomId: string, now = Date.now()) {
+  const room = preferences.find((preference) => preference.room_id === roomId);
+  if (!room) return false;
+  return !room.muted_until || Date.parse(room.muted_until) > now;
+}
+
 export function activeDoNotDisturb(preferences: NotificationPreference[], now = Date.now()) {
   const global = preferences.find((preference) => preference.room_id === null);
   if (!global) return null;

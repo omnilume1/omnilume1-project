@@ -30,11 +30,13 @@ function subscribeReducedMotion(callback: () => void) {
 // not a modal: spring-like 180 ms enter from the bell, 120 ms exit, staggered
 // items, fade-only under reduced motion; Esc / outside click close it and
 // focus returns to the bell; arrow keys move between notifications.
-export default function NotificationBell() {
+export default function NotificationBell({ roomId }: { roomId?: string } = {}) {
   const center = useNotificationCenter();
   const [phase, setPhase] = useState<Phase>('closed');
   const [dndHours, setDndHours] = useState<string>('1');
   const [dndWorking, setDndWorking] = useState(false);
+  const [roomMuteWorking, setRoomMuteWorking] = useState(false);
+  const roomMuted = roomId ? center.isRoomMuted(roomId) : false;
   const reducedMotion = useSyncExternalStore(subscribeReducedMotion, () => window.matchMedia(reducedMotionQuery).matches, () => false);
   const motion = popoverMotion(reducedMotion);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -102,6 +104,13 @@ export default function NotificationBell() {
     setDndWorking(true);
     await center.setDoNotDisturb(!center.doNotDisturb, center.doNotDisturb ? null : (dndHours === 'off' ? null : Number(dndHours)));
     setDndWorking(false);
+  };
+
+  const toggleRoomMute = async () => {
+    if (!roomId) return;
+    setRoomMuteWorking(true);
+    await center.setRoomMuted(roomId, !roomMuted);
+    setRoomMuteWorking(false);
   };
 
   const badge = unreadBadgeText(center.unreadCount);
@@ -193,6 +202,18 @@ export default function NotificationBell() {
             )}
             {center.status === 'error' && center.items.length > 0 && <p role="alert" className="notification-popover-inline-error">{center.error}</p>}
           </div>
+
+          {roomId && (
+            <div className="notification-popover-footer notification-popover-room">
+              <div className="min-w-0">
+                <p className="notification-popover-footer-title">Mute this room</p>
+                <p className="notification-popover-hint">{roomMuted ? 'Muted: no mentions, replies or room updates from here.' : 'Stop notifications from this room only.'}</p>
+              </div>
+              <button type="button" role="switch" aria-checked={roomMuted} onClick={() => void toggleRoomMute()} disabled={roomMuteWorking} className={`notification-switch ${roomMuted ? 'is-on' : ''}`}>
+                <span className="sr-only">Mute this room</span>
+              </button>
+            </div>
+          )}
 
           <div className="notification-popover-footer">
             <div className="min-w-0">

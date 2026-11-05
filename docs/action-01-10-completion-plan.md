@@ -70,15 +70,15 @@ Commit after each section; typecheck + lint + tests before moving on.
       window, non-pending).
 
 ## 3. Notification system + bell
-- [ ] Typed notifications (extend `room_notifications`): type CHECK (mention,
+- [x] (38b1503) Typed notifications (extend `room_notifications`): type CHECK (mention,
       reply, announcement, pdf_shared, timer, recovery_request,
       recovery_decision, access, security, permanent_conversion), actor,
       entity, idempotency key; recipients may update `read_at` only.
-- [ ] DND/mute prefs (global + per room), applied server-side in the single
+- [x] (764bc0a) DND/mute prefs (global + per room), applied server-side in the single
       enqueue function; access/security/recovery never suppressed.
-- [ ] Unread count + mark read / mark all read (actions return values).
-- [ ] Live delivery over the existing per-user channel (publication add).
-- [ ] Bell popover (anchored, ~16px radius, spring-like 180ms enter / 120ms
+- [x] (764bc0a) Unread count + mark read / mark all read (actions return values).
+- [x] (764bc0a) Live delivery over the existing per-user channel (publication add).
+- [x] (764bc0a) Bell popover (anchored, ~16px radius, spring-like 180ms enter / 120ms
       exit, stagger, reduced-motion fade, mobile sheet, full a11y, states).
 - [ ] Tests: popover logic unit tests; RLS probe; two-account browser test +
       screenshot.

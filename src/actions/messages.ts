@@ -33,6 +33,9 @@ export interface InboxGroup {
   username: string | null;
   description: string | null;
   role: string;
+  // Unread room messages since this member last read the chat (capped at
+  // 100 by get_room_unread_counts; 0 when chat is unavailable).
+  unread_count: number;
 }
 
 export interface MessageInbox {
@@ -281,8 +284,19 @@ async function getMyMessageInboxImpl(): Promise<MessageInbox> {
       username: room.username,
       description: room.description,
       role: membership.role,
+      unread_count: 0,
     };
   }).filter((group): group is InboxGroup => group !== null);
+
+  if (groups.length > 0) {
+    const { data: unreadRows, error: unreadError } = await supabase.rpc('get_room_unread_counts', {
+      p_room_ids: groups.slice(0, 200).map((group) => group.room_id),
+    });
+    if (!unreadError && Array.isArray(unreadRows)) {
+      const unreadByRoom = new Map((unreadRows as Array<{ room_id: string; unread_count: number }>).map((row) => [row.room_id, Number(row.unread_count) || 0]));
+      for (const group of groups) group.unread_count = unreadByRoom.get(group.room_id) ?? 0;
+    }
+  }
 
   return { friends, groups, general };
 }

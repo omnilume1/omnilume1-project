@@ -26,6 +26,8 @@ export type OmniIconName =
   | 'trash'
   | 'sun'
   | 'camera'
+  | 'pin'
+  | 'smile'
   | 'pen'
   | 'at'
   | 'reply'
@@ -61,6 +63,8 @@ const paths: Record<OmniIconName, ReactNode> = {
   megaphone: <><path d="M4 10v4h3l7 4V6l-7 4H4Z" /><path d="M18 9a4 4 0 0 1 0 6M7 14l1.5 5h2.5l-1-5" /></>,
   pen: <><path d="M4 20l4-1L19 8l-3-3L5 16z" /><path d="M14 6l3 3M4 20h16" /></>,
   camera: <><path d="M4 8h3l1.3-2h7.4L17 8h3v11H4z" /><circle cx="12" cy="13.5" r="3.25" /></>,
+  pin: <><path d="M9 4h6l-1 6 3 3v1H7v-1l3-3z" /><path d="M12 14v6" /></>,
+  smile: <><circle cx="12" cy="12" r="8.5" /><path d="M8.5 14a4 4 0 0 0 7 0" /><path d="M9.5 9.5h.01M14.5 9.5h.01" /></>,
 };
 
 export function OmniIcon({ name, size = 18, strokeWidth = 1.6, ...props }: SVGProps<SVGSVGElement> & { name: OmniIconName; size?: number; strokeWidth?: number }) {
