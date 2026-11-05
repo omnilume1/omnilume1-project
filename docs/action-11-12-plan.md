@@ -56,31 +56,31 @@ watch/watch_control capabilities, A10 metadata.
 Exists: StudyStage (shared timer, Focus Lock, study_sessions history),
 study_notes (versioned), whiteboard (versioned), PDF annotations, scheduled
 rooms, notifications, owner controls.
-- [ ] 12.1 Live notes (shared notes update live; editing presence).
-- [ ] 12.2 Collaborative docs (note version history, restore, read-only).
-- [ ] 12.3 Whiteboard cursors (ephemeral, throttled, named).
-- [ ] 12.4 Voice with owner mute (P2P WebRTC mesh, signaling on a private
-      capability-scoped topic; owner/managers mute; listeners enforce).
-- [ ] 12.5 Screen sharing (explicit start, visible indicator, stop;
-      capability-gated).
-- [ ] 12.6 Raise hand (queue; managers lower).
-- [ ] 12.7 Polls (create, vote once, close, results).
-- [ ] 12.8 Countdowns (shared event timer).
-- [ ] 12.9 Manual tasks/action items (assign, due, done; notify assignee).
-- [ ] 12.10 Room events (schedule, notify members, upcoming list).
-- [ ] 12.11 Study history (streaks, totals, longest, per subject) + study
-      music (compact player on the shared queue).
-- [ ] 12.12 YouTube/lecture video resources (save, watch together,
-      continue watching, timestamped notes).
-- [ ] 12.13 Consented recording (all participants consent; stored with
+- [x] 12.1 Live notes (shared notes update live; editing presence). (`aebdc39`)
+- [x] 12.2 Collaborative docs (note version history, restore, read-only). (`aebdc39`)
+- [x] 12.3 Whiteboard cursors (ephemeral, throttled, named). (`aebdc39`)
+- [x] 12.4 Voice with owner mute (P2P WebRTC mesh, signaling on a private
+      capability-scoped topic; owner/managers mute; listeners enforce). (`aebdc39`)
+- [x] 12.5 Screen sharing (explicit start, visible indicator, stop;
+      capability-gated). (`aebdc39`)
+- [x] 12.6 Raise hand (queue; managers lower). (`aebdc39`)
+- [x] 12.7 Polls (create, vote once, close, results). (`aebdc39`)
+- [x] 12.8 Countdowns (shared event timer). (`aebdc39`)
+- [x] 12.9 Manual tasks/action items (assign, due, done; notify assignee). (`aebdc39`)
+- [x] 12.10 Room events (schedule, notify members, upcoming list). (`aebdc39`)
+- [x] 12.11 Study history (streaks, totals, longest, per subject) + study
+      music (compact player on the shared queue). (`aebdc39`)
+- [x] 12.12 YouTube/lecture video resources (save, watch together,
+      continue watching, timestamped notes). (`aebdc39`)
+- [x] 12.13 Consented recording (all participants consent; stored with
       retention) + manual transcript (automatic transcription is AI →
-      Action 17).
-- [ ] 12.14 Searchable history (messages, notes, tasks, polls, events,
-      clips, transcripts; capability-scoped).
-- [ ] 12.15 Timer-created owner notification (roadmap feature list, tagged
-      12; built in Action 08 — verify two-user).
-- [ ] 12.16 Shared PDFs (roadmap feature list, tagged 10/12): present /
-      follow page, live annotations.
-- [ ] 12.17 Scheduled rooms (feature list, tagged 12): already shipped in
-      earlier actions; no Action 12 change (recorded, not re-built).
-- [ ] Probes, dry run, push, two-account browser (desktop + mobile), ledger.
+      Action 17). (`aebdc39`)
+- [x] 12.14 Searchable history (messages, notes, tasks, polls, events,
+      clips, transcripts; capability-scoped). (`aebdc39`)
+- [x] 12.15 Timer-created owner notification (roadmap feature list, tagged
+      12; built in Action 08 — verify two-user). (`aebdc39`)
+- [x] 12.16 Shared PDFs (roadmap feature list, tagged 10/12): present /
+      follow page, live annotations. (`aebdc39`)
+- [x] 12.17 Scheduled rooms (feature list, tagged 12): already shipped in
+      earlier actions; no Action 12 change (recorded, not re-built). (`aebdc39`)
+- [x] Probes, dry run, push, two-account browser (desktop + mobile), ledger. (`aebdc39`)
