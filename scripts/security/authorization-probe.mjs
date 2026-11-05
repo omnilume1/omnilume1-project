@@ -387,6 +387,65 @@ async function fullPhase() {
     const memberSubtitleUrl = memberSubtitleRow.data?.subtitle_path ? await B.client.storage.from(BUCKET).createSignedUrl(memberSubtitleRow.data.subtitle_path, 60) : { error: { code: 'no_subtitle' } };
     record('D8', 'member resolves the subtitle under RLS (resolveRoomMedia path)', memberSubtitleRow.data?.subtitle_path === subtitlePath && !memberSubtitleUrl.error, `${codeOf(memberSubtitleRow)}/${codeOf(memberSubtitleUrl)}`);
 
+    // ---- A10: whiteboard, study notes, PDF notes and the permanent file
+    // library (main's Actions 09-10 build, reconciled 2026-11-05).
+    const boardBefore = await B.client.rpc('get_room_whiteboard', { p_room_id: R1 });
+    const boardVersion = Number((Array.isArray(boardBefore.data) ? boardBefore.data[0] : boardBefore.data)?.version ?? 0);
+    const boardState = { v: 2, elements: [{ id: `qa-${randomUUID().slice(0, 8)}`, kind: 'rect', x: 1, y: 1, w: 10, h: 10, color: '#818cf8', width: 2 }], legacyImage: null };
+    const memberBoard = await B.client.rpc('save_room_whiteboard', { p_room_id: R1, p_expected_version: boardVersion, p_state: boardState });
+    const savedBoard = Array.isArray(memberBoard.data) ? memberBoard.data[0] : memberBoard.data;
+    record('A10', 'member B saves the shared whiteboard', !memberBoard.error && Number(savedBoard?.version) === boardVersion + 1, `${codeOf(memberBoard)} v${savedBoard?.version ?? '?'}`);
+    const staleBoard = await A.client.rpc('save_room_whiteboard', { p_room_id: R1, p_expected_version: boardVersion, p_state: { v: 2, elements: [], legacyImage: null } });
+    record('A10', 'stale whiteboard version is rejected (no silent overwrite)', Boolean(staleBoard.error) && /expected version/i.test(staleBoard.error?.message ?? ''), codeOf(staleBoard));
+    const ownerBoard = await A.client.rpc('get_room_whiteboard', { p_room_id: R1 });
+    const ownerBoardRow = Array.isArray(ownerBoard.data) ? ownerBoard.data[0] : ownerBoard.data;
+    record('A10', 'owner A reads the member\'s whiteboard save', !ownerBoard.error && ownerBoardRow?.state?.elements?.[0]?.id === boardState.elements[0].id, codeOf(ownerBoard));
+    const outsiderBoard = await newClient().rpc('get_room_whiteboard', { p_room_id: R1 });
+    record('A10', 'anon cannot read the whiteboard', Boolean(outsiderBoard.error) || rowsOf(outsiderBoard) === 0 || !(Array.isArray(outsiderBoard.data) ? outsiderBoard.data[0] : outsiderBoard.data)?.state, codeOf(outsiderBoard));
+
+    const personal = await A.client.rpc('create_study_note', { p_room_id: R1, p_scope: 'personal', p_title: 'qa personal', p_content: 'qa' });
+    const personalRow = Array.isArray(personal.data) ? personal.data[0] : personal.data;
+    const roomNote = await A.client.rpc('create_study_note', { p_room_id: R1, p_scope: 'room', p_title: 'qa room', p_content: 'qa' });
+    const roomNoteRow = Array.isArray(roomNote.data) ? roomNote.data[0] : roomNote.data;
+    const memberNoteList = await B.client.rpc('list_study_notes', { p_room_id: R1 });
+    const memberNoteIds = (memberNoteList.data ?? []).map((note) => note.id);
+    record('A10', 'member B sees the owner\'s room-scope note', !memberNoteList.error && memberNoteIds.includes(roomNoteRow?.id), codeOf(memberNoteList));
+    record('A10', 'member B does not see the owner\'s personal note', !memberNoteList.error && Boolean(personalRow?.id) && !memberNoteIds.includes(personalRow.id), `${codeOf(personal)}/${codeOf(memberNoteList)}`);
+    const personalTamper = personalRow?.id ? await B.client.rpc('update_study_note', { p_note_id: personalRow.id, p_expected_version: personalRow.version ?? 1, p_title: 'x', p_content: 'x' }) : { error: { code: 'no_note' } };
+    record('A10', 'member B cannot edit the owner\'s personal note', Boolean(personalTamper.error), codeOf(personalTamper));
+    const roomNoteEdit = roomNoteRow?.id ? await B.client.rpc('update_study_note', { p_note_id: roomNoteRow.id, p_expected_version: roomNoteRow.version ?? 1, p_title: 'qa room edited', p_content: 'qa' }) : { error: { code: 'no_note' } };
+    record('A10', 'member B can edit a room-scope note with the current version', !roomNoteEdit.error, codeOf(roomNoteEdit));
+    const roomNoteStale = roomNoteRow?.id ? await A.client.rpc('update_study_note', { p_note_id: roomNoteRow.id, p_expected_version: roomNoteRow.version ?? 1, p_title: 'stale', p_content: 'stale' }) : { error: { code: 'no_note' } };
+    record('A10', 'stale room-note version is rejected', Boolean(roomNoteStale.error), codeOf(roomNoteStale));
+
+    const pdfPath = `${R1}/files/${randomUUID()}.pdf`;
+    const pdfBody = new Blob(['%PDF-1.4\n%qa\n'], { type: 'application/pdf' });
+    const pdfUpload = await A.client.storage.from(BUCKET).upload(pdfPath, pdfBody, { contentType: 'application/pdf', upsert: false });
+    const registeredFile = await A.client.rpc('register_room_file', { p_room_id: R1, p_object_path: pdfPath, p_original_name: 'qa.pdf', p_normalized_name: 'qa.pdf', p_mime_type: 'application/pdf', p_size_bytes: pdfBody.size, p_metadata: {} });
+    const fileRow = Array.isArray(registeredFile.data) ? registeredFile.data[0] : registeredFile.data;
+    record('A10', 'owner uploads and registers a permanent room PDF', !pdfUpload.error && !registeredFile.error && Boolean(fileRow?.id), `${codeOf(pdfUpload)}/${codeOf(registeredFile)}`);
+    const memberFiles = await B.client.rpc('list_room_files', { p_room_id: R1 });
+    record('A10', 'member B lists the room file library', !memberFiles.error && (memberFiles.data ?? []).some((file) => file.id === fileRow?.id), codeOf(memberFiles));
+    const memberPath = fileRow?.id ? await B.client.rpc('get_room_file_download_path', { p_file_id: fileRow.id }) : { error: { code: 'no_file' } };
+    record('A10', 'member B gets the download path for a room file', !memberPath.error && memberPath.data === pdfPath, codeOf(memberPath));
+    const annotation = fileRow?.id ? await B.client.rpc('create_pdf_annotation', { p_file_id: fileRow.id, p_page_number: 1, p_position: { source: 'qa' }, p_content: 'qa annotation' }) : { error: { code: 'no_file' } };
+    const annotationRow = Array.isArray(annotation.data) ? annotation.data[0] : annotation.data;
+    record('A10', 'member B annotates the shared PDF', !annotation.error && Boolean(annotationRow?.id), codeOf(annotation));
+    const foreignAnnotationDelete = annotationRow?.id ? await A.client.rpc('delete_pdf_annotation', { p_annotation_id: annotationRow.id }) : { error: { code: 'no_annotation' } };
+    const annotationsAfter = fileRow?.id ? await A.client.rpc('list_pdf_annotations', { p_file_id: fileRow.id }) : { data: [] };
+    const annotationKept = (annotationsAfter.data ?? []).some((item) => item.id === annotationRow?.id);
+    info('A10', 'owner deleting a member\'s PDF annotation', `${codeOf(foreignAnnotationDelete)} kept=${annotationKept}`);
+    const memberFileDelete = fileRow?.id ? await B.client.rpc('begin_room_file_delete', { p_file_id: fileRow.id }) : { error: { code: 'no_file' } };
+    record('A10', 'member B (no admin role) cannot delete a room file', Boolean(memberFileDelete.error), codeOf(memberFileDelete));
+
+    // ---- A04/A06: database-only functions added by 20261105120000.
+    for (const [name, args] of [['destroy_expired_room', { p_room_id: R1 }], ['list_rooms_due_for_destruction', { p_limit: 1 }]]) {
+      const asMember = await B.client.rpc(name, args);
+      record('A06', `authenticated EXECUTE ${name} denied`, Boolean(asMember.error) && (asMember.error.code === '42501' || asMember.error.code === 'PGRST202'), codeOf(asMember));
+      const asAnon = await newClient().rpc(name, args);
+      record('A06', `anon EXECUTE ${name} denied`, Boolean(asAnon.error) && (asAnon.error.code === '42501' || asAnon.error.code === 'PGRST202'), codeOf(asAnon));
+    }
+
     // ---- D6: `files` deletion through room_file_owned_by_caller (20261105090000).
     const tinyPdf = () => new Blob(['%PDF-1.4\n%qa\n'], { type: 'application/pdf' });
     const registerFile = async (actor, label) => {

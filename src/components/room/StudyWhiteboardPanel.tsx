@@ -406,7 +406,12 @@ export default function StudyWhiteboardPanel({ roomId }: { roomId: string }) {
   const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (editor) { commitEditor(); return; }
     containerRef.current?.focus({ preventScroll: true });
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // A pointer the browser no longer treats as active (some assistive or
+      // synthesized input) cannot be captured; drawing still works without it.
+    }
     pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
     if (pointersRef.current.size === 2) {
