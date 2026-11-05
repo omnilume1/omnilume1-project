@@ -57,7 +57,8 @@ test('cleanup destroys only rooms the database re-confirms, and only via service
   assert.match(sql, /REVOKE ALL ON FUNCTION public\.destroy_expired_room\(uuid\) FROM PUBLIC, anon, authenticated;/);
   assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.destroy_expired_room\(uuid\) TO service_role;/);
 
-  const route = read('src/app/api/internal/cleanup-expired-rooms/route.ts');
+  assert.match(read('src/app/api/internal/cleanup-expired-rooms/route.ts'), /cleanupDestroyedRooms\(supabase, now\)/);
+  const route = read('src/lib/room-cleanup.ts');
   assert.match(route, /rpc\('list_rooms_due_for_destruction'/);
   // Storage first, then the locked, re-checked delete.
   assert.ok(route.indexOf('removeStorageFiles(supabase, storagePaths)') < route.indexOf("rpc('destroy_expired_room'"));

@@ -9,11 +9,19 @@ export type StorageObjectMetadata = {
   updatedAt: string | null;
 };
 
+// Reads inclusive byte ranges of one stored object (for example to parse a
+// media file's embedded tags without downloading all of it).
+export type StorageRangeReader = (start: number, endInclusive: number) => Promise<Uint8Array>;
+
+// Largest single range a reader returns.
+export const MAX_STORAGE_RANGE_BYTES = 4 * 1024 * 1024 + 64;
+
 export interface ServerStorageProvider {
   readonly name: 'supabase';
   readonly supportsResumableUpload: false;
   upload(bucket: string, path: string, file: File): Promise<StorageObjectMetadata>;
   createSignedDownloadUrl(bucket: string, path: string, expiresInSeconds: number): Promise<string>;
+  openRangeReader(bucket: string, path: string): Promise<StorageRangeReader>;
   delete(bucket: string, path: string): Promise<void>;
   getMetadata(bucket: string, path: string): Promise<StorageObjectMetadata | null>;
   exists(bucket: string, path: string): Promise<boolean>;
@@ -61,6 +69,26 @@ class SupabaseStorageProvider implements ServerStorageProvider {
     const { data, error } = await admin.storage.from(bucket).createSignedUrl(path, expiresInSeconds);
     if (error || !data?.signedUrl) throw new Error(error?.message || 'Unable to create a private download URL.');
     return data.signedUrl;
+  }
+
+  // Provider-neutral: a short-lived signed URL plus standard HTTP Range
+  // requests, which any object store with signed URLs supports.
+  async openRangeReader(bucket: string, path: string): Promise<StorageRangeReader> {
+    const url = await this.createSignedDownloadUrl(bucket, path, 120);
+    return async (start: number, endInclusive: number) => {
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(endInclusive) || start < 0 || endInclusive < start || endInclusive - start + 1 > MAX_STORAGE_RANGE_BYTES) {
+        throw new Error('Invalid byte range.');
+      }
+      const response = await fetch(url, {
+        headers: { Range: `bytes=${start}-${endInclusive}` },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (response.status !== 206 && response.status !== 200) throw new Error('Unable to read the stored file.');
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      // A server that ignores Range returns the whole object.
+      return response.status === 200 ? bytes.subarray(start, endInclusive + 1) : bytes.subarray(0, endInclusive - start + 1);
+    };
   }
 
   async delete(bucket: string, path: string) {

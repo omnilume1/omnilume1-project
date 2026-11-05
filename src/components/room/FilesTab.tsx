@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cleanupUnregisteredTemporaryMedia, getActiveTemporaryMedia, logTemporaryMedia, resolveRoomMedia } from '@/actions/media';
 import { cleanupUnregisteredRoomFile, deleteRoomFile, getRoomFileDownloadUrl, listRoomFiles, registerRoomFile, type RoomFileRow } from '@/actions/room-files';
@@ -41,9 +42,10 @@ export default function FilesTab({ roomId, currentUserRole, canControlMedia = fa
     else if (result.error) setError(result.error);
   }, [roomId]);
 
+  // Only the first load shows the loading state; background refreshes keep
+  // the current list on screen instead of flashing "Loading files…".
   const loadFiles = useCallback(async () => {
-    setLoadingFiles(true);
-    try { setFiles(await listRoomFiles(roomId)); }
+    try { setFiles(await listRoomFiles(roomId).then(unwrapAction)); }
     catch (loadError) { setError(loadError instanceof Error ? loadError.message : 'Unable to load room files.'); }
     finally { setLoadingFiles(false); }
   }, [roomId]);
@@ -76,7 +78,7 @@ export default function FilesTab({ roomId, currentUserRole, canControlMedia = fa
       await task.promise;
       setUpload((current) => current ? { ...current, loaded: current.total, percent: 100, phase: 'registering' } : current);
       if (kind === 'file') {
-        await registerRoomFile({ roomId, objectPath: filePath, fileName: checked.fileName, mimeType: checked.mimeType, size: checked.size });
+        await registerRoomFile({ roomId, objectPath: filePath, fileName: checked.fileName, mimeType: checked.mimeType, size: checked.size }).then(unwrapAction);
         await loadFiles();
       } else {
         const mediaType = checked.mimeType.startsWith('audio/') ? 'audio' : 'video';
@@ -86,7 +88,7 @@ export default function FilesTab({ roomId, currentUserRole, canControlMedia = fa
       }
     } catch (uploadError) {
       const message = uploadError instanceof Error ? uploadError.message : 'Upload failed.';
-      const cleanup = kind === 'file' ? cleanupUnregisteredRoomFile(roomId, filePath) : cleanupUnregisteredTemporaryMedia(roomId, filePath, 'media');
+      const cleanup = kind === 'file' ? cleanupUnregisteredRoomFile(roomId, filePath).then(unwrapAction) : cleanupUnregisteredTemporaryMedia(roomId, filePath, 'media');
       await cleanup.catch(() => undefined);
       setFailedUpload({ file, kind, message }); setError(message);
     } finally { activeTask.current = null; setUpload(null); }
@@ -108,11 +110,11 @@ export default function FilesTab({ roomId, currentUserRole, canControlMedia = fa
     broadcastEvent('cast', { url: resolved.media.url, title: resolved.media.title, subtitleUrl: resolved.media.subtitleUrl, sourceType: resolved.media.sourceType, mediaId: media.id, speed: 1, playing: true });
   };
   const downloadFile = async (file: RoomFileRow) => {
-    try { const { url } = await getRoomFileDownloadUrl(file.id); window.open(url, '_blank', 'noopener,noreferrer'); }
+    try { const { url } = await getRoomFileDownloadUrl(file.id).then(unwrapAction); window.open(url, '_blank', 'noopener,noreferrer'); }
     catch (downloadError) { setError(downloadError instanceof Error ? downloadError.message : 'Unable to download this file.'); }
   };
   const removeFile = async (file: RoomFileRow) => {
-    try { await deleteRoomFile(file.id); await loadFiles(); }
+    try { await deleteRoomFile(file.id).then(unwrapAction); await loadFiles(); }
     catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete this file.'); }
   };
 

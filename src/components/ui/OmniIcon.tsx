@@ -26,7 +26,12 @@ export type OmniIconName =
   | 'trash'
   | 'sun'
   | 'camera'
-  | 'pen';
+  | 'pin'
+  | 'smile'
+  | 'pen'
+  | 'at'
+  | 'reply'
+  | 'megaphone';
 
 const paths: Record<OmniIconName, ReactNode> = {
   home: <><path d="m3 10 9-7 9 7" /><path d="M5 9v11h14V9" /><path d="M9 20v-6h6v6" /></>,
@@ -53,8 +58,13 @@ const paths: Record<OmniIconName, ReactNode> = {
   logout: <><path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4M14 16l4-4-4-4M18 12H9" /></>,
   trash: <><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></>,
   sun: <><circle cx="12" cy="12" r="3.5" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
+  at: <><circle cx="12" cy="12" r="3.5" /><path d="M15.5 12v1.5a2.5 2.5 0 0 0 5 0V12a8.5 8.5 0 1 0-3.4 6.8" /></>,
+  reply: <><path d="M9 7 4 12l5 5" /><path d="M4 12h10a6 6 0 0 1 6 6v1" /></>,
+  megaphone: <><path d="M4 10v4h3l7 4V6l-7 4H4Z" /><path d="M18 9a4 4 0 0 1 0 6M7 14l1.5 5h2.5l-1-5" /></>,
   pen: <><path d="M4 20l4-1L19 8l-3-3L5 16z" /><path d="M14 6l3 3M4 20h16" /></>,
   camera: <><path d="M4 8h3l1.3-2h7.4L17 8h3v11H4z" /><circle cx="12" cy="13.5" r="3.25" /></>,
+  pin: <><path d="M9 4h6l-1 6 3 3v1H7v-1l3-3z" /><path d="M12 14v6" /></>,
+  smile: <><circle cx="12" cy="12" r="8.5" /><path d="M8.5 14a4 4 0 0 0 7 0" /><path d="M9.5 9.5h.01M14.5 9.5h.01" /></>,
 };
 
 export function OmniIcon({ name, size = 18, strokeWidth = 1.6, ...props }: SVGProps<SVGSVGElement> & { name: OmniIconName; size?: number; strokeWidth?: number }) {

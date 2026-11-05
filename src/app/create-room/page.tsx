@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -23,7 +24,7 @@ export default function CreateRoomPage() {
       const formData = new FormData(e.currentTarget);
       const policy = isTemp ? (allowRecovery ? 'recoverable' : 'irreversible') : 'permanent';
       formData.append('expiration_type', policy);
-      const roomId = await createRoom(formData);
+      const roomId = await createRoom(formData).then(unwrapAction);
       router.push(`/room/${roomId}`);
     } catch (error: unknown) {
       alert(error instanceof Error ? error.message : "Failed to create room.");

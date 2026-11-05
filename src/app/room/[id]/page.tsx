@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useState, use, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -14,13 +15,10 @@ import { convertRoomToGroup } from '@/actions/rooms';
 import {
   getPermanentRoomRequests,
   getRecoveryRequestStatus,
-  getRoomRecoveryRequests,
   requestPermanentRoom,
   requestRoomRecovery,
   reviewPermanentRoomRequest,
-  reviewRoomRecovery,
   type PermanentRoomRequest,
-  type RecoveryRequest,
   type RecoveryRequestStatus,
 } from '@/actions/recovery';
 import RoomRealtimeProvider from '@/components/room/RoomRealtimeProvider';
@@ -30,6 +28,7 @@ import RoomEntryPrompts from '@/components/room/RoomEntryPrompts';
 import RoomAnnouncementBanner from '@/components/room/RoomAnnouncementBanner';
 import RoomRoleChangeNotification from '@/components/room/RoomRoleChangeNotification';
 import FloatingDock from '@/components/ui/FloatingDock';
+import NotificationBell from '@/components/ui/NotificationBell';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import { leaveRoom, transferRoomOwnership } from '@/actions/room-controls';
 import { getRoomMembersList } from '@/actions/members';
@@ -39,6 +38,28 @@ import { clearFocusLock } from '@/lib/focus-lock';
 import { isRoomExpired } from '@/lib/room-lifecycle';
 import { roomWorkspacePreferenceKey } from '@/lib/room-workspace-preferences';
 import { minimizeRoom } from '@/lib/minimized-rooms';
+import RoomDashboard from '@/components/room/RoomDashboard';
+import {
+  DEFAULT_ROOM_APPEARANCE,
+  HOME_CHAT_WIDTH,
+  ROOM_LAYOUTS,
+  ROOM_LAYOUT_DETAILS,
+  ROOM_THEMES,
+  ROOM_THEME_LABELS,
+  clampHomeChatWidth,
+  effectiveActivity,
+  effectiveLayout,
+  effectiveTheme,
+  effectiveTool,
+  isRoomLayout,
+  isRoomTheme,
+  sidePanelState,
+  type RoomActivity,
+  type RoomAppearance,
+  type RoomLayout,
+  type RoomTheme,
+  type RoomTool,
+} from '@/lib/room-layout';
 
 type AccessStatus = 'loading' | 'approved' | 'pending' | 'expired' | 'recovery_window' | 'guest_expired' | 'scheduled' | 'not_found' | 'unauthorized' | 'public_not_joined' | 'private_not_joined' | 'blocked' | 'banned' | 'kicked';
 
@@ -53,6 +74,7 @@ type RoomData = {
   reopened_until?: string | null;
   scheduled_for?: string | null;
   is_group?: boolean;
+  deletion_scheduled_at?: string | null;
 };
 
 type RoomFeature = 'chat' | 'watch' | 'files' | 'study' | 'announcements';
@@ -86,7 +108,6 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryRequestStatus | 'none'>('none');
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
-  const [recoveryRequests, setRecoveryRequests] = useState<RecoveryRequest[]>([]);
   const [permanentRequests, setPermanentRequests] = useState<PermanentRoomRequest[]>([]);
   const [permanentSubmitting, setPermanentSubmitting] = useState(false);
   const [lifecycleActionError, setLifecycleActionError] = useState<string | null>(null);
@@ -110,6 +131,20 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [presenceRefreshVersion, setPresenceRefreshVersion] = useState(0);
   const [controlCenterTab, setControlCenterTab] = useState<'user-control' | 'profile' | null>(null);
   const [controlCenterMemberId, setControlCenterMemberId] = useState<string | null>(null);
+  // Action 09: owner-controlled appearance plus this member's own preset,
+  // theme and panel sizes (browser storage keyed by room and user).
+  const [appearance, setAppearance] = useState<RoomAppearance>(DEFAULT_ROOM_APPEARANCE);
+  const [personalLayout, setPersonalLayout] = useState<RoomLayout | null>(null);
+  const [personalTheme, setPersonalTheme] = useState<RoomTheme | null>(null);
+  const [homeChatWidth, setHomeChatWidth] = useState<number>(HOME_CHAT_WIDTH.initial);
+  // The panel a member opened on demand belongs to the layout it was opened
+  // in, so choosing Stage focus always starts with the stage filling the room.
+  const [stageChatOpenLayout, setStageChatOpenLayout] = useState<RoomLayout | null>(null);
+  const [showLayoutMenu, setShowLayoutMenu] = useState(false);
+  const workspacePreferencesLoadedRef = useRef<string | null>(null);
+  const workspaceModeRef = useRef<'home' | 'stage'>('home');
+  const sideInnerRef = useRef<HTMLDivElement>(null);
+  const layoutMenuRef = useRef<HTMLDivElement>(null);
 
   // ==========================================
   // DRAGGABLE SIDEBAR STATE
@@ -121,6 +156,12 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging) return;
+      if (workspaceModeRef.current === 'home') {
+        // The home chat is centred, so its edge moves half as far as its width.
+        const area = sideInnerRef.current?.parentElement?.getBoundingClientRect();
+        if (area) setHomeChatWidth(clampHomeChatWidth(Math.abs(e.clientX - (area.left + area.width / 2)) * 2));
+        return;
+      }
       const newWidth = document.body.clientWidth - e.clientX;
       setSidebarWidth(clampSidebarWidth(newWidth));
     };
@@ -150,7 +191,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     if (!target) return alert("Please provide a group username.");
     setConverting(true);
     try {
-      await convertRoomToGroup(roomData.id, groupUsername);
+      await convertRoomToGroup(roomData.id, groupUsername).then(unwrapAction);
       setConverting(false);
       setShowConvertModal(false);
       setConversionTarget(target);
@@ -183,7 +224,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   useEffect(() => {
     async function checkAccess() {
       try {
-        const { status, role, room } = await getRoomAccess(identifier);
+        const { status, role, room } = await getRoomAccess(identifier).then(unwrapAction);
         setAccessStatus(status as AccessStatus);
         setUserRole(role);
         if (room) {
@@ -250,16 +291,6 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   }, [accessStatus, isExpired, roomData]);
 
   useEffect(() => {
-    if (!roomData || !['owner', 'admin'].includes(userRole ?? '') || (!isExpired && accessStatus !== 'expired')) return;
-
-    let cancelled = false;
-    void getRoomRecoveryRequests(roomData.id).then((result) => {
-      if (!cancelled && result.success) setRecoveryRequests(result.requests ?? []);
-    });
-    return () => { cancelled = true; };
-  }, [accessStatus, isExpired, roomData, userRole]);
-
-  useEffect(() => {
     if (!roomData?.reopened_until || isExpired || accessStatus === 'expired') return;
 
     let cancelled = false;
@@ -283,15 +314,6 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     setRecoverySubmitting(false);
   };
 
-  const handleRecoveryReview = async (requestId: string, decision: 'approved' | 'rejected') => {
-    setLifecycleActionError(null);
-    const result = await reviewRoomRecovery(requestId, decision);
-    if (!result.success) {
-      setLifecycleActionError(result.error ?? 'Unable to review recovery request.');
-      return;
-    }
-    window.location.reload();
-  };
 
   const handlePermanentRequest = async () => {
     if (!roomData || permanentSubmitting) return;
@@ -316,8 +338,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     window.location.reload();
   };
 
-  const [mainActivity, setMainActivity] = useState<'watch' | 'study' | 'whiteboard'>('watch');
-  const [activeTool, setActiveTool] = useState<'chat' | 'members' | 'files' | 'notes' | 'timer'>('chat');
+  const [mainActivity, setMainActivity] = useState<RoomActivity>('home');
+  const [activeTool, setActiveTool] = useState<RoomTool>('chat');
   const [timerNavigationRequest, setTimerNavigationRequest] = useState(0);
   const roomIsExpired = accessStatus === 'expired' || isExpired;
   const realtimeRoomId = accessStatus === 'approved' && !roomIsExpired ? (roomData?.id ?? '') : '';
@@ -342,6 +364,48 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     if (!sidebarPreferenceKey || sidebarPreferenceLoadedKeyRef.current !== sidebarPreferenceKey) return;
     window.localStorage.setItem(sidebarPreferenceKey, String(sidebarWidth));
   }, [sidebarPreferenceKey, sidebarWidth]);
+  const layoutPreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'layout');
+  const themePreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'theme');
+  const homeChatPreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'home-chat-width');
+  useEffect(() => {
+    workspacePreferencesLoadedRef.current = null;
+    const timer = window.setTimeout(() => {
+      const readValue = (key: string | null) => (key ? window.localStorage.getItem(key) : null);
+      const savedLayout = readValue(layoutPreferenceKey);
+      const savedTheme = readValue(themePreferenceKey);
+      const savedWidth = Number(readValue(homeChatPreferenceKey));
+      setPersonalLayout(isRoomLayout(savedLayout) ? savedLayout : null);
+      setPersonalTheme(isRoomTheme(savedTheme) ? savedTheme : null);
+      setHomeChatWidth(Number.isFinite(savedWidth) && savedWidth > 0 ? clampHomeChatWidth(savedWidth) : HOME_CHAT_WIDTH.initial);
+      workspacePreferencesLoadedRef.current = layoutPreferenceKey;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [homeChatPreferenceKey, layoutPreferenceKey, themePreferenceKey]);
+  useEffect(() => {
+    if (!layoutPreferenceKey || workspacePreferencesLoadedRef.current !== layoutPreferenceKey) return;
+    const write = (key: string | null, value: string | null) => {
+      if (!key) return;
+      if (value === null) window.localStorage.removeItem(key);
+      else window.localStorage.setItem(key, value);
+    };
+    write(layoutPreferenceKey, personalLayout);
+    write(themePreferenceKey, personalTheme);
+    write(homeChatPreferenceKey, String(homeChatWidth));
+  }, [homeChatPreferenceKey, homeChatWidth, layoutPreferenceKey, personalLayout, personalTheme, themePreferenceKey]);
+  useEffect(() => {
+    if (!showLayoutMenu) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && layoutMenuRef.current?.contains(event.target)) return;
+      setShowLayoutMenu(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setShowLayoutMenu(false); };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [showLayoutMenu]);
   useEffect(() => {
     const currentUserId = roomSync.currentUserId;
     const removed = roomSync.roomControlEvents.find((event) => event.subjectUserId === currentUserId && ((event.eventType === 'membership_changed' && event.payload.action === 'kick') || (event.eventType === 'restriction_changed' && (event.payload.action === 'ban' || event.payload.action === 'block'))));
@@ -360,8 +424,22 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   }, [roomData?.id, roomSync.currentUserId, roomSync.roomControlEvents, router]);
   const focusRoomPath = `/room/${encodeURIComponent(identifier)}`;
   const featureEnabled = (feature: RoomFeature) => featureFlags[feature] !== false;
-  const handleControlStateChange = useCallback(({ featureFlags: nextFlags, canManageMembers: nextCanManageMembers, canControlMedia: nextCanControlMedia }: { featureFlags: Partial<Record<RoomFeature, boolean>>; canManageMembers: boolean; canControlMedia: boolean; isGhostMode: boolean }) => {
+  // A disabled feature never leaves an empty stage or panel.
+  const activity = effectiveActivity(mainActivity, featureFlags);
+  const tool = effectiveTool(activeTool, featureFlags);
+  const layout = effectiveLayout(appearance, personalLayout);
+  const theme = effectiveTheme(appearance, personalTheme);
+  const sidePanel = sidePanelState(activity, layout, stageChatOpenLayout === layout);
+  useEffect(() => { workspaceModeRef.current = sidePanel.mode; }, [sidePanel.mode]);
+  const openTool = (next: RoomTool) => {
+    setActiveTool(next);
+    setStageChatOpenLayout(layout);
+  };
+  const isHomeMode = sidePanel.mode === 'home';
+  const resizeBounds = isHomeMode ? { min: HOME_CHAT_WIDTH.min, max: HOME_CHAT_WIDTH.max, value: homeChatWidth } : { min: MIN_SIDEBAR_WIDTH, max: MAX_SIDEBAR_WIDTH, value: sidebarWidth };
+  const handleControlStateChange = useCallback(({ featureFlags: nextFlags, canManageMembers: nextCanManageMembers, canControlMedia: nextCanControlMedia, appearance: nextAppearance }: { featureFlags: Partial<Record<RoomFeature, boolean>>; canManageMembers: boolean; canControlMedia: boolean; isGhostMode: boolean; appearance: RoomAppearance }) => {
     setFeatureFlags({ ...DEFAULT_FEATURE_FLAGS, ...nextFlags });
+    setAppearance(nextAppearance);
     setCanManageMembers(nextCanManageMembers);
     setCanControlMedia(nextCanControlMedia);
     setPresenceRefreshVersion((version) => version + 1);
@@ -372,7 +450,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     setLeaving(true);
     setLeaveError(null);
     try {
-      await leaveRoom(roomData.id);
+      await leaveRoom(roomData.id).then(unwrapAction);
       clearRoomRealtimeCache(roomData.id);
       router.push('/explore');
     } catch (error) {
@@ -386,7 +464,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     setLeaving(true);
     setLeaveError(null);
     try {
-      const members = await getRoomMembersList(roomData.id) as Array<{ user_id: string; role: string; join_status: string; guest_expires_at?: string | null }>;
+      const members = await getRoomMembersList(roomData.id).then(unwrapAction) as Array<{ user_id: string; role: string; join_status: string; guest_expires_at?: string | null }>;
       const eligible = members.filter((member) => member.user_id !== roomData.created_by && member.join_status === 'approved' && member.role !== 'guest' && !member.guest_expires_at);
       if (eligible.length === 0) throw new Error('No eligible permanent member is available to receive ownership.');
       setOwnerTransferCandidates(eligible);
@@ -404,8 +482,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     setLeaving(true);
     setLeaveError(null);
     try {
-      await transferRoomOwnership(roomData.id, ownerTransferTarget);
-      await leaveRoom(roomData.id);
+      await transferRoomOwnership(roomData.id, ownerTransferTarget).then(unwrapAction);
+      await leaveRoom(roomData.id).then(unwrapAction);
       clearRoomRealtimeCache(roomData.id);
       router.push('/explore');
     } catch (error) {
@@ -468,26 +546,23 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
   if ((accessStatus === 'expired' || accessStatus === 'recovery_window' || isExpired) && roomData) {
     const isIrreversible = roomData.expiration_type === 'irreversible';
+    // Each member sees only the status of their own request; site owners
+    // review requests at /admin/recovery.
     const recoveryCopy = recoveryStatus === 'pending'
-      ? 'Recovery request pending review.'
+      ? 'Your recovery request is waiting for a site owner to review it.'
       : recoveryStatus === 'approved'
-        ? 'Recovery request approved.'
+        ? 'Your recovery request was approved. Reload the page to enter the room.'
         : recoveryStatus === 'rejected'
-          ? 'Recovery request was rejected.'
+          ? 'Your recovery request was rejected.'
           : null;
+    const canRequestRecovery = ['owner', 'admin', 'member'].includes(userRole ?? '');
     return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center">
         <div className="max-w-md w-full border border-neutral-800 bg-neutral-950 p-8 rounded-2xl shadow-2xl flex flex-col items-center">
           <div className="w-16 h-16 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center text-2xl mb-4">{isIrreversible ? '🔥' : '🔒'}</div>
           <h1 className={`text-xl font-bold mb-2 ${isIrreversible ? 'text-red-500' : 'text-amber-500'}`}>{isIrreversible ? 'Space Access Ended' : 'Space Quarantined'}</h1>
           <p className="text-sm text-neutral-400 mb-6">The timer hit zero. {isIrreversible ? 'Access has been cut off and the server cleanup process will permanently destroy this room.' : 'Data is preserved but inaccessible for 7 days. If no recovery is requested in that time, the room and all of its chats and files are permanently deleted.'}</p>
-          {!isIrreversible && (recoveryCopy ? <div className="w-full py-3 bg-emerald-950/40 border border-emerald-800 text-emerald-400 text-xs rounded-lg mb-4">{recoveryCopy}</div> : (userRole === 'owner' || userRole === 'admin') ? <button onClick={handleRecoveryRequest} disabled={recoverySubmitting} className="w-full py-2.5 bg-neutral-100 text-black font-semibold text-sm rounded-lg hover:bg-white disabled:cursor-wait disabled:opacity-60 mb-4">{recoverySubmitting ? 'Submitting...' : 'Request Admin Recovery'}</button> : <p className="w-full rounded-lg border border-neutral-800 bg-neutral-900/50 px-3 py-3 text-xs text-neutral-400">Only the current owner or admin can request recovery during this 7-day window.</p>)}
-          {!isIrreversible && recoveryRequests.filter((request) => request.status === 'pending').map((request) => (
-            <div key={request.id} className="mb-4 w-full rounded-lg border border-indigo-900/50 bg-indigo-950/20 p-3 text-left text-xs text-indigo-200">
-              <p>Recovery requested by User {request.requester_id}.</p>
-              {(userRole === 'owner' || userRole === 'admin') && <div className="mt-2 flex gap-2"><button type="button" onClick={() => void handleRecoveryReview(request.id, 'approved')} className="rounded bg-emerald-700/70 px-3 py-1.5 font-bold">Approve and reopen for 7 days</button><button type="button" onClick={() => void handleRecoveryReview(request.id, 'rejected')} className="rounded bg-red-700/70 px-3 py-1.5 font-bold">Reject</button></div>}
-            </div>
-          ))}
+          {!isIrreversible && (recoveryCopy ? <div className="w-full py-3 bg-emerald-950/40 border border-emerald-800 text-emerald-400 text-xs rounded-lg mb-4">{recoveryCopy}</div> : canRequestRecovery ? <><button onClick={handleRecoveryRequest} disabled={recoverySubmitting} className="w-full py-2.5 bg-neutral-100 text-black font-semibold text-sm rounded-lg hover:bg-white disabled:cursor-wait disabled:opacity-60 mb-2">{recoverySubmitting ? 'Submitting...' : 'Request recovery'}</button><p className="mb-4 text-xs text-neutral-500">Any member can ask during this 7-day window. A site owner reviews each request.</p></> : <p className="w-full rounded-lg border border-neutral-800 bg-neutral-900/50 px-3 py-3 text-xs text-neutral-400">Room members can request recovery during this 7-day window.</p>)}
           {recoveryError && <p className="mb-4 w-full rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-300">{recoveryError}</p>}
           <Link href="/explore" className="text-xs text-neutral-500 hover:text-white underline">Return to Explore</Link>
         </div>
@@ -497,7 +572,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
   return (
     <RoomRealtimeProvider sync={roomSync} presence={roomPresence}>
-      <div className="room-shell flex h-screen flex-col overflow-hidden font-sans selection:bg-neutral-800">
+      <div className="room-shell flex h-screen flex-col overflow-hidden font-sans selection:bg-neutral-800" data-room-theme={theme}>
       <header className="room-header shrink-0">
         <div className="room-header-title flex items-center gap-4">
           <span className="font-semibold text-white tracking-wide text-sm uppercase">{roomData?.is_group ? 'GROUP' : 'ROOM'} / {roomData?.name || identifier}</span>
@@ -508,6 +583,35 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         <div className="room-actions flex items-center gap-4">
           {userRole === 'owner' && roomData?.expiration_type === 'recoverable' && !roomData.reopened_until && <button onClick={() => setShowConvertModal(true)} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition">Upgrade to Group</button>}
           {roomData.reopened_until && <button onClick={handlePermanentRequest} disabled={permanentSubmitting || permanentRequests.some((request) => request.status === 'pending')} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition disabled:cursor-wait disabled:opacity-50">{permanentSubmitting ? 'Requesting...' : 'Request Permanent Room'}</button>}
+          <div className="room-layout-menu" ref={layoutMenuRef}>
+            <button type="button" className="room-action" aria-haspopup="dialog" aria-expanded={showLayoutMenu} onClick={() => setShowLayoutMenu((open) => !open)} title="Layout and theme"><OmniIcon name="rooms" size={14} /><span>Layout</span></button>
+            {showLayoutMenu && (
+              <div role="dialog" aria-label="Layout and theme" className="room-layout-popover">
+                <fieldset disabled={appearance.layoutLocked}>
+                  <legend className="room-layout-legend">Layout</legend>
+                  {appearance.layoutLocked && <p className="room-layout-hint">Locked by the room: {ROOM_LAYOUT_DETAILS[appearance.defaultLayout].label}.</p>}
+                  <label className="room-layout-option">
+                    <input type="radio" name="room-personal-layout" checked={personalLayout === null || appearance.layoutLocked} onChange={() => setPersonalLayout(null)} />
+                    <span><strong>Room default</strong><small>{ROOM_LAYOUT_DETAILS[appearance.defaultLayout].label}</small></span>
+                  </label>
+                  {ROOM_LAYOUTS.map((option) => (
+                    <label key={option} className="room-layout-option">
+                      <input type="radio" name="room-personal-layout" checked={!appearance.layoutLocked && personalLayout === option} onChange={() => setPersonalLayout(option)} />
+                      <span><strong>{ROOM_LAYOUT_DETAILS[option].label}</strong><small>{ROOM_LAYOUT_DETAILS[option].description}</small></span>
+                    </label>
+                  ))}
+                </fieldset>
+                <label className="room-layout-legend mt-3 block" htmlFor="room-personal-theme">Theme</label>
+                <select id="room-personal-theme" className="omni-input mt-1" value={personalTheme ?? ''} onChange={(event) => setPersonalTheme(isRoomTheme(event.target.value) ? event.target.value : null)}>
+                  <option value="">Room theme ({ROOM_THEME_LABELS[appearance.theme]})</option>
+                  {ROOM_THEMES.map((option) => <option key={option} value={option}>{ROOM_THEME_LABELS[option]}</option>)}
+                </select>
+                <button type="button" className="omni-button omni-button-ghost mt-3 w-full" onClick={() => { setSidebarWidth(320); setHomeChatWidth(HOME_CHAT_WIDTH.initial); }}>Reset panel sizes</button>
+                <p className="room-layout-hint mt-2">Your layout, theme and panel sizes are saved on this device for you only.</p>
+              </div>
+            )}
+          </div>
+          <NotificationBell roomId={roomData.id} />
           <button type="button" onClick={() => setShowControlCenter(true)} className="room-action room-action-controls"><OmniIcon name="settings" size={14} /><span>Controls</span></button>
           <button type="button" onClick={minimizeActiveRoom} className="room-action" title="Return to Rooms without leaving"><span aria-hidden="true">—</span><span>Minimize room</span></button>
           <button type="button" onClick={() => { setLeaveError(null); setShowLeaveConfirmation(true); }} data-room-leave className="room-action room-action-leave">Leave</button>
@@ -535,19 +639,21 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         </div>
       )}
       {lifecycleActionError && <p className="border-b border-red-900/50 bg-red-950/30 px-6 py-2 text-xs text-red-300" role="alert">{lifecycleActionError}</p>}
+      {roomData.expiration_type === 'permanent' && roomData.deletion_scheduled_at && <p className="border-b border-red-900/50 bg-red-950/30 px-6 py-2 text-xs text-red-200" role="status">This room is scheduled for permanent deletion on {new Date(roomData.deletion_scheduled_at).toLocaleString([], { dateStyle: 'full', timeStyle: 'short' })}. Chats and files will be deleted unless the owner cancels.</p>}
 
-      <div className="room-content flex-1 overflow-hidden">
+      <div className="room-content flex-1 overflow-hidden" data-workspace-mode={sidePanel.mode} data-layout={layout}>
         <nav className="workspace-rail z-10">
           <div className="workspace-rail-group w-full">
-            <button type="button" aria-label="Watch" title={featureEnabled('watch') ? 'Watch' : 'Watch is disabled by this room'} aria-disabled={!featureEnabled('watch')} onClick={() => setMainActivity('watch')} className={`workspace-tool ${mainActivity === 'watch' ? 'is-active' : ''} ${!featureEnabled('watch') ? 'opacity-40' : ''}`}><OmniIcon name="play" size={17} /></button>
-            <button type="button" aria-label="Study" title={featureEnabled('study') ? 'Study' : 'Study is disabled by this room'} aria-disabled={!featureEnabled('study')} onClick={() => setMainActivity('study')} className={`workspace-tool ${mainActivity === 'study' ? 'is-active' : ''} ${!featureEnabled('study') ? 'opacity-40' : ''}`}><OmniIcon name="study" size={18} /></button>
-            <button type="button" aria-label="Whiteboard" title={featureEnabled('study') ? 'Whiteboard' : 'The whiteboard is part of Study, which is disabled by this room'} aria-disabled={!featureEnabled('study')} onClick={() => setMainActivity('whiteboard')} className={`workspace-tool ${mainActivity === 'whiteboard' ? 'is-active' : ''} ${!featureEnabled('study') ? 'opacity-40' : ''}`}><OmniIcon name="pen" size={17} /></button>
+            <button type="button" aria-label="Room home" title="Room home" aria-pressed={activity === 'home'} onClick={() => setMainActivity('home')} className={`workspace-tool ${activity === 'home' ? 'is-active' : ''}`}><OmniIcon name="home" size={17} /></button>
+            <button type="button" aria-label="Watch" title={featureEnabled('watch') ? 'Watch' : 'Watch is turned off by this room'} aria-pressed={activity === 'watch'} disabled={!featureEnabled('watch')} onClick={() => setMainActivity('watch')} className={`workspace-tool ${activity === 'watch' ? 'is-active' : ''} ${!featureEnabled('watch') ? 'opacity-40' : ''}`}><OmniIcon name="play" size={17} /></button>
+            <button type="button" aria-label="Study" title={featureEnabled('study') ? 'Study' : 'Study is turned off by this room'} aria-pressed={activity === 'study'} disabled={!featureEnabled('study')} onClick={() => setMainActivity('study')} className={`workspace-tool ${activity === 'study' ? 'is-active' : ''} ${!featureEnabled('study') ? 'opacity-40' : ''}`}><OmniIcon name="study" size={18} /></button>
+            <button type="button" aria-label="Whiteboard" title={featureEnabled('study') ? 'Whiteboard' : 'The whiteboard is part of Study, which this room has turned off'} aria-pressed={activity === 'whiteboard'} disabled={!featureEnabled('study')} onClick={() => setMainActivity('whiteboard')} className={`workspace-tool ${activity === 'whiteboard' ? 'is-active' : ''} ${!featureEnabled('study') ? 'opacity-40' : ''}`}><OmniIcon name="pen" size={17} /></button>
           </div>
           <div className="my-2 h-px w-8 bg-neutral-800" />
           <div className="workspace-rail-group w-full">
-            <button type="button" aria-label="Chat" title={featureEnabled('chat') ? 'Chat' : 'Chat is disabled by this room'} aria-disabled={!featureEnabled('chat')} onClick={() => setActiveTool('chat')} className={`workspace-tool ${activeTool === 'chat' ? 'is-active' : ''} ${!featureEnabled('chat') ? 'opacity-40' : ''}`}><OmniIcon name="message" size={17} /></button>
-            <button type="button" aria-label="Members" title="Members" onClick={() => setActiveTool('members')} className={`workspace-tool ${activeTool === 'members' ? 'is-active' : ''}`}><OmniIcon name="users" size={17} /></button>
-            <button type="button" aria-label="Files" title={featureEnabled('files') ? 'Files' : 'Files are disabled by this room'} aria-disabled={!featureEnabled('files')} onClick={() => setActiveTool('files')} className={`workspace-tool ${activeTool === 'files' ? 'is-active' : ''} ${!featureEnabled('files') ? 'opacity-40' : ''}`}><OmniIcon name="file" size={17} /></button>
+            <button type="button" aria-label="Chat" title={featureEnabled('chat') ? 'Chat' : 'Chat is turned off by this room'} aria-pressed={tool === 'chat' && sidePanel.visible} disabled={!featureEnabled('chat')} onClick={() => openTool('chat')} className={`workspace-tool ${tool === 'chat' && sidePanel.visible ? 'is-active' : ''} ${!featureEnabled('chat') ? 'opacity-40' : ''}`}><OmniIcon name="message" size={17} /></button>
+            <button type="button" aria-label="Members" title="Members" aria-pressed={tool === 'members' && sidePanel.visible} onClick={() => openTool('members')} className={`workspace-tool ${tool === 'members' && sidePanel.visible ? 'is-active' : ''}`}><OmniIcon name="users" size={17} /></button>
+            <button type="button" aria-label="Files" title={featureEnabled('files') ? 'Files' : 'Files are turned off by this room'} aria-pressed={tool === 'files' && sidePanel.visible} disabled={!featureEnabled('files')} onClick={() => openTool('files')} className={`workspace-tool ${tool === 'files' && sidePanel.visible ? 'is-active' : ''} ${!featureEnabled('files') ? 'opacity-40' : ''}`}><OmniIcon name="file" size={17} /></button>
           </div>
         </nav>
 
@@ -556,8 +662,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
               Hiding this layer visually preserves playback and audio position. */}
           <div
             data-stage-layer
-            aria-hidden={mainActivity !== 'watch'}
-            className={`absolute inset-0 flex min-h-0 ${mainActivity === 'watch' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
+            aria-hidden={activity !== 'watch'}
+            className={`absolute inset-0 flex min-h-0 ${activity === 'watch' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
           >
             {featureEnabled('watch') ? <MediaStage roomId={roomData.id} canControlMedia={userRole === 'owner' || canControlMedia} /> : <RoomFeatureUnavailable label="Watch" />}
           </div>
@@ -566,8 +672,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
               navigation and can finish/log a session outside the Study view. */}
           <div
             data-stage-layer
-            aria-hidden={mainActivity !== 'study'}
-            className={`absolute inset-0 flex min-h-0 ${mainActivity === 'study' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
+            aria-hidden={activity !== 'study'}
+            className={`absolute inset-0 flex min-h-0 ${activity === 'study' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
           >
             {featureEnabled('study') ? <StudyStage
               roomId={roomData.id}
@@ -576,7 +682,20 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             /> : <RoomFeatureUnavailable label="Study" />}
           </div>
 
-          {mainActivity !== 'study' && roomSync.timerState.isRunning && (
+          {activity === 'home' && (
+            <div className="room-dashboard-layer relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto">
+              <RoomDashboard
+                roomId={roomData.id}
+                room={roomData}
+                timeLeft={timeLeft}
+                featureFlags={featureFlags}
+                onOpenActivity={setMainActivity}
+                onOpenTool={openTool}
+              />
+            </div>
+          )}
+
+          {activity !== 'study' && activity !== 'home' && roomSync.timerState.isRunning && (
             <StudyMiniTimer
               roomId={roomData.id}
               timerState={roomSync.timerState}
@@ -587,7 +706,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             />
           )}
 
-          {mainActivity === 'whiteboard' && (
+          {activity === 'whiteboard' && (
             <div className="relative z-10 flex min-h-0 flex-1 flex-col p-3">
               {featureEnabled('study')
                 ? <StudyWhiteboardPanel roomId={roomData.id} />
@@ -597,46 +716,66 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         </main>
 
         {/* DYNAMIC WIDTH SIDEBAR */}
-        <aside style={{ width: `${sidebarWidth}px` }} className="workspace-side z-10 shrink-0">
-          {/* The handle lives on the chat panel so it stays anchored to the
-              stage/chat boundary while the sidebar width changes. */}
-          <div
-            role="separator"
-            tabIndex={0}
-            aria-label="Resize chat panel"
-            aria-orientation="vertical"
-            aria-valuemin={MIN_SIDEBAR_WIDTH}
-            aria-valuemax={MAX_SIDEBAR_WIDTH}
-            aria-valuenow={sidebarWidth}
-            onMouseDown={() => setIsDragging(true)}
-            onDoubleClick={() => setSidebarWidth(320)}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowLeft') {
-                event.preventDefault();
-                setSidebarWidth((width) => clampSidebarWidth(width + 40));
-              } else if (event.key === 'ArrowRight') {
-                event.preventDefault();
-                setSidebarWidth((width) => clampSidebarWidth(width - 40));
-              } else if (event.key === 'Home') {
-                event.preventDefault();
-                setSidebarWidth(MIN_SIDEBAR_WIDTH);
-              } else if (event.key === 'End') {
-                event.preventDefault();
-                setSidebarWidth(MAX_SIDEBAR_WIDTH);
-              }
-            }}
-            className={`workspace-resizer z-20 ${isDragging ? 'is-resizing bg-indigo-500' : ''}`}
-            title="Drag to resize chat panel"
-          />
-          <div className="chat-topbar shrink-0">
-            <h3 className="font-medium text-sm text-white uppercase tracking-wider">{activeTool}</h3>
-          </div>
-          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            {activeTool === 'chat' && roomData && (featureEnabled('chat') ? <RoomChat roomId={roomData.id} /> : <RoomFeatureUnavailable label="Room chat" compact />)}
-            {activeTool === 'members' && roomData && <MembersTab roomId={roomData.id} currentUserRole={userRole} canManageMembers={canManageMembers} onChangeRole={(memberId) => { setControlCenterMemberId(memberId); setControlCenterTab('user-control'); setShowControlCenter(true); }} />}
-            {activeTool === 'files' && roomData && (featureEnabled('files') ? <FilesTab roomId={roomData.id} currentUserRole={userRole} canControlMedia={userRole === 'owner' || canControlMedia} /> : <RoomFeatureUnavailable label="Files" compact />)}
+        {/* One panel element in every mode: CSS places it in the centre at
+            room home and beside the stage when a feature is open, so chat,
+            members and files never remount when the layout changes. */}
+        <aside
+          style={{ ['--sidebar-width' as string]: `${sidebarWidth}px`, ['--home-chat-width' as string]: `${homeChatWidth}px` }}
+          className="workspace-side z-10 shrink-0"
+          data-placement={sidePanel.placement}
+          data-collapsed={sidePanel.visible ? undefined : 'true'}
+        >
+          <div ref={sideInnerRef} className="workspace-side-inner">
+            {/* The handle stays on the panel edge while its width changes. */}
+            <div
+              role="separator"
+              tabIndex={0}
+              aria-label={isHomeMode ? 'Resize the centred chat panel' : 'Resize chat panel'}
+              aria-orientation="vertical"
+              aria-valuemin={resizeBounds.min}
+              aria-valuemax={resizeBounds.max}
+              aria-valuenow={resizeBounds.value}
+              onMouseDown={() => setIsDragging(true)}
+              onDoubleClick={() => (isHomeMode ? setHomeChatWidth(HOME_CHAT_WIDTH.initial) : setSidebarWidth(320))}
+              onKeyDown={(event) => {
+                const grow = isHomeMode ? event.key === 'ArrowRight' : event.key === 'ArrowLeft';
+                const shrink = isHomeMode ? event.key === 'ArrowLeft' : event.key === 'ArrowRight';
+                const apply = (next: (width: number) => number) => (isHomeMode
+                  ? setHomeChatWidth((width) => clampHomeChatWidth(next(width)))
+                  : setSidebarWidth((width) => clampSidebarWidth(next(width))));
+                if (grow) {
+                  event.preventDefault();
+                  apply((width) => width + 40);
+                } else if (shrink) {
+                  event.preventDefault();
+                  apply((width) => width - 40);
+                } else if (event.key === 'Home') {
+                  event.preventDefault();
+                  apply(() => resizeBounds.min);
+                } else if (event.key === 'End') {
+                  event.preventDefault();
+                  apply(() => resizeBounds.max);
+                }
+              }}
+              className={`workspace-resizer z-20 ${isDragging ? 'is-resizing bg-indigo-500' : ''}`}
+              title="Drag to resize chat panel"
+            />
+            <div className="chat-topbar shrink-0">
+              <h3 className="font-medium text-sm text-white uppercase tracking-wider">{tool}</h3>
+              {layout === 'stage' && !isHomeMode && (
+                <button type="button" onClick={() => setStageChatOpenLayout(null)} className="room-panel-close" aria-label="Hide panel" title="Hide panel"><OmniIcon name="close" size={13} /></button>
+              )}
+            </div>
+            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+              {tool === 'chat' && roomData && (featureEnabled('chat') ? <RoomChat roomId={roomData.id} /> : <RoomFeatureUnavailable label="Room chat" compact />)}
+              {tool === 'members' && roomData && <MembersTab roomId={roomData.id} currentUserRole={userRole} canManageMembers={canManageMembers} onChangeRole={(memberId) => { setControlCenterMemberId(memberId); setControlCenterTab('user-control'); setShowControlCenter(true); }} />}
+              {tool === 'files' && roomData && (featureEnabled('files') ? <FilesTab roomId={roomData.id} currentUserRole={userRole} canControlMedia={userRole === 'owner' || canControlMedia} /> : <RoomFeatureUnavailable label="Files" compact />)}
+            </div>
           </div>
         </aside>
+        {layout === 'stage' && !isHomeMode && !sidePanel.visible && (
+          <button type="button" className="room-panel-reopen" onClick={() => setStageChatOpenLayout(layout)} aria-label={`Show ${tool}`}><OmniIcon name={tool === 'files' ? 'file' : tool === 'members' ? 'users' : 'message'} size={16} /><span>Show {tool}</span></button>
+        )}
       </div>
       </div>
       <RoomControlCenter
@@ -647,6 +786,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         onStateChange={handleControlStateChange}
         requestedTab={controlCenterTab}
         selectedMemberId={controlCenterMemberId}
+        roomLifecycle={{ expirationType: roomData.expiration_type, deletionScheduledAt: roomData.deletion_scheduled_at ?? null }}
+        onRoomLifecycleChange={(deletionScheduledAt) => setRoomData((current) => current ? { ...current, deletion_scheduled_at: deletionScheduledAt } : current)}
       />
       {showLeaveConfirmation && <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="leave-room-title"><section className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111217] p-6 shadow-2xl"><p className="text-[10px] font-bold uppercase tracking-[.16em] text-amber-200">Membership</p>{userRole === 'owner' && ownerLeaveStep === 'choice' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Do you want to transfer ownership before leaving?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Choose No to leave the active workspace while retaining your room membership and ownership for later.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => { setShowLeaveConfirmation(false); minimizeActiveRoom(); }} className="omni-button omni-button-ghost">No</button><button type="button" disabled={leaving} onClick={() => void openOwnerTransfer()} className="omni-button omni-button-primary">Yes</button></div></> : userRole === 'owner' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Choose a new owner</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Only an approved permanent member can receive ownership.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<select value={ownerTransferTarget} onChange={(event) => setOwnerTransferTarget(event.target.value)} className="omni-input mt-4">{ownerTransferCandidates.map((member) => <option key={member.user_id} value={member.user_id}>User {member.user_id.slice(0, 8)}</option>)}</select><div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setOwnerLeaveStep('choice')} className="omni-button omni-button-ghost">Back</button><button type="button" disabled={leaving || !ownerTransferTarget} onClick={() => void completeOwnerTransferAndLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Transfer and leave'}</button></div></> : <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Leave this room?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">You can rejoin later when the room is open and you are not restricted.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => void handleLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Leave room'}</button></div></>}</section></div>}
       <FloatingDock />

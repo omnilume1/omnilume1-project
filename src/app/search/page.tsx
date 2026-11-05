@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useState } from 'react';
 import Link from 'next/link';
 import { getPublicProfileByUsername } from '@/actions/profiles';
@@ -29,7 +30,7 @@ export default function SearchPage() {
     setSearchState('loading');
     setResult(null);
     try {
-      const profile = await getPublicProfileByUsername(username);
+      const profile = await getPublicProfileByUsername(username).then(unwrapAction);
       if (!profile) {
         setSearchState('empty');
         return;

@@ -1,12 +1,13 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { getMyProfile } from '@/actions/profiles';
 import { getLoginPath } from '@/lib/auth';
 import { createClient } from '@/utils/supabase/client';
-import { OmniIcon } from '@/components/ui/OmniIcon';
+import NotificationBell from '@/components/ui/NotificationBell';
 
 export interface AccountView {
   displayName: string;
@@ -61,7 +62,7 @@ export default function CurrentAccountControls({ account: preloadedAccount }: { 
       }
 
       try {
-        const profile = await getMyProfile();
+        const profile = await getMyProfile().then(unwrapAction);
         if (!active) return;
         const metadata = (user.user_metadata ?? {}) as Record<string, unknown>;
         setAccount({
@@ -102,10 +103,7 @@ export default function CurrentAccountControls({ account: preloadedAccount }: { 
   const profileHref = account.profileDetailsCompleted ? '/profile' : '/profile/setup';
   return (
     <>
-      <Link href="/home#notifications" className="icon-button" aria-label="Notifications" title="Notifications">
-        <OmniIcon name="bell" />
-        <span className="notification-dot" />
-      </Link>
+      <NotificationBell />
       <Link href={profileHref} className="avatar avatar-small public-account-avatar" aria-label="Open your profile" title="Profile">
         {account.avatarUrl ? <img src={account.avatarUrl} alt="" /> : initials(account.displayName)}
       </Link>

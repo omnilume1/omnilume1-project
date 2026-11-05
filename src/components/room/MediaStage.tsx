@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent, type FormEvent } from 'react';
 import dynamic from 'next/dynamic';
-import { attachRoomMediaSubtitle, cleanupUnregisteredTemporaryMedia, getActiveTemporaryMedia, logCastHistory, logTemporaryMedia, resolveRoomMedia } from '@/actions/media';
+import { attachRoomMediaSubtitle, cleanupUnregisteredTemporaryMedia, getActiveTemporaryMedia, getRoomMediaDetails, logCastHistory, logTemporaryMedia, resolveRoomMedia, type RoomMediaDetails } from '@/actions/media';
+import { fallbackArtwork } from '@/lib/media-metadata';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import { createRoomObjectPath, assertRoomFileInput, ROOM_ATTACHMENT_BUCKET } from '@/lib/room-file-contract';
@@ -39,6 +40,9 @@ interface TemporaryMedia {
   media_type: string;
   expires_at: string;
   created_at: string;
+  // Cached from the file's tags (Action 10); absent for links.
+  title?: string | null;
+  artist?: string | null;
 }
 
 interface LocalUploadState {
@@ -140,6 +144,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
   const [audioTracks, setAudioTracks] = useState<Array<{ id: number; label: string }>>([]);
   const [activeAudioIndex, setActiveAudioIndex] = useState(0);
 
+  const [mediaDetails, setMediaDetails] = useState<RoomMediaDetails | null>(null);
   const [history, setHistory] = useState<TemporaryMedia[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -172,7 +177,18 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
   const playbackUrl = activeMediaUrl;
   const playbackSubtitleUrl = activeSubtitleUrl;
   const isReady = playbackUrl !== null && readyCastId === activeCastId;
+  // Now-playing details cached with the media row; never sent over Broadcast.
+  const details = mediaDetails && mediaDetails.id === activeMediaId ? mediaDetails : null;
   const isFlacPlayback = isFlacPath(mediaTitle) || isFlacPath(playbackUrl);
+  const isAudioCast = Boolean(playbackUrl) && (details?.mediaType === 'audio' || isFlacPlayback);
+  useEffect(() => {
+    if (!activeMediaId) return;
+    let active = true;
+    void getRoomMediaDetails(roomId, activeMediaId).then((result) => {
+      if (active) setMediaDetails(result.success ? result.details : null);
+    });
+    return () => { active = false; };
+  }, [activeMediaId, roomId]);
   const flacPlaybackSupported = useSyncExternalStore(
     subscribeToNothing,
     () => !isFlacPlayback || document.createElement('audio').canPlayType('audio/flac') !== '',
@@ -538,7 +554,8 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
       >
         <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/90 to-transparent p-4 pointer-events-auto">
           <div className="flex min-w-0 flex-col">
-            <span className="truncate text-sm font-bold text-white drop-shadow-md">{playbackUrl ? mediaTitle : 'Watch Party Stage'}</span>
+            <span className="truncate text-sm font-bold text-white drop-shadow-md">{playbackUrl ? (details?.title ?? mediaTitle) : 'Watch Party Stage'}</span>
+            {playbackUrl && details && (details.artist || details.album) && <span className="truncate text-[11px] text-neutral-300">{[details.artist, details.album, details.year].filter(Boolean).join(' · ')}</span>}
             {playbackUrl && <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400">{playbackSpeed}x speed</span>}
           </div>
 
@@ -607,7 +624,8 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
 
         <div data-media-area className="relative flex min-h-0 flex-1 flex-col items-center justify-center bg-black p-4">
           {playbackUrl ? (
-            <div className="relative h-full w-full overflow-hidden rounded-xl border border-neutral-800">
+            <div className={`relative h-full w-full overflow-hidden rounded-xl border border-neutral-800 ${isAudioCast ? 'flex flex-col' : ''}`}>
+              {isAudioCast && details && <NowPlaying details={details} />}
               {isFlacPlayback ? (
                 flacPlaybackSupported ? <audio
                   key={playerKey}
@@ -617,7 +635,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
                   controls
                   preload="metadata"
                   crossOrigin="anonymous"
-                  className="h-full w-full bg-black"
+                  className={`${isAudioCast ? 'h-16 shrink-0' : 'h-full'} w-full bg-black`}
                   onLoadedMetadata={handleReady}
                   onTimeUpdate={handleTimeUpdate}
                   onPlay={handlePlay}
@@ -639,7 +657,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
                 playbackRate={playbackSpeed}
                 controls
                 width="100%"
-                height="100%"
+                height={isAudioCast ? '64px' : '100%'}
                 crossOrigin="anonymous"
                 onLoadedMetadata={handleReady}
                 onTimeUpdate={handleTimeUpdate}
@@ -687,10 +705,30 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
   );
 }
 
+// Now playing (Action 10): artwork from the file's tags, or generated art,
+// with where the details came from.
+function NowPlaying({ details }: { details: RoomMediaDetails }) {
+  const generated = fallbackArtwork(details.title);
+  const subline = [details.artist, details.album, details.year].filter(Boolean).join(' · ');
+  return (
+    <div className="media-now-playing" aria-label="Now playing">
+      {details.artworkDataUrl
+        // eslint-disable-next-line @next/next/no-img-element -- data-URL artwork cached on the media row; next/image cannot optimise it
+        ? <img src={details.artworkDataUrl} alt={`Artwork for ${details.title}`} className="media-now-playing-art" />
+        : <div className="media-now-playing-art is-generated" style={{ background: `linear-gradient(135deg, ${generated.from}, ${generated.to})` }} role="img" aria-label="Generated artwork"><span aria-hidden="true">{generated.initials}</span></div>}
+      <div className="min-w-0">
+        <p className="media-now-playing-title">{details.title}</p>
+        {subline && <p className="media-now-playing-sub">{subline}</p>}
+        <p className="media-now-playing-source">{details.source === 'tags' ? 'Details from the file\u2019s embedded tags' : details.source === 'link' ? 'Shared link' : 'Title from the file name'}{details.artworkDataUrl ? '' : ' · generated artwork'}</p>
+      </div>
+    </div>
+  );
+}
+
 function HistoryRow({ item, canCast, onCast }: { item: TemporaryMedia; canCast: boolean; onCast: (item: TemporaryMedia) => void }) {
   return (
     <div className="rounded-xl border border-neutral-800 bg-[#171717] p-3">
-      <div className="flex items-start gap-2"><span className={`mt-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${item.media_type === 'url' ? 'bg-sky-500/10 text-sky-300' : 'bg-purple-500/10 text-purple-300'}`}>{item.media_type === 'url' ? 'URL' : item.media_type}</span><span className="min-w-0 flex-1 truncate text-xs font-bold text-white" title={item.file_name}>{item.file_name}</span></div>
+      <div className="flex items-start gap-2"><span className={`mt-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${item.media_type === 'url' ? 'bg-sky-500/10 text-sky-300' : 'bg-purple-500/10 text-purple-300'}`}>{item.media_type === 'url' ? 'URL' : item.media_type}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-white" title={item.file_name}>{item.title || item.file_name}</span>{item.artist && <span className="block truncate text-[10px] text-neutral-400">{item.artist}</span>}</span></div>
       <div className="mt-2 flex items-center justify-between gap-2"><span className="text-[10px] text-neutral-500">{formatHoursUntil(item.expires_at)}</span>{canCast && <button type="button" onClick={() => onCast(item)} className="cursor-pointer rounded bg-indigo-600/20 px-3 py-1.5 text-[10px] font-bold text-indigo-300 transition hover:bg-indigo-600/30">Cast again</button>}</div>
     </div>
   );

@@ -1,5 +1,6 @@
 'use server';
 
+import { actionResult } from '@/lib/action-result';
 import { createClient } from '@/utils/supabase/server';
 
 export type MessageRequestStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled';
@@ -32,6 +33,9 @@ export interface InboxGroup {
   username: string | null;
   description: string | null;
   role: string;
+  // Unread room messages since this member last read the chat (capped at
+  // 100 by get_room_unread_counts; 0 when chat is unavailable).
+  unread_count: number;
 }
 
 export interface MessageInbox {
@@ -60,7 +64,7 @@ function displayName(profile: ProfileRef) {
   return profile.display_name || profile.username || 'OmniLume member';
 }
 
-export async function getMyMessageInbox(): Promise<MessageInbox> {
+async function getMyMessageInboxImpl(): Promise<MessageInbox> {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
@@ -280,13 +284,27 @@ export async function getMyMessageInbox(): Promise<MessageInbox> {
       username: room.username,
       description: room.description,
       role: membership.role,
+      unread_count: 0,
     };
   }).filter((group): group is InboxGroup => group !== null);
 
+  if (groups.length > 0) {
+    const { data: unreadRows, error: unreadError } = await supabase.rpc('get_room_unread_counts', {
+      p_room_ids: groups.slice(0, 200).map((group) => group.room_id),
+    });
+    if (!unreadError && Array.isArray(unreadRows)) {
+      const unreadByRoom = new Map((unreadRows as Array<{ room_id: string; unread_count: number }>).map((row) => [row.room_id, Number(row.unread_count) || 0]));
+      for (const group of groups) group.unread_count = unreadByRoom.get(group.room_id) ?? 0;
+    }
+  }
+
   return { friends, groups, general };
 }
+export async function getMyMessageInbox() {
+  return actionResult(() => getMyMessageInboxImpl());
+}
 
-export async function sendMessageRequest(recipientId: string, message: string) {
+async function sendMessageRequestImpl(recipientId: string, message: string) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
@@ -298,8 +316,11 @@ export async function sendMessageRequest(recipientId: string, message: string) {
   if (error) throw new Error(error.message);
   return data;
 }
+export async function sendMessageRequest(recipientId: string, message: string) {
+  return actionResult(() => sendMessageRequestImpl(recipientId, message));
+}
 
-export async function acceptMessageRequest(requestId: string) {
+async function acceptMessageRequestImpl(requestId: string) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
@@ -310,8 +331,11 @@ export async function acceptMessageRequest(requestId: string) {
   if (error) throw new Error(error.message);
   return data;
 }
+export async function acceptMessageRequest(requestId: string) {
+  return actionResult(() => acceptMessageRequestImpl(requestId));
+}
 
-export async function rejectMessageRequest(requestId: string) {
+async function rejectMessageRequestImpl(requestId: string) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
@@ -322,8 +346,11 @@ export async function rejectMessageRequest(requestId: string) {
   if (error) throw new Error(error.message);
   return data;
 }
+export async function rejectMessageRequest(requestId: string) {
+  return actionResult(() => rejectMessageRequestImpl(requestId));
+}
 
-export async function cancelMessageRequest(requestId: string) {
+async function cancelMessageRequestImpl(requestId: string) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
@@ -333,4 +360,7 @@ export async function cancelMessageRequest(requestId: string) {
   });
   if (error) throw new Error(error.message);
   return data;
+}
+export async function cancelMessageRequest(requestId: string) {
+  return actionResult(() => cancelMessageRequestImpl(requestId));
 }

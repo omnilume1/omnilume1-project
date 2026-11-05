@@ -1,11 +1,12 @@
 'use server';
 
+import { actionResult } from '@/lib/action-result';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@/utils/supabase/server';
 import { assertActiveRoom } from '@/lib/room-lifecycle';
 
 // 1. Create Room
-export async function createRoom(formData: FormData) {
+async function createRoomImpl(formData: FormData) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -82,8 +83,11 @@ export async function createRoom(formData: FormData) {
 
   return roomId;
 }
+export async function createRoom(formData: FormData) {
+  return actionResult(() => createRoomImpl(formData));
+}
 // 2. Fetch Public Rooms for Explore Page
-export async function getPublicRooms() {
+async function getPublicRoomsImpl() {
   const supabase = await createClient();
   const now = new Date().toISOString();
 
@@ -95,6 +99,8 @@ export async function getPublicRooms() {
       description,
       username,
       created_at,
+      expiration_type,
+      deletion_scheduled_at,
       room_members(count)
     `)
     .eq('is_private', false)
@@ -105,9 +111,12 @@ export async function getPublicRooms() {
   if (error) throw new Error(error.message);
   return data;
 }
+export async function getPublicRooms() {
+  return actionResult(() => getPublicRoomsImpl());
+}
 
 // 3. The Master Join Function (Handles IDs, Usernames, Links, and Join Requests)
-export async function processRoomJoin(identifier: string) {
+async function processRoomJoinImpl(identifier: string) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -128,10 +137,13 @@ export async function processRoomJoin(identifier: string) {
   }
   return { roomId: data[0].room_id, status: data[0].status };
 }
+export async function processRoomJoin(identifier: string) {
+  return actionResult(() => processRoomJoinImpl(identifier));
+}
 
 // The Rooms surface only receives the caller's currently approved memberships.
 // RLS on both tables remains the authority for private-room visibility.
-export async function getMyJoinedRooms() {
+async function getMyJoinedRoomsImpl() {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
@@ -144,9 +156,12 @@ export async function getMyJoinedRooms() {
   if (error) throw new Error(error.message);
   return data ?? [];
 }
+export async function getMyJoinedRooms() {
+  return actionResult(() => getMyJoinedRoomsImpl());
+}
 
 // 4. Phase 16: Convert a Temporary Room into a Permanent Group
-export async function convertRoomToGroup(roomId: string, groupUsername: string) {
+async function convertRoomToGroupImpl(roomId: string, groupUsername: string) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -188,4 +203,7 @@ export async function convertRoomToGroup(roomId: string, groupUsername: string) 
   if (conversionError) throw new Error(conversionError.message);
 
   return true;
+}
+export async function convertRoomToGroup(roomId: string, groupUsername: string) {
+  return actionResult(() => convertRoomToGroupImpl(roomId, groupUsername));
 }

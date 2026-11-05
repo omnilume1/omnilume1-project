@@ -1,7 +1,8 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { getRoomWhiteboard, saveRoomWhiteboard } from '@/actions/study-collaboration';
+import { getRoomWhiteboard, saveRoomWhiteboard, type RoomWhiteboard } from '@/actions/study-collaboration';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import {
   LEGACY_IMAGE_KEY,
@@ -215,7 +216,7 @@ export default function StudyWhiteboardPanel({ roomId }: { roomId: string }) {
     setSaveTick((tick) => tick + 1);
   }, [commitDoc, syncHistoryState]);
 
-  const adoptRemote = useCallback((board: Awaited<ReturnType<typeof getRoomWhiteboard>>) => {
+  const adoptRemote = useCallback((board: RoomWhiteboard | null) => {
     const remote = parseWhiteboardState(board?.state);
     const version = board?.version ?? 0;
     remoteRef.current = remote;
@@ -230,7 +231,7 @@ export default function StudyWhiteboardPanel({ roomId }: { roomId: string }) {
     // finishInteraction re-runs the deferred load.
     if (reason === 'remote' && interactionRef.current) { remoteDeferredRef.current = true; return; }
     try {
-      const board = await getRoomWhiteboard(roomId);
+      const board = await getRoomWhiteboard(roomId).then(unwrapAction);
       if ((board?.version ?? 0) < expectedVersionRef.current && reason !== 'manual') return;
       adoptRemote(board);
       setError(null);
@@ -258,7 +259,7 @@ export default function StudyWhiteboardPanel({ roomId }: { roomId: string }) {
           throw new Error('The whiteboard is full. Erase or clear some items before adding more.');
         }
         try {
-          const board = await saveRoomWhiteboard(roomId, expectedVersionRef.current, serializeWhiteboard(next));
+          const board = await saveRoomWhiteboard(roomId, expectedVersionRef.current, serializeWhiteboard(next)).then(unwrapAction);
           remoteRef.current = next;
           expectedVersionRef.current = board.version;
           setExpectedVersion(board.version);
@@ -274,7 +275,7 @@ export default function StudyWhiteboardPanel({ roomId }: { roomId: string }) {
           const message = errorMessage(saveError);
           if (!isConflict(message) || attempt === 3) throw saveError;
           // Someone else saved first: merge our operations onto their board.
-          const latest = await getRoomWhiteboard(roomId);
+          const latest = await getRoomWhiteboard(roomId).then(unwrapAction);
           adoptRemote(latest);
         }
       }
@@ -406,7 +407,12 @@ export default function StudyWhiteboardPanel({ roomId }: { roomId: string }) {
   const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (editor) { commitEditor(); return; }
     containerRef.current?.focus({ preventScroll: true });
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // A pointer the browser no longer treats as active (some assistive or
+      // synthesized input) cannot be captured; drawing still works without it.
+    }
     pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
     if (pointersRef.current.size === 2) {

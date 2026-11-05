@@ -1066,6 +1066,115 @@ are no longer missing. They are unverified in the browser.
 - Not run: browser flows for the whiteboard, GIF picker and merged `main`
   panels (waived), Preview deployment and Cron execution.
 
+## Phase 1 final audit of Actions 01–10 (2026-11-05)
+
+### State
+- Branch `fix/actions-01-10-final-audit`, cut from `main` at 65755a7 (PR #17 merge).
+- Migration `20261105120000` (7-day recovery, room destruction functions,
+  minimum age 13): re-run in a rolled-back transaction (`due=8,
+  recovery_window=12, under13_update=blocked, exactly13_update=allowed`,
+  delete grants service-role only), then applied with `npx supabase db push`.
+  `supabase migration list --linked`: local and remote match for every
+  timestamped migration. Live catalog after the push: 7-day window, no
+  24-hour text, age trigger present, `destroy_expired_room` and
+  `list_rooms_due_for_destruction` executable by `service_role` only.
+- `GIPHY_API_KEY` present in `.env.local`.
+
+### Automated checks (after the fixes below)
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` | pass |
+| `npm run lint` | 0 errors, 13 warnings (unchanged pre-existing `<img>`/unused warnings) |
+| `npm run test:unit` | 48/48 pass (adds `server-action-results.test.ts`) |
+| `node --test tests/*.mjs` | 5/5 pass |
+| `npm run build` | pass |
+| `authorization-probe.mjs full` | 173 pass, 1 fail, 0 blocked, 8 info. The one failure (anon EXECUTE `convert_active_room_to_permanent`) had no error code; the catalog shows anon has no EXECUTE, and three `anon` re-runs each PASS with 42501. A later full run hit 3 network errors (empty error code, Realtime `CHANNEL_ERROR`) in checks that passed in the previous run. Risk noted: some denial checks accept any error, so a dropped request can also pass. |
+| `authorization-probe.mjs routes http://localhost:3000` (production build) | 17 pass, 0 fail |
+| `lifecycle-probe.mjs` (new) | 25 pass, 0 fail |
+
+The authorization probe now also covers A10 (member whiteboard save and
+stale-version rejection, personal-note privacy, room-note edits, the
+permanent PDF library, PDF annotations, non-admin file delete denied) and
+A06 (`destroy_expired_room` / `list_rooms_due_for_destruction` denied to
+`anon` and `authenticated`). The lifecycle probe proves, on disposable
+fixtures: the database rejects a date of birth under 13 and accepts a 13th
+birthday; an expired recoverable room enters the recovery window, its
+content is unreadable while quarantined, a non-member cannot request or
+approve recovery, approval reopens it for exactly 7 days and restores
+access; a pending request keeps a room past 7 days; a room 8 days past
+expiry without a request is due and is deleted with every row (rooms,
+members, messages, notes, whiteboard, files, controls) and every stored
+object; rejecting a held request makes the room due and it is deleted.
+
+### Browser walkthrough (two accounts, production build, real browser)
+Run on `next start` with QA account A (owner) and QA account B (approved
+member) in separate incognito sessions (`localhost` and `127.0.0.1`).
+
+| Item | Result |
+| --- | --- |
+| Whiteboard | Room rail opens it. B's pen stroke saves (v1, "All changes saved") and appears on A's open board live. Rectangle and arrow from both accounts persist. Forced version race (a save made behind B's back): B's next stroke merges onto the newer board and saves v6 with 6 elements, no conflict error (after fix 1). |
+| GIF picker | 24 trending GIFs load from GIPHY CDNs, search focus, "Powered by GIPHY". Search "thumbs up" returns 24 results with "Load more". Sending one closes the picker; the GIF renders for B and arrives live for A with its title as alt text. |
+| Study notes | Empty state, create room note, autosave. Edits typed while a save is in flight are saved (database: new title and full body, version 6) (after fix 2). Concurrent edit shows the conflict with "Keep my version" / "Load latest"; keeping saves over the other member's version (version 8). |
+| PDF panel | Lists the room PDF, opens it in the viewer from a signed URL, page controls; annotation added by A is visible to B. |
+| File library | Upload of a PDF into the permanent library lists it (name, type, size); Download returns the PDF (`200 application/pdf`, `%PDF-`) from a signed storage URL. |
+| Upload cancel/retry | 40 MB cast upload shows progress, Cancel leaves "Upload cancelled." with Retry; Retry completes, the server verifies and registers it; storage holds exactly one object (no orphan from the cancelled attempt). Cast to room: both accounts get a `<video>` with their own signed URL. |
+| 7-day recovery screens | Expired recoverable room: "Data is preserved but inaccessible for 7 days. If no recovery is requested…". Request shows pending, and the owner's Approve/Reject appear at once with "Recovery requested by you." (after fix 5). Approve reopens with ~168 h left; Reject shows "Recovery request was rejected."; a non-member gets "Space Not Found". |
+| Age-13 form | Date of birth field has `max` = 13 years ago and the help text; the browser blocks an under-13 date; with the limit removed, the server returns "You must be at least 13 years old to use OmniLume." and nothing is saved. |
+| Error messages | An invalid invite code shows the server's real message ("This room is unavailable…") instead of a minified React error (after fix 1). |
+
+### Bugs found and fixed in this run
+1. **Server Action errors were hidden in production.** React replaces any
+   error thrown by a Server Action with "Minified React error #441", so
+   every error message in 80 throw-style actions (study, files, room
+   controls, rooms, members, profiles, messages, chat) reached users as that
+   code, and the whiteboard and study-note conflict handling could never see
+   "expected version". Actions now return `{ ok, data | error }` through
+   `actionResult` (`src/lib/action-result.ts`, Next.js control-flow errors
+   re-thrown with `unstable_rethrow`) and every call site unwraps with
+   `.then(unwrapAction)`, which re-throws the real message so existing
+   `try/catch` blocks keep working. `deleteMyAccount` is wrapped the same
+   way. A unit test fails if any exported Server Action can throw to the
+   browser again.
+2. **Study notes lost edits.** A save that finished cleared the dirty flag
+   even when the user typed during the request, so later edits were never
+   saved while the panel said "Saved.". Fixed with an edit revision counter;
+   conflicts now keep the local text and offer "Keep my version" or "Load
+   latest (discard mine)".
+3. **File library flicker.** Background refreshes replaced the list with
+   "Loading files…" every 60 s; only the first load shows the loading state.
+4. **PDF annotation double submit.** "Add annotation" now shows "Adding…"
+   and is disabled while saving or empty.
+5. **Recovery review.** After requesting recovery the owner had to reload to
+   see Approve/Reject, and the requester was shown as a raw user UUID. The
+   list refreshes after the request, and requesters are labelled "you" or by
+   public display name.
+- Whiteboard: a pointer-capture failure no longer aborts drawing.
+
+### Open items
+- **Nightly cleanup is not running in production.** Two irreversible rooms
+  expired before 00:00 UTC on 2026-11-05 (oldest at 22:05 UTC on 2026-11-04)
+  and were still present afterwards, although the code deployed at that time
+  deleted such rooms. Vercel's environment and Cron logs cannot be read from
+  this session (the Vercel CLI is outside the shell allowlist and the Vercel
+  connector is not authorized).
+- **2 profiles are under 13** (unchanged; the trigger checks new and changed
+  dates of birth only).
+- **`GIPHY_API_KEY` on Vercel**: cannot be verified from this session.
+
+### Verdict per action (roadmap "What must be fixed or built" + Definition of Done)
+| Action | Verdict | Evidence |
+| --- | --- | --- |
+| 01 Foundation and Evidence | COMPLETE | Ledger, audit pack 01–09, reusable authorization / lifecycle / route probes on disposable fixtures. |
+| 02 Authentication and Identity | INCOMPLETE (blocked on owner) | Routes 17/17, profile gate and safe redirects verified; the DoD's Google OAuth runtime (no duplicate users, SSR/client agree) needs a real Google sign-in, which this session cannot perform. |
+| 03 Database, RLS, Storage | COMPLETE | Catalog audit 01–09, D1–D9 fixed, every migration applied (list matches), probe 0 failures. |
+| 04 Profiles, Privacy, Follows, Friends, Posts | COMPLETE | Privacy/follow/friend/post/message-request matrix in the probe; age 13 enforced in the browser form, server action and database; deletion re-auth. Data decision pending: 2 existing under-13 profiles. |
+| 05 Rooms, Membership, Roles, Control | COMPLETE | Invites, join/approve, roles, kick/ban, transfer, controls and feature toggles probed (T1–T3); member action menus present in the members list; Ghost Mode excluded by owner decision. |
+| 06 Lifecycle, Expiry, Recovery, Cleanup | INCOMPLETE (blocked on owner) | Code and database verified end to end (lifecycle probe 25/25, recovery screens in the browser), but the production cron did not delete rooms due at its last run. |
+| 07 Shared Realtime Foundation | COMPLETE | D7 hostile-client probes; browser: live whiteboard hints, live GIF delivery, per-viewer media resolution. |
+| 08 Room Messaging and Notifications | INCOMPLETE (fixable) | Missing: edit own messages, replies/threads, reactions UI, mentions, message pins, shared-PDF and timer-owner notifications, Notification Center, DND/mute, chat unread/read state. Present: send/history/delete, announcements, GIFs, room notification read state. |
+| 09 Adaptive Room Workspace | INCOMPLETE (fixable) | Missing: layout presets, themes, room dashboard. Present: resizable chat/side panels with saved per-user sizes, feature visibility, whiteboard (no empty tab). |
+| 10 Files, PDFs, Media, Storage | INCOMPLETE (fixable + owner decision) | Present and browser-verified: permanent files, shared PDFs, signed links, upload progress/retry/cancel, subtitles. Missing: media metadata/artwork/attribution/fallback and PDF-share notification (fixable); lyrics need a licensed provider (owner decision). |
+
 ## Dashboard extensions result (2026-11-04)
 
 | Finding | Classification | Evidence and disposition |
@@ -1121,3 +1230,309 @@ confirmed defect to remediate.
    2026-11-05. Those gates stay UNVERIFIED until run.
 3. Vercel Preview URL/log access for the exact pushed commit, including Cron
    invocation evidence.
+
+## Actions 01–10 completion run (branch `feat/actions-01-10-complete`, 2026-11-05)
+
+Plan and resume point: `docs/action-01-10-completion-plan.md`. Nothing was
+pushed. Every migration below had a rolled-back dry run (migration plus
+checks run as simulated `authenticated`/`anon` users inside a transaction
+that ends in `RAISE EXCEPTION 'DRYRUN_RESULT …'`) before
+`npx supabase db push`. Afterwards, `npx supabase migration list --linked`
+shows the same 41 migrations locally and remotely.
+
+Evidence labels: **static** = source review and unit tests; **runtime** =
+local production build (`next build` + `next start`); **browser** = the
+two-account walkthrough (QA A = room owner on `localhost`, QA B = member on
+`127.0.0.1`, separate incognito sessions, desktop 1002–1280 px and iPhone 12
+Pro 390×844); **database** = live probes with the two disposable QA accounts,
+or rolled-back dry runs, against the linked project.
+
+### Owner decisions applied (they override the roadmap)
+
+- Action 02 COMPLETE: Google sign-in confirmed by the owner.
+- Action 06 production cron VERIFIED by the owner. Supabase API logs at
+  2026-11-05 08:00 UTC show `list_rooms_due_for_destruction`, storage list
+  and `destroy_expired_room` all returning 200, and old expired rooms were
+  deleted. Vercel `CRON_SECRET` and `SUPABASE_SERVICE_ROLE_KEY` are correct.
+  The cleanup-overlap bug is fixed below.
+- `GIPHY_API_KEY` renamed on Vercel by the owner (needs a redeploy). The 2
+  under-13 profiles were deleted by the owner. Neither was touched.
+- 7-day recovery window; no Ghost Mode; E2EE untouched; AI is Action 17;
+  lyrics owner-dropped (not a gap); minimum age 13. Site owners (the only
+  recovery reviewers): `09e1232f-…3c1f` and `ca4a2221-…e021`.
+
+### Commits
+
+| Commit | Scope |
+| --- | --- |
+| `b84f68f` | A06: overlapping cleanup runs treated as already cleaned |
+| `38b1503` | A06: site-owner recovery review, §9 permanent-room deletion schedule, policy shown before joining |
+| `764bc0a` | A08: notification center, bell popover, private per-user channel |
+| `bfb9d2e` | A08: edits, replies, reactions, mentions, pins, announcements/PDF/timer notices, unread state |
+| `054c985` | A09: room home, centred/docked chat, presets, themes, owner layout lock |
+| `718c861` | A10: provider-neutral media metadata, artwork and attribution |
+| `53d726f` | Browser-walkthrough fixes and private inbox/DM channels |
+
+### Migrations (dry run → push → lists match)
+
+| Migration | Purpose |
+| --- | --- |
+| `20261105130000_action06_site_owner_recovery_and_notifications_core` | site_owners, is_site_owner, typed notifications + single writer, site-owner-only review, §9 deletion schedule |
+| `20261105140000_action06_invite_preview_deletion_policy` | invite preview shows the deletion policy before joining |
+| `20261105150000_action06_fix_recovery_room_visibility_policy` | **hotfix** for the regression disclosed below |
+| `20261105160000_action08_notification_preferences_and_delivery` | DND/room mute, read_at-only updates, publication, access notices |
+| `20261105170000_action08_private_personal_notification_channel` | private per-user notification topic |
+| `20261105180000_action08_room_messaging` | edits, replies, reactions, pins, mentions/reply/announcement/PDF/timer notices, read state |
+| `20261105190000_action09_room_layout_theme` | owner default layout, layout lock, room theme (manage_settings) |
+| `20261105200000_action10_media_metadata_cache` | cached metadata column with a shape/size/key/artwork CHECK |
+| `20261105200500_action10_media_metadata_rpc` | service-role-only metadata cache RPC |
+| `20261105210000_action08_private_dm_and_inbox_channels` | private inbox and private-chat topics |
+
+### Section 1: Action 06 cleanup overlap (`b84f68f`)
+
+- Bug: when two cleanup runs overlapped, the second one's
+  `room_cleanup_jobs` upsert hit FK `23503` (the room was already destroyed)
+  and was reported as a failure (HTTP 207).
+- Fix: `src/lib/room-cleanup.ts` counts a missing parent row, or a room
+  deleted before its destroy, as `skipped`. The route reports
+  `alreadyCleanedSkipped`; real failures still return 207/500.
+- Evidence (static): `tests/room-cleanup.test.ts` covers the overlap, race
+  and real-failure cases.
+- Evidence (database, owner): production cron logs above.
+- Pending recovery requests `f5b1e203…` and `f7b05080…` (rooms `023cab03…`,
+  `3ffa29d8…`) were left untouched.
+
+### Section 2: site-owner recovery and §9 (`38b1503`, hotfix `20261105150000`)
+
+- Database (`scripts/security/site-owner-probe.mjs`, **43/43**):
+  - Member, admin, room owner and anon cannot review, and cannot list the
+    queue.
+  - `site_owners` is hidden; self-insert is denied.
+  - Any approved member, admin or owner can request recovery, one pending
+    request per user per room; forged requesters are denied.
+  - Site owners are notified of requests.
+  - Positive cases ran with a disposable QA account inserted into
+    `site_owners` inside a rolled-back transaction. They covered: queue,
+    approve, sibling auto-approval, 7-day reopen, decision notice, double
+    review denied, review of a non-pending/missing request denied, reject,
+    no review or request after the window, and the room destroyed after the
+    window. The real site owners' credentials were never used.
+- §9:
+  - The owner schedules deletion of a permanent room (7–14 day grace) and
+    can cancel; non-owners are denied.
+  - Members are notified, and a direct column write is blocked by a trigger.
+  - Cleanup destroys the room after the grace period (backdated fixture).
+  - The policy appears on explore cards and in the invite preview before
+    joining.
+- Lifecycle probe **26/26**: room-owner approval is now denied (`42501`).
+- Static: `tests/site-owner-recovery.test.ts`; `/admin/recovery` returns
+  `notFound()` for non-site-owners; `/admin` requires sign-in (route smoke:
+  307 → `/login?next=%2Fadmin%2Frecovery`).
+
+### Section 3: notifications and bell (`764bc0a`, `53d726f`)
+
+- Database (`notification-probe.mjs`, **26/26**):
+  - Others cannot read, mark or update your notices; recipients can change
+    `read_at` only.
+  - Clients cannot insert notices or call the writer.
+  - Mark-all-read affects only your own rows.
+  - Muting needs membership; room mute and DND suppress room updates;
+    access and room-deletion notices still arrive during DND.
+  - Live delivery reaches only the recipient.
+  - The per-user private channel is joinable only by its user.
+  - Own inbox and private-chat channels are joinable; another user's inbox
+    and a foreign chat are refused.
+- Browser (desktop):
+  - B's badge went 0→1→2→3 live for an access notice, a mention and a
+    reply, and A's for a PDF share.
+  - The popover is anchored under the bell (right edges aligned, 10px
+    below).
+  - It is a dialog with `aria-expanded`/`aria-controls`; focus moves to the
+    heading; Esc closes it and returns focus to the bell.
+  - Items show type icons, room names and unread markers; the room-mute and
+    DND switches are present.
+  - Read state survives a refresh.
+  - On the fixed build, the unread count appears 0.5s after the bell renders
+    (3.0s after navigation).
+- Browser (mobile): fixed sheet 12px from the edges, below the header,
+  opaque and on top; room modals (z-index 70+) still cover it.
+- Static: `tests/notification-center.test.ts` covers the badge, labels,
+  icons, merge, read math, arrow keys, motion values (180/120ms, scale
+  .96, 8px), reduced motion, migration guarantees and walkthrough
+  regressions. The reduced-motion overrides were confirmed in the stylesheet
+  the browser loaded; the preview tool cannot emulate
+  `prefers-reduced-motion`.
+- Screenshots: popover (desktop) and sheet (mobile) saved under
+  `C:\Users\DeLL\.t3\userdata\browser-artifacts\` (local only).
+
+### Section 4: Action 08 messaging (`bfb9d2e`, `53d726f`)
+
+- Database (`messaging-probe.mjs`, **37/37**):
+  - Scoped, private mentions: a non-member is never notified, the sender
+    cannot see the recipient's notice, and GIF messages never mention.
+  - Live reply notices; a reply to another room's message is rejected.
+  - Edits: the server sets `edited_at` (the client cannot); nobody can edit
+    another member's message.
+  - Reactions: only through the RPC; counts add up live; toggling removes
+    only your own; unsupported emoji are rejected; non-members cannot react.
+  - Pins need `manage_announcements` and appear live; a column write is
+    denied.
+  - Delete for everyone unpins and clears reactions; a deleted message
+    cannot be restored or edited.
+  - Announcement, PDF-share and timer-start notices arrive live; an early
+    "completed" timer claim does not notify.
+  - Unread counts and read markers work, are private, and require
+    membership.
+- Browser:
+  - `@` autocomplete is a combobox with a listbox, `aria-activedescendant`
+    and Enter-to-pick.
+  - Live: the mention highlight ("me"), the reply quote, 👍 reaction with
+    `aria-pressed`, the edit with its "edited" marker, the pin bar for the
+    member (no Unpin) and the pinned card on the dashboard.
+  - Message menus: the owner gets Reply/React/Pin/Delete for me on others'
+    messages; a member gets Reply/React/Edit/Delete for me/Delete for
+    everyone on their own messages and never Pin.
+  - Members 3-dot: the owner sees View profile/Kick/Ban/Change role on a
+    member and only View profile on themself; a member sees only View
+    profile. Moderation RPCs are server-gated (authorization probe).
+  - GIF picker with the local `GIPHY_API_KEY`: 24 trending results from
+    `media2.giphy.com` with GIPHY attribution.
+  - "New messages" divider (`role="separator"`) appears before the first
+    message after the member's last read.
+  - DND and room-mute switches are in the bell (room mute inside rooms).
+- Static: `tests/room-messaging.test.ts` covers emoji set parity with SQL,
+  mention parsing, autocomplete, the unread divider, reply previews, edit
+  rights, pins, the migration contract, notifications never copying chat
+  text, no new channel, and read markers actually sent.
+
+### Section 5: Action 09 workspace (`054c985`, `53d726f`)
+
+- Database (`workspace-probe.mjs`, **20/20**):
+  - Only `manage_settings` changes the shared layout/theme; direct writes
+    and invalid presets are refused; changes are announced as a control
+    event.
+  - With each feature off, the database and Realtime refuse it: chat
+    read/send/react plus the `sync-chat` join; files list/register; study
+    timer plus the `sync-study` join; the `sync-watch` join; announcements
+    read/post.
+  - The general room channel still works, and re-enabling restores access.
+  - The files table is never directly readable.
+- Browser:
+  - Room home: dashboard plus centred chat (720px default, resizable).
+    Opening Watch docks chat at the side (320px); Chat focus is wide (44%).
+  - Stage focus collapses the panel, which stays mounted (`display:none`),
+    with Show/Hide controls.
+  - The chat DOM node is identical across all modes, so nothing remounts.
+  - Personal preset and theme are saved per room and user (localStorage
+    keys).
+  - The owner's lock and Emerald theme reached the member live: the
+    member's own preset was overridden, the picker was disabled with
+    "Locked by the room", and "Room theme (Emerald)" applied (#6ee7b7).
+  - Watch turned off: the member fell back to home live, the Watch button
+    became disabled, and the dashboard reported "Turned off by the room:
+    Watch". No empty stage was visible.
+- Browser (mobile): no horizontal overflow; the home page shows the
+  dashboard then chat; Watch shows the stage then the panel.
+- Static: `tests/room-workspace.test.ts`.
+
+### Section 6: Action 10 media (`718c861`)
+
+- Database (`media-probe.mjs`, **12/12**):
+  - A real tagged MP3 was uploaded. The server pipeline read it through a
+    signed URL plus HTTP Range (provider-neutral; reads ≤ 64 KB) and got the
+    title, artist, album, year and JPEG artwork.
+  - Members and the owner cannot write the cache; only the service-role RPC
+    can, and the database refuses SVG/invalid artwork even from the server.
+  - Members who can watch read the cache; it is hidden while Watch is off.
+- Browser:
+  - The owner uploaded the MP3 in Watch. Both accounts saw the now-playing
+    card with "Walkthrough Theme", "The QA Players · Actions 01-10 · 2026",
+    the decoded artwork, and the attribution "Details from the file's
+    embedded tags".
+  - Player settings offer Subtitles/Audio ("Only the default audio track is
+    available").
+- Static: `tests/media-metadata.test.ts` covers ID3v2.3/2.4 (UTF-16,
+  multi-value, APIC), ID3v1, FLAC (STREAMINFO, Vorbis comments, PICTURE),
+  MP4 (moov after mdat via ranged reads), unsafe or oversized art, the
+  file-name fallback, deterministic fallback art, and server-side extraction
+  contracts.
+- No lyrics; no hard-coded storage provider (`openRangeReader` lives behind
+  the storage provider interface).
+- PDF-share notification: section 4.
+
+### Verification results
+
+| Check | Result | Label |
+| --- | --- | --- |
+| `tsc --noEmit` | clean | static |
+| `npm run lint` | 0 errors; 13 warnings, none from this run's code (`<img>` avatars, unused vars in untouched files) | static |
+| `npm run test:unit` | **89/89** | static |
+| `next build` | success | runtime |
+| Route smoke (`next start`) | `/admin/recovery`, `/home`, `/messages`, `/room/<id>` → 307 sign-in; `/`, `/login`, `/forgot-password` 200; cron without or with a wrong secret → 401. `/explore` is public by design. The login page renders a session check first and "Continue with Google" after hydration (seen in the browser). | runtime |
+| authorization probe (`full`) | **175 pass, 0 fail, 0 blocked** | database |
+| lifecycle / site-owner / notification / messaging / workspace / media probes | **26 / 43 / 26 / 37 / 20 / 12**, all pass | database |
+| Migrations | local and remote lists identical (41) | database |
+| Two-account walkthrough, desktop and mobile | all features above; defects fixed in `53d726f` and re-verified on a rebuilt server | browser |
+
+### Defects found during this run (all fixed)
+
+1. **Production regression, about 25 minutes (disclosed).** Migration
+   `20261105130000` added a `rooms` SELECT policy that called
+   `public.room_user_role`, which client roles cannot execute (RLS runs
+   with the caller's privileges). Every authenticated rooms query, and room
+   creation, failed with "permission denied for function room_user_role".
+   It was fixed by hotfix `20261105150000` (a SECURITY DEFINER wrapper
+   granted to `authenticated`; the policy is scoped to `authenticated`).
+   Since then every dry run also runs its checks as a simulated
+   `authenticated` user.
+2. **Private-only Realtime.** The project now refuses public channels. The
+   per-user notification channel (`20261105170000`) and the inbox and
+   private-chat channels (`20261105210000`) were still public and silently
+   failed in production. Personal-message toasts, the inbox refresh and
+   live E2EE DM delivery were affected. All three are now private, with
+   own-topic or participant-only policies. Encryption is unchanged.
+3. Header popovers painted under the chat (the header's stacking context).
+   Fixed with header `z-index: 60`.
+4. The bell waited 6–10s on room pages behind the page's queued server
+   actions. Notification data now goes directly through RLS.
+5. Room read markers were never sent (a lazy Supabase builder behind
+   `void`). Fixed; a pending marker is flushed on leave.
+6. "Former member" was shown while names loaded. Names now load directly;
+   "Member" is shown until they arrive.
+7. Stage focus kept a panel opened in another layout. Fixed.
+
+### Limits and items not run
+
+- The **encrypted DM browser exchange was not re-run**: QA A and B are no
+  longer friends, so RLS blocks DMs between them by design, and creating a
+  friendship would be a data change nobody asked for. Private DM and inbox
+  channel authorization is verified live (probe); the Postgres Changes path
+  on private channels is the one proven live for room chat.
+- `prefers-reduced-motion` is verified statically and in the served
+  stylesheet only.
+- A timer completion notice needs the starter's client to record
+  completion. There is no server scheduler; a completion claim earlier than
+  the session duration is ignored.
+- Unread badges appear in Messages › Groups (group rooms) and in room chat
+  (divider).
+- Other room panels still use the page's sequential server actions
+  (pre-existing, about 1.2s each); the bell and chat no longer depend on
+  them.
+- Production: not deployed and not pushed. The owner must redeploy Vercel
+  for `GIPHY_API_KEY`, and two pending recovery requests await review at
+  `/admin/recovery`.
+
+### Verdict
+
+| Action | Verdict | Basis |
+| --- | --- | --- |
+| 01 Foundation | COMPLETE | Phase 1 ledger; probes above |
+| 02 Authentication | COMPLETE | owner confirmed Google sign-in; route smoke |
+| 03 Schema/RLS alignment | COMPLETE | Phase 1 remote audit; migration lists match |
+| 04 Profiles/social | COMPLETE | Phase 1 (D9 fixed and applied earlier) |
+| 05 Room controls | COMPLETE | authorization probe 175/175; member 3-dot verified in browser |
+| 06 Lifecycle/recovery | COMPLETE | overlap fix, site-owner recovery, §9, owner cron evidence |
+| 07 Realtime | COMPLETE | capability-scoped channels; private-only gaps fixed (`170000`, `210000`) |
+| 08 Messaging/notifications | COMPLETE | sections 3–4 |
+| 09 Adaptive workspace | COMPLETE | section 5 |
+| 10 Files/media | COMPLETE | section 6; lyrics owner-dropped |

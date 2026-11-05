@@ -1,10 +1,11 @@
 'use server';
 
+import { actionResult } from '@/lib/action-result';
 import { createClient } from '@/utils/supabase/server';
 import { assertActiveRoom, isRoomExpired } from '@/lib/room-lifecycle';
 
 // 1. The Bouncer: Checks if the user is allowed inside the room
-export async function getRoomAccess(identifier: string) {
+async function getRoomAccessImpl(identifier: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { status: 'unauthorized', role: null, room: null };
@@ -44,14 +45,14 @@ export async function getRoomAccess(identifier: string) {
     return { status: 'scheduled', role: member.role, room };
   }
 
-  // Recovery-window rooms are intentionally resolvable only for the existing
-  // owner/admin recovery audience. Do not let stale approved membership fall
-  // through to the normal room shell.
+  // Recovery-window rooms resolve for every approved non-guest member (any of
+  // them may request recovery; only site owners review). Do not let stale
+  // approved membership fall through to the normal room shell.
   if (
     member.join_status === 'approved'
     && room.expiration_type === 'recoverable'
     && isRoomExpired(room)
-    && ['owner', 'admin'].includes(member.role ?? '')
+    && ['owner', 'admin', 'member'].includes(member.role ?? '')
   ) {
     return { status: 'recovery_window', role: member.role, room };
   }
@@ -62,8 +63,11 @@ export async function getRoomAccess(identifier: string) {
 
   return { status: member.join_status, role: member.role, room };
 }
+export async function getRoomAccess(identifier: string) {
+  return actionResult(() => getRoomAccessImpl(identifier));
+}
 // 2. Fetch the clipboard: Gets all members for the sidebar
-export async function getRoomMembersList(roomId: string) {
+async function getRoomMembersListImpl(roomId: string) {
   const supabase = await createClient();
   await assertActiveRoom(supabase, roomId);
   
@@ -76,17 +80,23 @@ export async function getRoomMembersList(roomId: string) {
   if (error) throw new Error(error.message);
   return data;
 }
+export async function getRoomMembersList(roomId: string) {
+  return actionResult(() => getRoomMembersListImpl(roomId));
+}
 
-export async function getRoomMemberIdentities(roomId: string) {
+async function getRoomMemberIdentitiesImpl(roomId: string) {
   const supabase = await createClient();
   await assertActiveRoom(supabase, roomId);
   const { data, error } = await supabase.rpc('get_room_member_identities', { p_room_id: roomId });
   if (error) throw new Error(error.message);
   return data ?? [];
 }
+export async function getRoomMemberIdentities(roomId: string) {
+  return actionResult(() => getRoomMemberIdentitiesImpl(roomId));
+}
 
 // 3. The Owner's Control: Approve or Reject a pending user
-export async function manageMemberRequest(roomId: string, targetUserId: string, action: 'approve' | 'reject') {
+async function manageMemberRequestImpl(roomId: string, targetUserId: string, action: 'approve' | 'reject') {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -111,4 +121,7 @@ export async function manageMemberRequest(roomId: string, targetUserId: string, 
     p_action: action,
   });
   if (error) throw new Error(error.message);
+}
+export async function manageMemberRequest(roomId: string, targetUserId: string, action: 'approve' | 'reject') {
+  return actionResult(() => manageMemberRequestImpl(roomId, targetUserId, action));
 }

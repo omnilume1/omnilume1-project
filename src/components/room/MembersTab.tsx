@@ -1,5 +1,6 @@
 "use client";
 
+import { unwrapAction } from '@/lib/action-result';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -94,9 +95,9 @@ export default function MembersTab({
     setLoading(true);
     try {
       const [memberData, controlStateData, identityData] = await Promise.all([
-        getRoomMembersList(roomId),
-        getRoomMemberControlStates(roomId),
-        getRoomMemberIdentities(roomId),
+        getRoomMembersList(roomId).then(unwrapAction),
+        getRoomMemberControlStates(roomId).then(unwrapAction),
+        getRoomMemberIdentities(roomId).then(unwrapAction),
       ]);
       setMembers((memberData as RoomMember[]) || []);
       setMemberStates((controlStateData as MemberState[]) || []);
@@ -131,7 +132,7 @@ export default function MembersTab({
   ) => {
     setError(null);
     try {
-      await manageMemberRequest(roomId, targetId, action);
+      await manageMemberRequest(roomId, targetId, action).then(unwrapAction);
       await fetchMembers();
     } catch (actionError) {
       setError(messageFrom(actionError, "Unable to update member."));
@@ -151,15 +152,15 @@ export default function MembersTab({
           roomId,
           confirmAction.userId,
           confirmAction.action,
-        );
+        ).then(unwrapAction);
       } else if (confirmAction.action === "transfer") {
-        await transferRoomOwnership(roomId, confirmAction.userId);
+        await transferRoomOwnership(roomId, confirmAction.userId).then(unwrapAction);
       } else {
         await moderateRoomMember(
           roomId,
           confirmAction.userId,
           confirmAction.action,
-        );
+        ).then(unwrapAction);
       }
       setConfirmAction(null);
       setActiveMenuId(null);

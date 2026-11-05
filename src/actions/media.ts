@@ -12,8 +12,62 @@ import {
   isRoomSubtitleMimeType,
 } from '@/lib/room-file-contract';
 import { getServerStorageProvider } from '@/lib/storage/server-provider';
+import { createAdminClient } from '@/utils/supabase/admin';
+import { cleanText, extractMediaMetadata, metadataFromFileName } from '@/lib/media-metadata';
 
 type MediaType = 'audio' | 'video' | 'url';
+
+// Action 10: read the stored file's own tags (provider-neutral byte-range
+// reads), then cache the result on the media row through a service-role-only
+// RPC (clients cannot write temporary_media); the database re-checks the
+// shape (temporary_media_metadata_shape_check).
+async function cacheMediaMetadata(mediaId: string, roomId: string, objectPath: string, fileName: string, mimeType: string, size: number) {
+  const read = await getServerStorageProvider().openRangeReader(ROOM_ATTACHMENT_BUCKET, objectPath);
+  const extracted = await extractMediaMetadata({ read, size, mimeType, fileName });
+  const metadata: Record<string, unknown> = { source: extracted.source, extracted_at: new Date().toISOString() };
+  if (extracted.title) metadata.title = extracted.title;
+  if (extracted.artist) metadata.artist = extracted.artist;
+  if (extracted.album) metadata.album = extracted.album;
+  if (extracted.year) metadata.year = extracted.year;
+  if (extracted.durationSeconds) metadata.duration_seconds = extracted.durationSeconds;
+  if (extracted.artwork) metadata.artwork = { mime_type: extracted.artwork.mimeType, data: Buffer.from(extracted.artwork.bytes).toString('base64') };
+  const { error } = await createAdminClient().rpc('cache_temporary_media_metadata', { p_media_id: mediaId, p_room_id: roomId, p_metadata: metadata });
+  if (error) throw new Error(error.message);
+}
+
+export type RoomMediaDetails = {
+  id: string;
+  mediaType: 'audio' | 'video' | 'url';
+  title: string;
+  artist: string | null;
+  album: string | null;
+  year: string | null;
+  durationSeconds: number | null;
+  // Where the details came from, shown as attribution.
+  source: 'tags' | 'filename' | 'link';
+  artworkDataUrl: string | null;
+};
+
+function detailsFromRow(row: { id: string; media_type: string; file_name: string; metadata: unknown }): RoomMediaDetails {
+  const metadata = row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata) ? row.metadata as Record<string, unknown> : {};
+  const mediaType = row.media_type === 'audio' || row.media_type === 'video' ? row.media_type : 'url';
+  const fallback = metadataFromFileName(row.file_name);
+  const artwork = metadata.artwork && typeof metadata.artwork === 'object' ? metadata.artwork as Record<string, unknown> : null;
+  const artworkMime = artwork && (artwork.mime_type === 'image/jpeg' || artwork.mime_type === 'image/png') ? artwork.mime_type : null;
+  const artworkData = artwork && typeof artwork.data === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(artwork.data) ? artwork.data : null;
+  const duration = typeof metadata.duration_seconds === 'number' && Number.isFinite(metadata.duration_seconds) ? metadata.duration_seconds : null;
+  return {
+    id: row.id,
+    mediaType,
+    title: cleanText(metadata.title) ?? (mediaType === 'url' ? cleanText(row.file_name) : fallback.title) ?? 'Untitled media',
+    artist: cleanText(metadata.artist) ?? (mediaType === 'url' ? null : fallback.artist),
+    album: cleanText(metadata.album),
+    year: typeof metadata.year === 'string' && /^[12][0-9]{3}$/.test(metadata.year) ? metadata.year : null,
+    durationSeconds: duration,
+    source: mediaType === 'url' ? 'link' : metadata.source === 'tags' ? 'tags' : 'filename',
+    artworkDataUrl: artworkMime && artworkData ? `data:${artworkMime};base64,${artworkData}` : null,
+  };
+}
 
 async function getAuthenticatedUser() {
   const supabase = await createClient();
@@ -98,6 +152,11 @@ export async function logTemporaryMedia(
     if (error) throw new Error(error.message);
     const row = (Array.isArray(data) ? data[0] : data) as { id?: unknown } | null;
     if (!row || typeof row.id !== 'string') throw new Error('Media was not registered.');
+    if (mediaType !== 'url' && verifiedMimeType && verifiedFileSize) {
+      // Never blocks the cast: on any failure the stage falls back to the
+      // file name and generated artwork.
+      await cacheMediaMetadata(row.id, roomId, filePath, fileName, verifiedMimeType, verifiedFileSize).catch(() => undefined);
+    }
     // Room members learn about a cast only through this id. They resolve the
     // playable URL themselves through resolveRoomMedia, which never travels
     // over Broadcast (see src/lib/room-broadcast-contract.ts).
@@ -205,6 +264,29 @@ export async function attachRoomMediaSubtitle(roomId: string, mediaId: string, s
   }
 }
 
+// The details behind the stage's now-playing card. Only members who can
+// watch this room right now receive them; nothing travels over Broadcast.
+export async function getRoomMediaDetails(roomId: string, mediaId: string): Promise<{ success: true; details: RoomMediaDetails } | { success: false; error: string }> {
+  try {
+    if (!isUuid(roomId) || !isUuid(mediaId)) throw new Error('Invalid media reference.');
+    const { supabase, user } = await getAuthenticatedUser();
+    await assertActiveRoom(supabase, roomId);
+    await assertCapability(supabase, roomId, user.id, 'watch');
+    const { data, error } = await supabase
+      .from('temporary_media')
+      .select('id, media_type, file_name, metadata')
+      .eq('id', mediaId)
+      .eq('room_id', roomId)
+      .gt('expires_at', new Date().toISOString())
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error('This media is no longer available.');
+    return { success: true, details: detailsFromRow(data) };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to load media details.' };
+  }
+}
+
 export async function getActiveTemporaryMedia(roomId: string) {
   try {
     if (!roomId) throw new Error('Room is required.');
@@ -213,9 +295,10 @@ export async function getActiveTemporaryMedia(roomId: string) {
     await assertActiveRoom(supabase, roomId);
     await assertCapability(supabase, roomId, user.id, 'watch');
 
+    // Cached text details only; artwork is fetched per item on the stage.
     const { data, error } = await supabase
       .from('temporary_media')
-      .select('*')
+      .select('id, room_id, file_name, file_url, media_type, mime_type, file_size, storage_path, subtitle_path, expires_at, created_at, title:metadata->>title, artist:metadata->>artist, metadata_source:metadata->>source')
       .eq('room_id', roomId)
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false });

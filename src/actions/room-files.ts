@@ -1,5 +1,6 @@
 'use server';
 
+import { actionResult } from '@/lib/action-result';
 import { createClient } from '@/utils/supabase/server';
 import {
   ROOM_ATTACHMENT_BUCKET,
@@ -47,7 +48,7 @@ async function assertFilesCapability(
   if (!data) throw new Error('You do not have permission to use Files in this room.');
 }
 
-export async function listRoomFiles(roomId: string): Promise<RoomFileRow[]> {
+async function listRoomFilesImpl(roomId: string): Promise<RoomFileRow[]> {
   const { supabase } = await authenticatedClient();
   const { data, error } = await supabase.rpc('list_room_files', { p_room_id: roomId });
   if (error) throw new Error(error.message);
@@ -57,8 +58,11 @@ export async function listRoomFiles(roomId: string): Promise<RoomFileRow[]> {
     size_bytes: Number((row as { size_bytes: number | string }).size_bytes),
   })) as RoomFileRow[];
 }
+export async function listRoomFiles(roomId: string) {
+  return actionResult(() => listRoomFilesImpl(roomId));
+}
 
-export async function registerRoomFile(input: {
+async function registerRoomFileImpl(input: {
   roomId: string;
   objectPath: string;
   fileName: string;
@@ -91,8 +95,17 @@ export async function registerRoomFile(input: {
   if (error) throw new Error(error.message);
   return data as RoomFileRow;
 }
+export async function registerRoomFile(input: {
+  roomId: string;
+  objectPath: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+}) {
+  return actionResult(() => registerRoomFileImpl(input));
+}
 
-export async function getRoomFileDownloadUrl(fileId: string) {
+async function getRoomFileDownloadUrlImpl(fileId: string) {
   const { supabase } = await authenticatedClient();
   const { data: objectPath, error } = await supabase.rpc('get_room_file_download_path', { p_file_id: fileId });
   if (error || !objectPath) throw new Error(error?.message || 'Unable to authorize this room-file download.');
@@ -103,8 +116,11 @@ export async function getRoomFileDownloadUrl(fileId: string) {
   );
   return { url };
 }
+export async function getRoomFileDownloadUrl(fileId: string) {
+  return actionResult(() => getRoomFileDownloadUrlImpl(fileId));
+}
 
-export async function deleteRoomFile(fileId: string) {
+async function deleteRoomFileImpl(fileId: string) {
   const { supabase } = await authenticatedClient();
   const { data: objectPath, error } = await supabase.rpc('begin_room_file_delete', { p_file_id: fileId });
   if (error) throw new Error(error.message);
@@ -129,17 +145,23 @@ export async function deleteRoomFile(fileId: string) {
     throw new Error(`File deletion is queued for retry: ${message}`);
   }
 }
+export async function deleteRoomFile(fileId: string) {
+  return actionResult(() => deleteRoomFileImpl(fileId));
+}
 
 // This cleans an object only after the caller proves the same room-scoped path
 // they just uploaded. It handles cancellation and registration failures without
 // exposing the service-role credential to the browser.
-export async function cleanupUnregisteredRoomFile(roomId: string, objectPath: string) {
+async function cleanupUnregisteredRoomFileImpl(roomId: string, objectPath: string) {
   const { supabase, user } = await authenticatedClient();
   await assertFilesCapability(supabase, roomId, user.id);
   if (!isRoomObjectPath(roomId, objectPath, 'file')) {
     throw new Error('Invalid room file path.');
   }
   await getServerStorageProvider().cleanup(ROOM_ATTACHMENT_BUCKET, [objectPath]);
+}
+export async function cleanupUnregisteredRoomFile(roomId: string, objectPath: string) {
+  return actionResult(() => cleanupUnregisteredRoomFileImpl(roomId, objectPath));
 }
 
 export type { RoomFileRow };

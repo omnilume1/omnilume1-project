@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useEffect, useState } from 'react';
 import { getRoomControlState } from '@/actions/room-controls';
 
@@ -13,7 +14,7 @@ export default function RoomEntryPrompts({ roomId, onOpenRoomProfile }: { roomId
   useEffect(() => {
     let active = true;
 
-    void getRoomControlState(roomId).then((state) => {
+    void getRoomControlState(roomId).then(unwrapAction).then((state) => {
       if (!active) return;
       const nextWelcome = state.settings?.welcome_message ?? '';
       const nextRules = state.settings?.rules ?? '';

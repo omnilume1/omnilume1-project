@@ -9,7 +9,15 @@ type AdminDatabase = {
   public: {
     Tables: Record<string, never>;
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    // Deliberately narrow: the only public RPC the service role calls from
+    // app code caches media metadata the server read from the stored file
+    // itself (Action 10; clients cannot write temporary_media).
+    Functions: {
+      cache_temporary_media_metadata: {
+        Args: { p_media_id: string; p_room_id: string; p_metadata: Record<string, unknown> };
+        Returns: boolean;
+      };
+    };
   };
   storage: {
     Tables: {

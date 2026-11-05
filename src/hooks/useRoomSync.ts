@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { isUuid } from '@/lib/message-limits';
@@ -180,7 +181,9 @@ export function clearRoomRealtimeCache(roomId: string) {
 }
 
 const MEDIA_RESOLUTION_TTL_MS = 45 * 60 * 1000;
-const ROOM_MESSAGE_FIELDS = ['id', 'sender_id', 'content', 'is_deleted', 'created_at'] as const;
+// Room message columns relayed from the RLS-checked Postgres Changes feed
+// (edits, pins and reaction summaries are UPDATEs of the same row).
+const ROOM_MESSAGE_FIELDS = ['id', 'sender_id', 'content', 'is_deleted', 'created_at', 'edited_at', 'reply_to_id', 'pinned_at', 'pinned_by', 'reaction_summary'] as const;
 
 function asFiniteNumber(value: unknown, fallback: number) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -709,7 +712,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     if (snapshotType) {
       // The server allocates the version while serializing the snapshot row.
       // Broadcast only after that authoritative version is known.
-      void saveRoomRealtimeSnapshot(roomId, snapshotType, 1, { eventType, payload: wirePayload })
+      void saveRoomRealtimeSnapshot(roomId, snapshotType, 1, { eventType, payload: wirePayload }).then(unwrapAction)
         .then((result) => {
           const authoritativeVersion = result?.state_version;
           if (!authoritativeVersion || !Number.isSafeInteger(authoritativeVersion)) return;
@@ -808,7 +811,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     let cancelled = false;
     if (!roomId) return () => { cancelled = true; };
 
-    void getRoomRealtimeSnapshots(roomId).then((snapshots) => {
+    void getRoomRealtimeSnapshots(roomId).then(unwrapAction).then((snapshots) => {
       if (cancelled) return;
       (snapshots as RealtimeSnapshot[]).forEach((snapshot) => {
         const snapshotType = snapshot.snapshot_type === 'media' || snapshot.snapshot_type === 'timer'

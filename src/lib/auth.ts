@@ -61,6 +61,8 @@ export function isAuthRequiredPath(pathname: string) {
     pathname === '/profile' ||
     pathname.startsWith('/profile/') ||
     pathname === '/settings' ||
+    pathname === '/admin' ||
+    pathname.startsWith('/admin/') ||
     pathname === PROFILE_SETUP_PATH
   );
 }

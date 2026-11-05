@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useEffect, useState } from 'react';
 import { getMyRoomPresenceMode } from '@/actions/room-controls';
 import { createClient } from '@/utils/supabase/client';
@@ -36,7 +37,7 @@ export function useRoomPresence(roomId: string, refreshKey = 0): RoomPresenceVal
     const connect = async () => {
       const [{ data: { user } }, mode] = await Promise.all([
         supabase.auth.getUser(),
-        getMyRoomPresenceMode(roomId),
+        getMyRoomPresenceMode(roomId).then(unwrapAction),
       ]);
       if (!isMounted || !user) return;
 

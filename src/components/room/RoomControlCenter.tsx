@@ -1,5 +1,6 @@
 "use client";
 
+import { unwrapAction } from '@/lib/action-result';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createRoomAnnouncement,
@@ -12,10 +13,22 @@ import {
   setRoomGhostMode,
   transferRoomOwnership,
   updateRoomAnnouncement,
+  updateRoomAppearance,
   updateRoomControls,
   updateRoomSpecificProfile,
 } from "@/actions/room-controls";
+import {
+  ROOM_LAYOUTS,
+  ROOM_LAYOUT_DETAILS,
+  ROOM_THEMES,
+  ROOM_THEME_LABELS,
+  appearanceFromSettings,
+  type RoomAppearance,
+  type RoomLayout,
+  type RoomTheme,
+} from "@/lib/room-layout";
 import { useRoomRealtime } from "@/components/room/RoomRealtimeProvider";
+import RoomDeletionControls from '@/components/room/RoomDeletionControls';
 import { OmniIcon } from "@/components/ui/OmniIcon";
 
 type Feature = "chat" | "watch" | "files" | "study" | "announcements";
@@ -44,6 +57,9 @@ type Settings = {
   welcome_message: string;
   is_locked: boolean;
   feature_flags: Record<Feature, boolean>;
+  default_layout: RoomLayout;
+  layout_locked: boolean;
+  theme: RoomTheme;
 };
 type Permission = { role: RoomRole; capability: Capability; allowed: boolean };
 type Announcement = {
@@ -129,6 +145,9 @@ const DEFAULT_SETTINGS: Settings = {
     study: true,
     announcements: true,
   },
+  default_layout: "balanced",
+  layout_locked: false,
+  theme: "violet",
 };
 
 function messageFrom(error: unknown, fallback: string) {
@@ -151,6 +170,8 @@ export default function RoomControlCenter({
   onStateChange,
   requestedTab,
   selectedMemberId,
+  roomLifecycle,
+  onRoomLifecycleChange,
 }: {
   open: boolean;
   roomId: string;
@@ -161,9 +182,13 @@ export default function RoomControlCenter({
     canManageMembers: boolean;
     canControlMedia: boolean;
     isGhostMode: boolean;
+    appearance: RoomAppearance;
   }) => void;
   requestedTab?: Tab | null;
   selectedMemberId?: string | null;
+  // Lifecycle facts the owner's deletion controls need (master plan §9).
+  roomLifecycle?: { expirationType: string; deletionScheduledAt: string | null };
+  onRoomLifecycleChange?: (deletionScheduledAt: string | null) => void;
 }) {
   const { roomControlVersion } = useRoomRealtime();
   const [tab, setTab] = useState<Tab>("overview");
@@ -190,6 +215,9 @@ export default function RoomControlCenter({
   );
   const [editAnnouncementBody, setEditAnnouncementBody] = useState("");
   const [editAnnouncementPinned, setEditAnnouncementPinned] = useState(false);
+  const [draftLayout, setDraftLayout] = useState<RoomLayout>("balanced");
+  const [draftLayoutLocked, setDraftLayoutLocked] = useState(false);
+  const [draftTheme, setDraftTheme] = useState<RoomTheme>("violet");
   const [profileName, setProfileName] = useState("");
   const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
   const [profileBio, setProfileBio] = useState("");
@@ -214,7 +242,7 @@ export default function RoomControlCenter({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const state = await getRoomControlState(roomId);
+      const state = await getRoomControlState(roomId).then(unwrapAction);
       const nextSettings = {
         ...DEFAULT_SETTINGS,
         ...(state.settings ?? {}),
@@ -233,7 +261,7 @@ export default function RoomControlCenter({
             permission.allowed,
         );
       const [history] = await Promise.all([
-        canManageInvites ? listRoomInviteHistory(roomId) : Promise.resolve([]),
+        canManageInvites ? listRoomInviteHistory(roomId).then(unwrapAction) : Promise.resolve([]),
       ]);
       const nextProfile = state.myRoomProfile as RoomProfile | null;
 
@@ -244,6 +272,10 @@ export default function RoomControlCenter({
       setInviteHistory(history as InviteHistory[]);
       setDraftRules(nextSettings.rules);
       setDraftWelcome(nextSettings.welcome_message);
+      const nextAppearance = appearanceFromSettings(nextSettings);
+      setDraftLayout(nextAppearance.defaultLayout);
+      setDraftLayoutLocked(nextAppearance.layoutLocked);
+      setDraftTheme(nextAppearance.theme);
       setProfileName(nextProfile?.display_name ?? "");
       setProfileAvatarUrl(nextProfile?.avatar_url ?? "");
       setProfileBio(nextProfile?.bio ?? "");
@@ -267,6 +299,7 @@ export default function RoomControlCenter({
               permission.allowed,
           ),
         isGhostMode: state.myPresenceMode?.is_ghost_mode === true,
+        appearance: appearanceFromSettings(nextSettings),
       });
       setError(null);
     } catch (loadError) {
@@ -326,6 +359,7 @@ export default function RoomControlCenter({
         canControlMedia:
           isOwner || nextPermissions.some((permission) => permission.role === currentUserRole && permission.capability === "watch_control" && permission.allowed),
         isGhostMode,
+        appearance: appearanceFromSettings(settings),
       });
     };
 
@@ -334,7 +368,7 @@ export default function RoomControlCenter({
     setWorking(key);
     setError(null);
     try {
-      await setRoomRolePermission(roomId, role, capability, allowed);
+      await setRoomRolePermission(roomId, role, capability, allowed).then(unwrapAction);
       setNotice(`${role} permission updated.`);
     } catch (actionError) {
       setPermissions(previous);
@@ -458,6 +492,15 @@ export default function RoomControlCenter({
               <>
                 {tab === "overview" && (
                   <div className="space-y-5">
+                    {roomLifecycle && (
+                      <RoomDeletionControls
+                        roomId={roomId}
+                        expirationType={roomLifecycle.expirationType}
+                        deletionScheduledAt={roomLifecycle.deletionScheduledAt}
+                        isOwner={isOwner}
+                        onChanged={(value) => onRoomLifecycleChange?.(value)}
+                      />
+                    )}
                     <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
@@ -480,7 +523,7 @@ export default function RoomControlCenter({
                                 () =>
                                   updateRoomControls(roomId, {
                                     isLocked: !settings.is_locked,
-                                  }).then(() => undefined),
+                                  }).then(unwrapAction).then(() => undefined),
                                 settings.is_locked
                                   ? "Room unlocked."
                                   : "Room locked.",
@@ -542,7 +585,7 @@ export default function RoomControlCenter({
                                           featureFlags: {
                                             [feature.key]: !enabled,
                                           },
-                                        }).then(() => undefined),
+                                        }).then(unwrapAction).then(() => undefined),
                                       `${feature.label} ${enabled ? "disabled" : "enabled"}.`,
                                     )
                                   }
@@ -676,7 +719,7 @@ export default function RoomControlCenter({
                                         ? Number(guestMinutes)
                                         : undefined,
                                     },
-                                  );
+                                  ).then(unwrapAction);
                                   const newInvite = (
                                     Array.isArray(created)
                                       ? created[0]
@@ -721,7 +764,7 @@ export default function RoomControlCenter({
                                   void run(
                                     "revoke-latest",
                                     async () => {
-                                      await revokeRoomInvite(invite.id);
+                                      await revokeRoomInvite(invite.id).then(unwrapAction);
                                       setInvite(null);
                                     },
                                     "Invite revoked.",
@@ -773,7 +816,7 @@ export default function RoomControlCenter({
                                       onClick={() =>
                                         void run(
                                           `revoke-${item.id}`,
-                                          () => revokeRoomInvite(item.id),
+                                          () => revokeRoomInvite(item.id).then(unwrapAction),
                                           "Invite revoked.",
                                         )
                                       }
@@ -839,7 +882,7 @@ export default function RoomControlCenter({
                                 updateRoomControls(roomId, {
                                   rules: draftRules,
                                   welcomeMessage: draftWelcome,
-                                }).then(() => undefined),
+                                }).then(unwrapAction).then(() => undefined),
                               "Rules and welcome message saved.",
                             )
                           }
@@ -853,6 +896,76 @@ export default function RoomControlCenter({
                     ) : (
                       <ReadOnly
                         message={`${settings.welcome_message || "No welcome message has been configured."}${settings.rules ? `\n\n${settings.rules}` : ""}`}
+                      />
+                    )}
+
+                    <div>
+                      <h3 className="font-semibold text-white">Layout and theme</h3>
+                      <p className="mt-1 text-sm text-neutral-500">
+                        The default layout and theme every member starts with. Members can pick their own layout unless you lock it.
+                      </p>
+                    </div>
+                    {canManageSettings ? (
+                      <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4" aria-label="Room layout and theme">
+                        <fieldset className="space-y-2">
+                          <legend className="text-sm font-medium text-white">Default layout</legend>
+                          {ROOM_LAYOUTS.map((layout) => (
+                            <label key={layout} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm transition ${draftLayout === layout ? "border-violet-400/50 bg-violet-500/10" : "border-white/10 hover:border-white/20"}`}>
+                              <input type="radio" name="room-default-layout" value={layout} checked={draftLayout === layout} onChange={() => setDraftLayout(layout)} className="mt-1" />
+                              <span>
+                                <span className="block font-semibold text-white">{ROOM_LAYOUT_DETAILS[layout].label}</span>
+                                <span className="block text-xs leading-5 text-neutral-400">{ROOM_LAYOUT_DETAILS[layout].description}</span>
+                              </span>
+                            </label>
+                          ))}
+                        </fieldset>
+                        <label className="flex items-center justify-between gap-3 rounded-xl border border-white/10 p-3 text-sm text-white">
+                          <span>
+                            <span className="block font-medium">Lock layout for members</span>
+                            <span className="block text-xs text-neutral-400">Everyone uses the default layout; personal panel sizes still apply.</span>
+                          </span>
+                          <input type="checkbox" checked={draftLayoutLocked} onChange={(event) => setDraftLayoutLocked(event.target.checked)} />
+                        </label>
+                        <fieldset>
+                          <legend className="text-sm font-medium text-white">Room theme</legend>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {ROOM_THEMES.map((theme) => (
+                              <button
+                                key={theme}
+                                type="button"
+                                aria-pressed={draftTheme === theme}
+                                onClick={() => setDraftTheme(theme)}
+                                className={`room-theme-swatch theme-${theme} ${draftTheme === theme ? "is-selected" : ""}`}
+                              >
+                                <span aria-hidden="true" className="room-theme-swatch-dot" />
+                                {ROOM_THEME_LABELS[theme]}
+                              </button>
+                            ))}
+                          </div>
+                        </fieldset>
+                        <button
+                          type="button"
+                          disabled={working === "appearance"}
+                          onClick={() =>
+                            void run(
+                              "appearance",
+                              () =>
+                                updateRoomAppearance(roomId, {
+                                  defaultLayout: draftLayout,
+                                  layoutLocked: draftLayoutLocked,
+                                  theme: draftTheme,
+                                }).then(unwrapAction).then(() => undefined),
+                              "Layout and theme saved for everyone in the room.",
+                            )
+                          }
+                          className="omni-button omni-button-primary"
+                        >
+                          {working === "appearance" ? "Saving…" : "Save layout & theme"}
+                        </button>
+                      </section>
+                    ) : (
+                      <ReadOnly
+                        message={`Default layout: ${ROOM_LAYOUT_DETAILS[settings.default_layout]?.label ?? "Balanced"}${settings.layout_locked ? " (locked by the room)" : ""}. Theme: ${ROOM_THEME_LABELS[settings.theme] ?? "Violet"}.`}
                       />
                     )}
                   </div>
@@ -1026,7 +1139,7 @@ export default function RoomControlCenter({
                                             roomId,
                                             selectedMember.user_id,
                                             "admin",
-                                          ),
+                                          ).then(unwrapAction),
                                         "Member role updated to admin.",
                                       )
                                     }
@@ -1047,7 +1160,7 @@ export default function RoomControlCenter({
                                             roomId,
                                             selectedMember.user_id,
                                             "member",
-                                          ),
+                                          ).then(unwrapAction),
                                         "Member role updated to member.",
                                       )
                                     }
@@ -1066,7 +1179,7 @@ export default function RoomControlCenter({
                                         transferRoomOwnership(
                                           roomId,
                                           selectedMember.user_id,
-                                        ),
+                                        ).then(unwrapAction),
                                       "Ownership transferred.",
                                     )
                                   }
@@ -1136,7 +1249,7 @@ export default function RoomControlCenter({
                                       roomId,
                                       announcementBody,
                                       announcementPinned,
-                                    );
+                                    ).then(unwrapAction);
                                     setAnnouncementBody("");
                                     setAnnouncementPinned(false);
                                   },
@@ -1209,7 +1322,7 @@ export default function RoomControlCenter({
                                                 announcement.id,
                                                 editAnnouncementBody,
                                                 editAnnouncementPinned,
-                                              ).then(() => undefined),
+                                              ).then(unwrapAction).then(() => undefined),
                                             "Announcement updated.",
                                           )
                                         }
@@ -1285,7 +1398,7 @@ export default function RoomControlCenter({
                             const next = event.target.checked;
                             void run(
                               "ghost-mode",
-                              () => setRoomGhostMode(roomId, next).then(() => undefined),
+                              () => setRoomGhostMode(roomId, next).then(unwrapAction).then(() => undefined),
                               next ? "Ghost Mode enabled." : "Ghost Mode disabled.",
                             );
                           }}
@@ -1337,7 +1450,7 @@ export default function RoomControlCenter({
                                 displayName: profileName || null,
                                 avatarUrl: profileAvatarUrl || null,
                                 bio: profileBio || null,
-                              }).then(() => undefined),
+                              }).then(unwrapAction).then(() => undefined),
                             "Room-specific profile saved.",
                           )
                         }

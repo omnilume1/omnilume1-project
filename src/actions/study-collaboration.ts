@@ -1,5 +1,6 @@
 'use server';
 
+import { actionResult, unwrapAction } from '@/lib/action-result';
 import { createClient } from '@/utils/supabase/server';
 import { assertActiveRoom } from '@/lib/room-lifecycle';
 import { listRoomFiles, type RoomFileRow } from '@/actions/room-files';
@@ -20,13 +21,43 @@ async function studyClient(roomId: string) {
   return { supabase, user };
 }
 
-export async function listStudyNotes(roomId: string) { const { supabase } = await studyClient(roomId); const { data, error } = await supabase.rpc('list_study_notes', { p_room_id: roomId }); if (error) throw new Error(error.message); return (data ?? []) as StudyNote[]; }
-export async function createStudyNote(roomId: string, scope: StudyNote['scope']) { const { supabase } = await studyClient(roomId); const { data, error } = await supabase.rpc('create_study_note', { p_room_id: roomId, p_scope: scope, p_title: 'Untitled note', p_content: '' }); if (error) throw new Error(error.message); return data as StudyNote; }
-export async function updateStudyNote(noteId: string, expectedVersion: number, title: string, content: string) { const supabase = await createClient(); const { data, error } = await supabase.rpc('update_study_note', { p_note_id: noteId, p_expected_version: expectedVersion, p_title: title, p_content: content }); if (error) throw new Error(error.message); return data as StudyNote; }
-export async function deleteStudyNote(noteId: string) { const supabase = await createClient(); const { error } = await supabase.rpc('delete_study_note', { p_note_id: noteId }); if (error) throw new Error(error.message); }
-export async function getRoomWhiteboard(roomId: string) { const { supabase } = await studyClient(roomId); const { data, error } = await supabase.rpc('get_room_whiteboard', { p_room_id: roomId }); if (error) throw new Error(error.message); return (data ?? null) as RoomWhiteboard | null; }
-export async function saveRoomWhiteboard(roomId: string, expectedVersion: number, state: RoomWhiteboard['state']) { const { supabase } = await studyClient(roomId); const { data, error } = await supabase.rpc('save_room_whiteboard', { p_room_id: roomId, p_expected_version: expectedVersion, p_state: state }); if (error) throw new Error(error.message); return data as RoomWhiteboard; }
-export async function listStudyPdfFiles(roomId: string) { await studyClient(roomId); const files = await listRoomFiles(roomId); return files.filter((file) => file.mime_type === 'application/pdf') as RoomFileRow[]; }
-export async function listPdfAnnotations(roomId: string, fileId: string) { const { supabase } = await studyClient(roomId); const { data, error } = await supabase.rpc('list_pdf_annotations', { p_file_id: fileId }); if (error) throw new Error(error.message); return (data ?? []) as PdfAnnotation[]; }
-export async function createPdfAnnotation(roomId: string, fileId: string, pageNumber: number, content: string) { const { supabase } = await studyClient(roomId); const { data, error } = await supabase.rpc('create_pdf_annotation', { p_file_id: fileId, p_page_number: pageNumber, p_position: { source: 'study-pdf-viewer' }, p_content: content }); if (error) throw new Error(error.message); return data as PdfAnnotation; }
-export async function deletePdfAnnotation(roomId: string, annotationId: string) { const { supabase } = await studyClient(roomId); const { error } = await supabase.rpc('delete_pdf_annotation', { p_annotation_id: annotationId }); if (error) throw new Error(error.message); }
+async function listStudyNotesImpl(roomId: string) { const { supabase } = await studyClient(roomId); const { data, error } = await supabase.rpc('list_study_notes', { p_room_id: roomId }); if (error) throw new Error(error.message); return (data ?? []) as StudyNote[]; }
+export async function listStudyNotes(roomId: string) {
+  return actionResult(() => listStudyNotesImpl(roomId));
+}
+async function createStudyNoteImpl(roomId: string, scope: StudyNote['scope']) { const { supabase } = await studyClient(roomId); const { data, error } = await supabase.rpc('create_study_note', { p_room_id: roomId, p_scope: scope, p_title: 'Untitled note', p_content: '' }); if (error) throw new Error(error.message); return data as StudyNote; }
+export async function createStudyNote(roomId: string, scope: StudyNote['scope']) {
+  return actionResult(() => createStudyNoteImpl(roomId, scope));
+}
+async function updateStudyNoteImpl(noteId: string, expectedVersion: number, title: string, content: string) { const supabase = await createClient(); const { data, error } = await supabase.rpc('update_study_note', { p_note_id: noteId, p_expected_version: expectedVersion, p_title: title, p_content: content }); if (error) throw new Error(error.message); return data as StudyNote; }
+export async function updateStudyNote(noteId: string, expectedVersion: number, title: string, content: string) {
+  return actionResult(() => updateStudyNoteImpl(noteId, expectedVersion, title, content));
+}
+async function deleteStudyNoteImpl(noteId: string) { const supabase = await createClient(); const { error } = await supabase.rpc('delete_study_note', { p_note_id: noteId }); if (error) throw new Error(error.message); }
+export async function deleteStudyNote(noteId: string) {
+  return actionResult(() => deleteStudyNoteImpl(noteId));
+}
+async function getRoomWhiteboardImpl(roomId: string) { const { supabase } = await studyClient(roomId); const { data, error } = await supabase.rpc('get_room_whiteboard', { p_room_id: roomId }); if (error) throw new Error(error.message); return (data ?? null) as RoomWhiteboard | null; }
+export async function getRoomWhiteboard(roomId: string) {
+  return actionResult(() => getRoomWhiteboardImpl(roomId));
+}
+async function saveRoomWhiteboardImpl(roomId: string, expectedVersion: number, state: RoomWhiteboard['state']) { const { supabase } = await studyClient(roomId); const { data, error } = await supabase.rpc('save_room_whiteboard', { p_room_id: roomId, p_expected_version: expectedVersion, p_state: state }); if (error) throw new Error(error.message); return data as RoomWhiteboard; }
+export async function saveRoomWhiteboard(roomId: string, expectedVersion: number, state: RoomWhiteboard['state']) {
+  return actionResult(() => saveRoomWhiteboardImpl(roomId, expectedVersion, state));
+}
+async function listStudyPdfFilesImpl(roomId: string) { await studyClient(roomId); const files = await listRoomFiles(roomId).then(unwrapAction); return files.filter((file) => file.mime_type === 'application/pdf') as RoomFileRow[]; }
+export async function listStudyPdfFiles(roomId: string) {
+  return actionResult(() => listStudyPdfFilesImpl(roomId));
+}
+async function listPdfAnnotationsImpl(roomId: string, fileId: string) { const { supabase } = await studyClient(roomId); const { data, error } = await supabase.rpc('list_pdf_annotations', { p_file_id: fileId }); if (error) throw new Error(error.message); return (data ?? []) as PdfAnnotation[]; }
+export async function listPdfAnnotations(roomId: string, fileId: string) {
+  return actionResult(() => listPdfAnnotationsImpl(roomId, fileId));
+}
+async function createPdfAnnotationImpl(roomId: string, fileId: string, pageNumber: number, content: string) { const { supabase } = await studyClient(roomId); const { data, error } = await supabase.rpc('create_pdf_annotation', { p_file_id: fileId, p_page_number: pageNumber, p_position: { source: 'study-pdf-viewer' }, p_content: content }); if (error) throw new Error(error.message); return data as PdfAnnotation; }
+export async function createPdfAnnotation(roomId: string, fileId: string, pageNumber: number, content: string) {
+  return actionResult(() => createPdfAnnotationImpl(roomId, fileId, pageNumber, content));
+}
+async function deletePdfAnnotationImpl(roomId: string, annotationId: string) { const { supabase } = await studyClient(roomId); const { error } = await supabase.rpc('delete_pdf_annotation', { p_annotation_id: annotationId }); if (error) throw new Error(error.message); }
+export async function deletePdfAnnotation(roomId: string, annotationId: string) {
+  return actionResult(() => deletePdfAnnotationImpl(roomId, annotationId));
+}

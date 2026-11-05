@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -55,8 +56,8 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
 
     async function loadDashboardData() {
       const [friendsResult, roomsResult] = await Promise.allSettled([
-        getMyFriends(),
-        getPublicRooms(),
+        getMyFriends().then(unwrapAction),
+        getPublicRooms().then(unwrapAction),
       ]);
 
       if (!active) return;
