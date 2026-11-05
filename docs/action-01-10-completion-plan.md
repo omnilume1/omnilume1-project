@@ -45,7 +45,7 @@ Commit after each section; typecheck + lint + tests before moving on.
       real failures still 207/500.
 - [x] (b84f68f) Unit tests: overlap case, real failure case (tests/room-cleanup.test.ts).
 - [x] Leave rooms `023cab03…` and `3ffa29d8…` (pending requests) untouched (no data change made).
-- [ ] Ledger: Action 06 cron evidence (owner) + fix.
+- [x] (53d726f) Ledger: Action 06 cron evidence (owner) + fix.
 
 ## 2. Site-owner recovery (security-critical) + §9 lifecycle gaps
 - [x] (38b1503) `site_owners` table (PK → auth.users), RLS (select own row only, no
@@ -80,7 +80,7 @@ Commit after each section; typecheck + lint + tests before moving on.
 - [x] (764bc0a) Live delivery over the existing per-user channel (publication add).
 - [x] (764bc0a) Bell popover (anchored, ~16px radius, spring-like 180ms enter / 120ms
       exit, stagger, reduced-motion fade, mobile sheet, full a11y, states).
-- [ ] Tests: popover logic unit tests; RLS probe; two-account browser test +
+- [x] (53d726f) Tests: popover logic unit tests; RLS probe; two-account browser test +
       screenshot.
 
 ## 4. Action 08 — room messaging
@@ -90,19 +90,19 @@ Commit after each section; typecheck + lint + tests before moving on.
 - [x] (bfb9d2e) Mentions (@username of room members only; private notification).
 - [x] (bfb9d2e) Pinned messages (manage_announcements; pinned bar; live).
 - [x] (bfb9d2e) Announcements (authorized roles only) + member notifications.
-- [ ] Member 3-dot actions (server-gated; re-verify).
+- [x] (53d726f) Member 3-dot actions (server-gated; re-verify).
 - [x] (bfb9d2e) DND controls UI (global + per room).
 - [x] (bfb9d2e) Unread/read state (per member last read; badge + divider).
 - [x] (bfb9d2e) Shared-PDF notification; timer notifications (room owner on start,
       starter on completion).
-- [ ] GIFs re-verified with GIPHY_API_KEY.
+- [x] (53d726f) GIFs re-verified with GIPHY_API_KEY.
 
 ## 5. Action 09 — adaptive workspace
 - [x] (054c985) Layout presets (user-scoped), owner-controlled default/lock.
 - [x] (054c985) Themes/appearance (user preference, CSS variables).
 - [x] (054c985) Room dashboard/home activity (no empty gaps).
 - [x] (054c985) Saved panel sizes (user-scoped, re-verify).
-- [ ] Mobile rules (narrow-width layout).
+- [x] (53d726f) Mobile rules (narrow-width layout).
 - [x] (054c985) No remounting of existing stages; disabled features denied by
       server/RLS/realtime (re-verify).
 
@@ -110,12 +110,12 @@ Commit after each section; typecheck + lint + tests before moving on.
 - [x] (718c861) Provider-neutral metadata from embedded tags (MP3 ID3, FLAC, MP4/M4A)
       + filename fallback; artwork thumbnail; cached with the media row;
       attribution ("from file tags"/"from file name"); generated fallback art.
-- [ ] Subtitles/audio tracks re-verified.
+- [x] (53d726f) Subtitles/audio tracks re-verified.
 - [x] (bfb9d2e) PDF-share notification (section 3/4).
 
 ## Verification
-- [ ] typecheck, lint, all tests, production build, route smoke.
-- [ ] Extended two-account RLS probe (every new table/function).
-- [ ] Browser walkthrough, desktop and mobile width, every feature.
-- [ ] Migrations: rolled-back dry run → `npx supabase db push` → lists match.
-- [ ] Ledger evidence per item; final verdict table.
+- [x] (53d726f) typecheck, lint, all tests, production build, route smoke.
+- [x] (53d726f) Extended two-account RLS probe (every new table/function).
+- [x] (53d726f) Browser walkthrough, desktop and mobile width, every feature.
+- [x] (53d726f) Migrations: rolled-back dry run → `npx supabase db push` → lists match.
+- [x] (53d726f) Ledger evidence per item; final verdict table.
