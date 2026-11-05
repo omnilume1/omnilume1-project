@@ -26,35 +26,35 @@ exist; `room_control_events` is the audited, published control log.
 Privacy: private, locked (invite-only), scheduled, deletion-pending and
 converted rooms are never discoverable. Discovery/activity are enforced in
 RPC/RLS and probed.
-- [ ] 13.1 Room Search + Smart Search/Filters (Explore): `discover_rooms`
+- [x] (`26873e6`) 13.1 Room Search + Smart Search/Filters (Explore): `discover_rooms`
       RPC (query, lifespan, min members, feature, sort; public only) and a
       "My rooms" scope. Exists: client-side name filter. Extend: Explore UI.
-- [ ] 13.2 Activity / Room History: append-only `room_activity` (kind,
+- [x] (`26873e6`) 13.2 Activity / Room History: append-only `room_activity` (kind,
       actor, entity only; labels resolved at read by capability), triggers on
       existing tables, `list_room_activity` RPC, feed UI. Exists:
       `room_control_events` (control log only).
-- [ ] 13.3 Live Activity Bar / Room Pulse: `get_room_pulse` + live bar
+- [x] (`26873e6`) 13.3 Live Activity Bar / Room Pulse: `get_room_pulse` + live bar
       (online, recent chat/activity, next event) using presence + activity
       Postgres Changes on the existing channel.
-- [ ] 13.4 Room Dashboard / Home: extend RoomDashboard (Action 09) with
+- [x] (`26873e6`) 13.4 Room Dashboard / Home: extend RoomDashboard (Action 09) with
       Pulse + recent activity + upcoming event.
-- [ ] 13.5 Bookmarks / Saved content: `room_bookmarks` (room, message, file),
+- [x] (`26873e6`) 13.5 Bookmarks / Saved content: `room_bookmarks` (room, message, file),
       save/remove/list RPCs with per-kind access checks; UI in Explore, chat,
       files and Home.
-- [ ] 13.6 Room Templates: `room_templates` (own + built-in), save-from-room,
+- [x] (`26873e6`) 13.6 Room Templates: `room_templates` (own + built-in), save-from-room,
       apply at create; UI in create-room and room settings.
-- [ ] 13.7 Smart Auto-Organization: `list_my_room_overview` + pure bucketing
+- [x] (`26873e6`) 13.7 Smart Auto-Organization: `list_my_room_overview` + pure bucketing
       (`room-organization.ts`: attention / active / expiring / saved / quiet).
-- [ ] 13.8 Reputation / Trust Levels: derived (no stored score)
+- [x] (`26873e6`) 13.8 Reputation / Trust Levels: derived (no stored score)
       `get_room_trust_levels` (managers see all, others only self); badges.
-- [ ] 13.9 Cross-Room Personal Dashboard: Home sections from the overview,
+- [x] (`26873e6`) 13.9 Cross-Room Personal Dashboard: Home sections from the overview,
       upcoming events, assigned tasks, saved items.
-- [ ] 13.10 Backup / Export: `export_room_snapshot` (owner/admin, rate
+- [x] (`26873e6`) 13.10 Backup / Export: `export_room_snapshot` (owner/admin, rate
       limited, audited in `room_exports`, SHA-256 digest, no keys/ciphertext);
       server action + download.
-- [ ] 13.11 Event management: RSVPs on `room_events` (`room_event_rsvps`),
+- [x] (`26873e6`) 13.11 Event management: RSVPs on `room_events` (`room_event_rsvps`),
       counts + own response, events in Home.
-- [ ] 13.12 Unit tests; probes (member/admin/owner/outsider/anon); dry run;
+- [x] (`26873e6`) 13.12 Unit tests; probes (member/admin/owner/outsider/anon); dry run;
       push; two-account browser (desktop + mobile); ledger.
 
 ## Action 14 — Room-to-group conversion
