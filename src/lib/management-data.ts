@@ -98,6 +98,11 @@ export const listEventRsvpCounts = (roomId: string) =>
 export const setEventRsvp = (eventId: string, response: RsvpResponse | null) =>
   rpc<null>('set_event_rsvp', { p_event_id: eventId, p_response: response }, 'Unable to save your response.');
 
+// --- Room-to-group conversion (Action 14) ---------------------------------------------------------
+export type RoomGroup = { group_id: string; name: string; converted_at: string; member_count: number };
+export const getRoomGroup = (roomId: string) =>
+  rpc<RoomGroup | null>('get_room_group', { p_room_id: roomId }, 'Group details are unavailable.');
+
 // --- Cross-room dashboard ----------------------------------------------------------------------------
 export type UpcomingEvent = { event_id: string; room_id: string; room_name: string; title: string; starts_at: string; my_response: RsvpResponse | null };
 export type OpenTask = { task_id: string; room_id: string; room_name: string; title: string; due_at: string | null };

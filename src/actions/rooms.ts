@@ -3,7 +3,6 @@
 import { actionResult } from '@/lib/action-result';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@/utils/supabase/server';
-import { assertActiveRoom } from '@/lib/room-lifecycle';
 
 // 1. Create Room
 async function createRoomImpl(formData: FormData) {
@@ -168,50 +167,25 @@ export async function getMyJoinedRooms() {
   return actionResult(() => getMyJoinedRoomsImpl());
 }
 
-// 4. Phase 16: Convert a Temporary Room into a Permanent Group
-async function convertRoomToGroupImpl(roomId: string, groupUsername: string) {
+// 4. Action 14: convert a room into a persistent group. One database
+// transaction (convert_room_to_group) decides eligibility and does all of the
+// work or none of it; a repeated call returns the same group. A group has no
+// username or link, so none is accepted here.
+const CONVERSION_ERRORS = new Set(['not_owner', 'not_signed_in', 'not_active', 'irreversible', 'deletion_scheduled', 'owner_invalid', 'e2ee_keys_missing']);
+async function convertRoomToGroupImpl(roomId: string) {
+  if (typeof roomId !== 'string' || !/^[0-9a-f-]{36}$/i.test(roomId)) throw new Error('Choose a room to convert.');
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) throw new Error('Sign in to convert a room.');
 
-  if (authError || !user) throw new Error("Unauthorized");
-
-  // Verify ownership
-  const { data: member } = await supabase
-    .from('room_members')
-    .select('role')
-    .eq('room_id', roomId)
-    .eq('user_id', user.id)
-    .single();
-
-  if (!member || member.role !== 'owner') {
-    throw new Error("Only the room owner can convert this space to a group.");
+  const { data, error } = await supabase.rpc('convert_room_to_group', { p_room_id: roomId });
+  if (error) {
+    // The RPC's own sentences are written for people; anything else is generic.
+    throw new Error(CONVERSION_ERRORS.has(error.hint ?? '') ? error.message : 'The room could not be converted. Nothing was changed. Try again.');
   }
-
-  await assertActiveRoom(supabase, roomId);
-
-  // Verify the room is allowed to be converted (Not Irreversible)
-  const { data: room } = await supabase
-    .from('rooms')
-    .select('expiration_type')
-    .eq('id', roomId)
-    .single();
-
-  if (!room || room.expiration_type === 'irreversible') {
-    throw new Error("Irreversible rooms cannot be converted to groups.");
-  }
-
-  // Clean the new username
-  const cleanUsername = groupUsername.toLowerCase().replace(/[^a-z0-9_.]/g, '');
-
-  const { error: conversionError } = await supabase.rpc('convert_active_room_to_permanent', {
-    p_room_id: roomId,
-    p_username: cleanUsername || null,
-  });
-
-  if (conversionError) throw new Error(conversionError.message);
-
-  return true;
+  const result = data as { group_id: string; name: string; already_converted: boolean; member_count: number };
+  return { groupId: result.group_id, name: result.name, alreadyConverted: result.already_converted, memberCount: result.member_count };
 }
-export async function convertRoomToGroup(roomId: string, groupUsername: string) {
-  return actionResult(() => convertRoomToGroupImpl(roomId, groupUsername));
+export async function convertRoomToGroup(roomId: string) {
+  return actionResult(() => convertRoomToGroupImpl(roomId));
 }

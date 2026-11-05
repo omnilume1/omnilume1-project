@@ -1831,3 +1831,71 @@ discovery. Export is signed with a recorded SHA-256 digest (no signing secret
 is configured; a keyed signature would need an owner-provided secret).
 Template apply at creation is best-effort (scheduled rooms are not yet
 "active", so apply is skipped; the owner can apply from Controls).
+
+### Action 14 — Room-to-group conversion
+
+Database (`20261108110000_action14_room_group_conversion.sql`, applied after a
+rolled-back dry run as `authenticated`/`anon`). `groups` (no username or
+link; `source_room_id` UNIQUE, ON DELETE RESTRICT), `group_members` (one
+owner per group), `room_group_conversions` (audit + staged content counts +
+previous settings + what was resolved); RLS, select-only grants, policy
+helpers `is_group_member` / `is_group_manager` executable by `authenticated`.
+`convert_room_to_group(room)` is one SECURITY DEFINER transaction (row lock →
+idempotent): owner only; refuses inactive, irreversible, deletion-scheduled
+and owner-less rooms and encrypted rooms whose members lack keys; migrates
+approved, non-guest, unrestricted members with roles; keeps the room and all
+content by reference; closes the room (permanent, private, locked, invites
+revoked, username cleared, pending requests settled); one notice per member
+(`group_conversion`), one `group_converted` control event, one activity row.
+`destroy_expired_room`, `list_rooms_due_for_destruction` and
+`schedule_room_deletion` exclude converted rooms (the cleanup job removes
+storage *before* destroying, so the due list is the real guard);
+`prepare_account_deletion` moves group ownership to the replacement owner or
+removes a sole owner's group first; the legacy `convert_active_room_to_permanent`
+(group username) is no longer executable.
+
+- database-security, dry run: member/outsider/anon refused (42501); irreversible
+  and deletion-scheduled refused; encrypted room refused without keys and
+  converted with keys, ciphertext hash identical; a forced failure inside the
+  transaction left the room, group count and invites unchanged; double call:
+  first `false`, second `true`, same group; 1 group / 2 members / 1 record; room
+  permanent/NULL/NULL/private/group/locked; notices: member 1, actor 0; 1 control
+  event, 1 activity row; post-conversion RLS (member sees group + members, not the
+  record; outsider/anon nothing; direct inserts refused); `lifecycle_state` was
+  `destroyed` yet the due list excluded the room, `destroy_expired_room` returned
+  false and a direct DELETE hit the RESTRICT FK; account deletion → replacement
+  becomes group owner, sole owner's group+room removed.
+- database-security, `scripts/security/conversion-probe.mjs` (live, owner A,
+  member B and three throw-away users: guest, pending requester, outsider):
+  **19 pass, 0 fail** — incl. two simultaneous conversions → exactly one group,
+  guest/pending not migrated, exactly one notice and one received event, closed to
+  requests and old invites, not discoverable, deletion cannot be scheduled /
+  listed / destroyed / forced, encrypted room with untouched ciphertext.
+- static, `tests/group-conversion.test.ts` (in the 125/125 run): migration
+  contract (RLS, grants, RESTRICT FK, no username/link column, single definer
+  transaction, eligibility before first write, never deletes content or touches
+  ciphertext), lifecycle guards, cleanup ordering, account deletion order, server
+  action (no username, values), dialog contract, and the hook-order regression
+  below. Lint 0 errors / 13 warnings; `next build` ok.
+
+Walkthrough (multi-user, local runtime; owner A desktop 830 px, member B at
+390 px): A opened "Convert to group" → dialog lists what is kept/changes, no
+username field, focus on Cancel; double confirm → one request; A saw the group
+banner and the button disappeared; B (no reload) got the banner, header
+"GROUP / … PERMANENT" and a "Group" notification in the bell; B has no convert
+button; B page has no horizontal overflow (scrollWidth 375). Explore: converted
+room absent from Public rooms, listed under My rooms.
+
+Bugs found in the walkthrough and fixed: (1) the new hooks in the room page were
+placed after the page's early returns → "page couldn't load" (hook order); moved
+above them, with a source-order regression test. (2) two clicks in the same tick
+could send two requests and the later "already converted" answer overwrote the
+result text → an in-flight ref now allows one request.
+
+Decisions / notes: conversion is owner-only (the roadmap's "explicit admin
+permission" would need a new capability; not added). Group membership is a
+snapshot at conversion; later room-role changes do not mirror into the group
+(Action 15 owns group membership). Pending recovery requests (practically
+impossible on an active room) are deleted and pending permanent-room requests
+approved; both counts are in the conversion record. No external provider is
+needed for either action.

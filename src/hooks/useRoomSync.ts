@@ -126,7 +126,7 @@ export type RoomMessageEvent = {
 export type RoomControlEvent = {
   id: number;
   roomId: string;
-  eventType: 'membership_changed' | 'role_changed' | 'invite_changed' | 'restriction_changed' | 'ownership_changed' | 'settings_changed' | 'lock_changed' | 'announcement_changed' | 'guest_changed' | 'feature_changed';
+  eventType: 'membership_changed' | 'role_changed' | 'invite_changed' | 'restriction_changed' | 'ownership_changed' | 'settings_changed' | 'lock_changed' | 'announcement_changed' | 'guest_changed' | 'feature_changed' | 'group_converted';
   subjectUserId: string | null;
   payload: Record<string, unknown>;
   createdAt: string;
