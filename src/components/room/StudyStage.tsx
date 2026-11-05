@@ -5,11 +5,12 @@ import {
   useEffect,
   useRef,
   useState,
-  type ChangeEvent,
-  type MouseEvent,
 } from 'react';
 import { deleteStudySubject, getStudyHistory, logStudySession, type StudyHistoryEntry } from '@/actions/study';
 import StudySubTimer from '@/components/room/StudySubTimer';
+import StudyNotesPanel from '@/components/room/StudyNotesPanel';
+import StudyWhiteboardPanel from '@/components/room/StudyWhiteboardPanel';
+import StudyPdfPanel from '@/components/room/StudyPdfPanel';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import type { TimerState } from '@/hooks/useRoomSync';
@@ -195,14 +196,9 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
   const [focusLock, setFocusLock] = useState<FocusLockState | null>(null);
   const [showFocusWarning, setShowFocusWarning] = useState(false);
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [ctx, setCtx] = useState<CanvasRenderingContext2D | null>(null);
   const completionSessionRef = useRef<string | null>(null);
   const loggingSessionRef = useRef(new Set<string>());
   const previousTimerSessionRef = useRef<string | null>(timerState.sessionId);
-  const [notesContent, setNotesContent] = useState('');
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
   const draftDurationSeconds = (inputHrs * 3_600) + (inputMin * 60) + inputSec;
   const hasSession = Boolean(timerState.sessionId);
@@ -333,24 +329,6 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
     return () => window.clearTimeout(expiryRefresh);
   }, [focusLock, focusLockActive, focusLockRemaining, refreshFocusLock]);
 
-  useEffect(() => {
-    if (activeTab !== 'WHITEBOARD' || !canvasRef.current || ctx) return;
-    const canvas = canvasRef.current;
-    canvas.width = canvas.offsetWidth;
-    canvas.height = canvas.offsetHeight;
-    const context = canvas.getContext('2d');
-    if (context) {
-      context.lineCap = 'round';
-      context.lineWidth = 3;
-      context.strokeStyle = '#6366f1';
-      setCtx(context);
-    }
-  }, [activeTab, ctx]);
-
-  useEffect(() => () => {
-    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-  }, [pdfUrl]);
-
   const rememberSubject = (value: string) => {
     saveRecentSubject(roomId, value);
     setRecentSubjects(readRecentSubjects(roomId));
@@ -437,32 +415,6 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
     const lock = activateFocusLock(roomId, focusRoomPath);
     setFocusLock(lock);
     setShowFocusWarning(false);
-  };
-
-  const startDraw = (event: MouseEvent<HTMLCanvasElement>) => {
-    if (!ctx) return;
-    ctx.beginPath();
-    ctx.moveTo(event.nativeEvent.offsetX, event.nativeEvent.offsetY);
-    setIsDrawing(true);
-  };
-
-  const draw = (event: MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !ctx) return;
-    ctx.lineTo(event.nativeEvent.offsetX, event.nativeEvent.offsetY);
-    ctx.stroke();
-  };
-
-  const stopDraw = () => {
-    if (!ctx) return;
-    ctx.closePath();
-    setIsDrawing(false);
-  };
-
-  const handlePdfUpload = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-    setPdfUrl(URL.createObjectURL(file));
   };
 
   const selectHistorySubject = (historySubject: string) => {
@@ -627,13 +579,9 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
           </div>
         </div>
 
-        {activeTab === 'NOTES' && <textarea value={notesContent} onChange={(event) => setNotesContent(event.target.value)} placeholder="Type your private study notes here..." className="min-h-0 flex-1 w-full resize-none rounded-xl border border-neutral-800 bg-[#121212] p-6 text-white shadow-inner outline-none focus:border-indigo-500" />}
-        {activeTab === 'WHITEBOARD' && <div className="relative min-h-0 flex-1 w-full cursor-crosshair overflow-hidden rounded-xl border border-neutral-800 bg-[#121212]"><canvas ref={canvasRef} onMouseDown={startDraw} onMouseMove={draw} onMouseUp={stopDraw} onMouseLeave={stopDraw} className="block h-full w-full" /></div>}
-        {activeTab === 'PDF' && (
-          <div className="relative flex min-h-0 flex-1 w-full flex-col overflow-hidden rounded-xl border border-neutral-800 bg-[#121212]">
-            {!pdfUrl ? <div className="flex flex-1 flex-col items-center justify-center gap-4"><label className="cursor-pointer rounded-lg bg-indigo-600 px-6 py-3 font-bold text-white shadow-lg transition hover:bg-indigo-500">Upload PDF<input type="file" accept="application/pdf" className="hidden" onChange={handlePdfUpload} /></label></div> : <iframe src={pdfUrl} className="h-full w-full flex-1 border-none bg-white" title="PDF Viewer" />}
-          </div>
-        )}
+        {activeTab === 'NOTES' && <StudyNotesPanel roomId={roomId} />}
+        {activeTab === 'WHITEBOARD' && <StudyWhiteboardPanel roomId={roomId} />}
+        {activeTab === 'PDF' && <StudyPdfPanel roomId={roomId} />}
       </div>
 
       <div

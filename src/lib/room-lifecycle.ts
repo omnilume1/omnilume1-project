@@ -5,6 +5,7 @@ export type RoomLifecycleRow = {
   expiration_type: 'permanent' | 'recoverable' | 'irreversible';
   expires_at: string | null;
   reopened_until?: string | null;
+  scheduled_for?: string | null;
 };
 
 function effectiveDeadline(room: Pick<RoomLifecycleRow, 'expiration_type' | 'expires_at' | 'reopened_until'>, now: number) {
@@ -34,7 +35,7 @@ export async function getRoomLifecycle(
 ): Promise<RoomLifecycleRow> {
   const { data, error } = await supabase
     .from('rooms')
-    .select('id, expiration_type, expires_at, reopened_until')
+    .select('id, expiration_type, expires_at, reopened_until, scheduled_for')
     .eq('id', roomId)
     .maybeSingle();
 
@@ -46,6 +47,9 @@ export async function getRoomLifecycle(
 
 export async function assertActiveRoom(supabase: SupabaseClient, roomId: string) {
   const room = await getRoomLifecycle(supabase, roomId);
+  const { data: hasActiveAccess, error } = await supabase.rpc('room_has_active_access', { p_room_id: roomId });
+  if (error) throw new Error(error.message);
+  if (!hasActiveAccess) throw new Error('This room is not currently open.');
   if (isRoomExpired(room)) throw new Error('This room has expired and is no longer active.');
   return room;
 }

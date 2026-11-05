@@ -13,6 +13,7 @@ export default function CreateRoomPage() {
   const [loading, setLoading] = useState(false);
   const [isTemp, setIsTemp] = useState(false);
   const [allowRecovery, setAllowRecovery] = useState(true);
+  const [isScheduled, setIsScheduled] = useState(false);
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -50,6 +51,8 @@ export default function CreateRoomPage() {
             <div><label className="form-label" htmlFor="room-username">Custom link <span className="text-neutral-500">(optional)</span></label><div className="flex overflow-hidden rounded-xl border border-white/10 bg-black/20 focus-within:border-violet-400/40"><span className="flex items-center border-r border-white/10 px-3 text-xs text-neutral-500">omnilume.com/r/</span><input id="room-username" name="username" type="text" placeholder="my_custom_room" className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-white outline-none" /></div><p className="form-help">A memorable link people can use to find your room.</p></div>
 
             <div><p className="form-label">Room lifespan</p><div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setIsTemp(false)} className={`omni-button ${!isTemp ? 'omni-button-primary' : 'omni-button-ghost'}`}>Permanent</button><button type="button" onClick={() => setIsTemp(true)} className={`omni-button ${isTemp ? 'omni-button-primary' : 'omni-button-ghost'}`}>Temporary</button></div></div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"><label className="flex cursor-pointer items-start gap-3 text-xs leading-relaxed text-neutral-300"><input type="checkbox" checked={isScheduled} onChange={(event) => setIsScheduled(event.target.checked)} className="mt-0.5 h-4 w-4 accent-violet-400" /><span><strong className="text-white">Schedule room opening</strong><br /><span className="text-neutral-500">Members can see the scheduled room, but no one can join before it opens.</span></span></label>{isScheduled && <label className="mt-4 block"><span className="form-label">Opens at</span><input name="scheduled_for" type="datetime-local" required={isScheduled} className="omni-input" /></label>}</div>
 
             {isTemp && <div className="rounded-2xl border border-amber-300/20 bg-amber-200/[0.04] p-4"><div><label className="form-label text-amber-100" htmlFor="expires-hours">Self-destruct timer (hours)</label><input id="expires-hours" name="expires_in_hours" type="number" min="1" max="720" required defaultValue="24" className="omni-input border-amber-300/20" /></div><label className="mt-4 flex cursor-pointer items-start gap-3 text-xs leading-relaxed text-neutral-300"><input type="checkbox" checked={allowRecovery} onChange={(e) => setAllowRecovery(e.target.checked)} className="mt-0.5 h-4 w-4 accent-amber-400" /><span><strong className="text-amber-100">Enable quarantine:</strong> If unchecked, files and chats are permanently burned when the timer ends.</span></label></div>}
 

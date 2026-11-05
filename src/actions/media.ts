@@ -3,6 +3,15 @@
 import { createClient } from '@/utils/supabase/server';
 import { assertActiveRoom, roomExpirySeconds } from '@/lib/room-lifecycle';
 import { isUuid } from '@/lib/message-limits';
+import {
+  ROOM_ATTACHMENT_BUCKET,
+  isLegacyRoomObjectPath,
+  hasValidRoomFileMimeExtension,
+  isRoomMediaMimeType,
+  isRoomObjectPath,
+  isRoomSubtitleMimeType,
+} from '@/lib/room-file-contract';
+import { getServerStorageProvider } from '@/lib/storage/server-provider';
 
 type MediaType = 'audio' | 'video' | 'url';
 
@@ -42,18 +51,37 @@ export async function logTemporaryMedia(
   fileName: string,
   filePath: string,
   mediaType: MediaType,
-  upload?: { mimeType: string; sizeBytes: number },
+  mimeType?: string,
+  fileSize?: number,
 ) {
   try {
     if (!roomId || !fileName.trim() || !filePath) {
       throw new Error('Invalid media details.');
     }
     if (!['audio', 'video', 'url'].includes(mediaType)) throw new Error('Invalid media type.');
-    if (mediaType !== 'url' && !upload) throw new Error('Uploaded media requires its type and size.');
 
     const { supabase, user } = await getAuthenticatedUser();
     await assertActiveRoom(supabase, roomId);
     await assertCanCast(supabase, roomId, user.id);
+
+    // The stored object's own metadata, not the client's claim, is what gets
+    // registered: path shape, MIME allow-list, FLAC extension pairing, size.
+    let verifiedMimeType: string | null = null;
+    let verifiedFileSize: number | null = null;
+    if (mediaType !== 'url') {
+      if (!isRoomObjectPath(roomId, filePath, 'media')
+        || !isRoomMediaMimeType(mimeType ?? '')
+        || !hasValidRoomFileMimeExtension(fileName, mimeType ?? '')
+        || !hasValidRoomFileMimeExtension(filePath, mimeType ?? '')) {
+        throw new Error('Invalid temporary-media upload.');
+      }
+      const metadata = await getServerStorageProvider().getMetadata(ROOM_ATTACHMENT_BUCKET, filePath);
+      if (!metadata || metadata.mimeType !== mimeType || metadata.size !== fileSize) {
+        throw new Error('Uploaded media could not be verified.');
+      }
+      verifiedMimeType = metadata.mimeType;
+      verifiedFileSize = metadata.size;
+    }
 
     // Direct temporary_media writes were revoked in 20260923140000. The RPC
     // re-checks watch_control, validates the <room>/media/<uuid>.<ext> path,
@@ -63,8 +91,8 @@ export async function logTemporaryMedia(
       p_file_name: fileName.trim().slice(0, 512),
       p_file_path: filePath,
       p_media_type: mediaType,
-      p_mime_type: mediaType === 'url' ? null : upload?.mimeType ?? null,
-      p_file_size: mediaType === 'url' ? null : upload?.sizeBytes ?? null,
+      p_mime_type: verifiedMimeType,
+      p_file_size: verifiedFileSize,
     });
 
     if (error) throw new Error(error.message);
@@ -87,7 +115,7 @@ async function signRoomObject(
   roomId: string,
   objectPath: string,
 ) {
-  if (!objectPath.startsWith(`${roomId}/`) || objectPath.includes('..') || objectPath.includes('\\')) {
+  if (!isRoomObjectPath(roomId, objectPath) && !isLegacyRoomObjectPath(roomId, objectPath)) {
     throw new Error('Invalid file path.');
   }
   // Never let a signed URL outlive the room's server-side expiry.
@@ -159,11 +187,15 @@ export async function resolveRoomMedia(roomId: string, mediaId: string): Promise
 export async function attachRoomMediaSubtitle(roomId: string, mediaId: string, subtitlePath: string): Promise<{ success: boolean; subtitleUrl?: string; error?: string }> {
   try {
     if (!isUuid(roomId) || !isUuid(mediaId)) throw new Error('Invalid media reference.');
-    if (!subtitlePath.startsWith(`${roomId}/subtitles/`)) throw new Error('Invalid subtitle path.');
+    if (!isRoomObjectPath(roomId, subtitlePath, 'subtitle')) throw new Error('Invalid subtitle path.');
 
     const { supabase, user } = await getAuthenticatedUser();
     const room = await assertActiveRoom(supabase, roomId);
     await assertCanCast(supabase, roomId, user.id);
+    const metadata = await getServerStorageProvider().getMetadata(ROOM_ATTACHMENT_BUCKET, subtitlePath);
+    if (!metadata || !isRoomSubtitleMimeType(metadata.mimeType ?? '')) {
+      throw new Error('Uploaded subtitle could not be verified.');
+    }
 
     const { error } = await supabase.rpc('set_temporary_media_subtitle', { p_media_id: mediaId, p_subtitle_path: subtitlePath });
     if (error) throw new Error(error.message);
@@ -205,9 +237,7 @@ export async function logCastHistory(roomId: string, title: string, url: string)
 export async function getSignedStorageUrl(filePath: string, roomId: string): Promise<{ success: boolean; url?: string; error?: string }> {
   try {
     if (!filePath || !roomId) throw new Error('File path and room ID are required.');
-
-    // Verify the file path belongs to this room
-    if (!filePath.startsWith(`${roomId}/`) || filePath.includes('..') || filePath.includes('\\')) {
+    if (!isRoomObjectPath(roomId, filePath) && !isLegacyRoomObjectPath(roomId, filePath)) {
       throw new Error('Invalid file path.');
     }
 
@@ -223,3 +253,30 @@ export async function getSignedStorageUrl(filePath: string, roomId: string): Pro
     return { success: false, error: error instanceof Error ? error.message : 'Unable to generate signed URL.' };
   }
 }
+
+// Used after a cancelled upload or a rejected metadata registration. The
+// explicit capability and structured path prevent a client from deleting an
+// arbitrary object through this server-side cleanup path.
+export async function cleanupUnregisteredTemporaryMedia(roomId: string, objectPath: string, kind: 'media' | 'subtitle') {
+  try {
+    const { supabase, user } = await getAuthenticatedUser();
+    await assertCanCast(supabase, roomId, user.id);
+    if (!isRoomObjectPath(roomId, objectPath, kind)) throw new Error('Invalid temporary-media path.');
+    // The service-role delete below must never remove media that was
+    // registered (by this or another member). The path passed the strict
+    // UUID contract above, so it is safe inside the filter expression.
+    const { data: registered, error: lookupError } = await supabase
+      .from('temporary_media')
+      .select('id')
+      .eq('room_id', roomId)
+      .or(`storage_path.eq.${objectPath},subtitle_path.eq.${objectPath},file_url.eq.${objectPath}`)
+      .limit(1);
+    if (lookupError) throw new Error(lookupError.message);
+    if (registered && registered.length > 0) throw new Error('Registered media cannot be cleaned up here.');
+    await getServerStorageProvider().cleanup(ROOM_ATTACHMENT_BUCKET, [objectPath]);
+    return { success: true };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to clean up temporary media.' };
+  }
+}
+

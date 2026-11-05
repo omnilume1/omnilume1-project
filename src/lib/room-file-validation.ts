@@ -69,6 +69,17 @@ export function roomSubtitleStorageMimeType(name: string): string | null {
   return ROOM_SUBTITLE_STORAGE_MIME_TYPES[roomFileExtension(name)] ?? null;
 }
 
+// Browsers report inconsistent types (an empty string for .srt, audio/x-flac,
+// application/octet-stream). Re-type a validated file with its contract type
+// so assertRoomFileInput, the bucket allow-list and the server-side metadata
+// check all see the same value. Unknown files keep their reported type and
+// are then rejected by assertRoomFileInput.
+export function withRoomStorageMimeType(file: File, kind: 'media' | 'subtitle'): File {
+  const contractType = kind === 'media' ? roomMediaStorageMimeType(file) : roomSubtitleStorageMimeType(file.name);
+  if (!contractType || contractType === file.type) return file;
+  return new File([file], file.name, { type: contractType, lastModified: file.lastModified });
+}
+
 // Storage policies authorize writes only under <room>/media/ and
 // <room>/subtitles/, and register_temporary_media requires
 // <room>/media/<uuid v4>.<extension>.

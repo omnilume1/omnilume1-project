@@ -5,10 +5,11 @@ import { createClient } from '@/utils/supabase/client';
 import { isUuid } from '@/lib/message-limits';
 import { isRoomBroadcastEventType, toRoomBroadcastPayload, type RoomBroadcastEventType } from '@/lib/room-broadcast-contract';
 import { resolveRoomMedia, type ResolvedRoomMedia } from '@/actions/media';
+import { getRoomRealtimeSnapshots, saveRoomRealtimeSnapshot } from '@/actions/room-controls';
 
 type BrowserSupabaseClient = ReturnType<typeof createClient>;
 type RoomChannel = ReturnType<BrowserSupabaseClient['channel']>;
-type RoomChannelKind = 'general' | 'control';
+type RoomChannelKind = 'general' | 'chat' | 'study' | 'watch' | 'control';
 type RoomChannels = Record<RoomChannelKind, RoomChannel | null>;
 
 // Chat messages are not Broadcast events. They arrive through RLS-checked
@@ -212,6 +213,12 @@ function isSyncEventPayload(value: unknown, roomId: string): value is SyncEvent 
 }
 
 type MediaRevision = Pick<MediaEventMeta, 'eventId' | 'timestamp'>;
+type RealtimeSnapshot = {
+  snapshot_type: 'media' | 'timer' | 'settings';
+  state_version: number | string;
+  payload: unknown;
+  updated_at: string;
+};
 
 function isMediaEvent(eventType: SyncEventType) {
   return eventType === 'cast'
@@ -225,7 +232,16 @@ function isMediaEvent(eventType: SyncEventType) {
 }
 
 function channelKindForEvent(eventType: SyncEventType): RoomChannelKind {
+  if (eventType === 'typing') return 'chat';
+  if (eventType === 'timer_start' || eventType === 'timer_pause' || eventType === 'timer_reset') return 'study';
+  if (eventType === 'request_sync') return 'watch';
   return isMediaEvent(eventType) ? 'control' : 'general';
+}
+
+function snapshotTypeForEvent(eventType: SyncEventType): 'media' | 'timer' | null {
+  if (isMediaEvent(eventType)) return 'media';
+  if (eventType === 'timer_start' || eventType === 'timer_pause' || eventType === 'timer_reset') return 'timer';
+  return null;
 }
 
 function isNewerMediaRevision(next: MediaRevision, current: MediaRevision | null) {
@@ -318,7 +334,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
 
   const [connectionState, setConnectionState] = useState<RoomSyncValue['connectionState']>('idle');
   const connectionStateRef = useRef<RoomSyncValue['connectionState']>('idle');
-  const channelRefs = useRef<RoomChannels>({ general: null, control: null });
+  const channelRefs = useRef<RoomChannels>({ general: null, chat: null, study: null, watch: null, control: null });
   const pendingEventsRef = useRef<Array<{ eventType: SyncEventType; payload: Record<string, unknown>; meta: MediaEventMeta }>>([]);
 
   const [typingUsers, setTypingUsers] = useState<Map<string, number>>(new Map());
@@ -338,6 +354,9 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   const [roomControlEvents, setRoomControlEvents] = useState<RoomControlEvent[]>([]);
   const [roomControlVersion, setRoomControlVersion] = useState(0);
   const [connectionGeneration, setConnectionGeneration] = useState(0);
+  // Server-allocated versions of the persisted media/timer snapshots. Older
+  // Broadcasts and snapshots are ignored.
+  const stateVersionsRef = useRef<Record<'media' | 'timer', number>>({ media: 0, timer: 0 });
   // Late async work (media resolution) must not apply to a room the user has
   // since left or been removed from.
   const roomIdRef = useRef(roomId);
@@ -496,6 +515,35 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     }
   }, [updateTimerState]);
 
+  // The playable URL, title and subtitle are fetched under the receiver's
+  // own authorization. A removed member's fetch fails, so nothing is applied.
+  const applyResolvedMediaEvent = useCallback((
+    eventType: SyncEventType,
+    payload: Record<string, unknown>,
+    meta: MediaEventMeta,
+    compensateClock: boolean,
+  ) => {
+    const mediaId = payload.mediaId;
+    if (typeof mediaId !== 'string') return;
+    const eventRoomId = roomId;
+    void resolveMedia(mediaId, eventType === 'subtitle_upload').then((media) => {
+      if (!media || roomIdRef.current !== eventRoomId) return;
+      // A playing state keeps advancing while the packet and the resolution
+      // are in flight. Compensate on the receiving side.
+      const time = compensateClock && payload.playing === true && typeof payload.time === 'number'
+        ? payload.time + Math.max(0, (Date.now() - meta.timestamp) / 1_000)
+        : payload.time;
+      applyMediaEvent(eventType, {
+        ...payload,
+        ...(time === undefined ? {} : { time }),
+        url: media.url,
+        title: media.title,
+        subtitleUrl: media.subtitleUrl,
+        sourceType: media.sourceType,
+      }, meta);
+    });
+  }, [applyMediaEvent, resolveMedia, roomId]);
+
   const handleIncomingEvent = useCallback((incoming: { payload?: unknown }) => {
     const event = incoming.payload;
     if (!isSyncEventPayload(event, roomId)) return;
@@ -504,6 +552,12 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     // client that has not been updated yet) are ignored, never trusted.
     const payload = toRoomBroadcastPayload(event.event_type, event.payload);
     if (!payload) return;
+
+    const snapshotType = snapshotTypeForEvent(event.event_type);
+    if (snapshotType) {
+      if (event.state_version <= stateVersionsRef.current[snapshotType]) return;
+      stateVersionsRef.current[snapshotType] = event.state_version;
+    }
 
     if (event.event_type === 'typing') {
       setTypingUsers((current) => {
@@ -536,27 +590,8 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       return;
     }
 
-    // The playable URL, title and subtitle are fetched under the receiver's
-    // own authorization. A removed member's fetch fails, so nothing is applied.
-    const mediaId = payload.mediaId as string;
-    const eventRoomId = roomId;
-    void resolveMedia(mediaId, event.event_type === 'subtitle_upload').then((media) => {
-      if (!media || roomIdRef.current !== eventRoomId) return;
-      // A playing state keeps advancing while the packet and the resolution
-      // are in flight. Compensate on the receiving side, as before.
-      const time = event.event_type === 'force_sync' && payload.playing === true && typeof payload.time === 'number'
-        ? payload.time + Math.max(0, (Date.now() - event.timestamp) / 1_000)
-        : payload.time;
-      applyMediaEvent(event.event_type, {
-        ...payload,
-        ...(time === undefined ? {} : { time }),
-        url: media.url,
-        title: media.title,
-        subtitleUrl: media.subtitleUrl,
-        sourceType: media.sourceType,
-      }, meta);
-    });
-  }, [applyMediaEvent, applyTimerEvent, resolveMedia, roomId]);
+    applyResolvedMediaEvent(event.event_type, payload, meta, event.event_type === 'force_sync');
+  }, [applyMediaEvent, applyResolvedMediaEvent, applyTimerEvent, roomId]);
 
   // Persistent chat rows arrive through Postgres Changes. Realtime evaluates
   // the messages SELECT policy (room_has_capability 'chat') for each event and
@@ -595,7 +630,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     setRoomControlVersion((current) => current + 1);
   }, [roomId]);
 
-  const sendEvent = useCallback((eventType: SyncEventType, payload: Record<string, unknown>, meta?: Partial<MediaEventMeta>) => {
+  const sendEvent = useCallback((eventType: SyncEventType, payload: Record<string, unknown>, meta?: Partial<MediaEventMeta>, stateVersion = 1) => {
     const channel = channelRefs.current[channelKindForEvent(eventType)];
     const senderId = currentUserIdRef.current;
     if (!channel || !senderId || connectionStateRef.current !== 'connected') return false;
@@ -607,7 +642,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       room_id: roomId,
       event_type: eventType,
       payload,
-      state_version: 1,
+      state_version: stateVersion,
     };
 
     void channel.send({ type: 'broadcast', event: 'room_action', payload: event }).catch((error: unknown) => {
@@ -633,6 +668,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       senderId: currentUserIdRef.current ?? undefined,
       source: 'local',
     };
+    const snapshotType = snapshotTypeForEvent(eventType);
 
     // Update the local room state immediately with the full payload (this
     // client already holds the URL). This keeps the cast responsive even if
@@ -644,16 +680,42 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     }
 
     if (!roomId) return;
-    // Only the wire contract leaves this client: never chat text, titles,
-    // URLs or storage paths (src/lib/room-broadcast-contract.ts).
+    // Only the wire contract leaves this client, over Broadcast or in the
+    // persisted snapshot: never chat text, titles, URLs or storage paths
+    // (src/lib/room-broadcast-contract.ts).
     const wirePayload = toRoomBroadcastPayload(eventType, eventPayload);
     if (!wirePayload) {
       console.warn(`Room ${eventType} was not shared: media events need a registered mediaId.`);
       return;
     }
-    if (!sendEvent(eventType, wirePayload, meta)) {
-      pendingEventsRef.current.push({ eventType, payload: wirePayload, meta });
+    const emit = (stateVersion: number) => {
+      if (!sendEvent(eventType, wirePayload, meta, stateVersion)) {
+        // Only sync requests are safe to replay. Persistent state is saved via
+        // the authorized snapshot RPC and must never be retried as stale input.
+        if (eventType === 'request_sync') pendingEventsRef.current.push({ eventType, payload: wirePayload, meta });
+      }
+    };
+
+    if (snapshotType) {
+      // The server allocates the version while serializing the snapshot row.
+      // Broadcast only after that authoritative version is known.
+      void saveRoomRealtimeSnapshot(roomId, snapshotType, 1, { eventType, payload: wirePayload })
+        .then((result) => {
+          const authoritativeVersion = result?.state_version;
+          if (!authoritativeVersion || !Number.isSafeInteger(authoritativeVersion)) return;
+          stateVersionsRef.current[snapshotType] = Math.max(
+            stateVersionsRef.current[snapshotType],
+            authoritativeVersion,
+          );
+          emit(authoritativeVersion);
+        })
+        .catch((error: unknown) => {
+          console.error('Room snapshot write failed:', error);
+        });
+      return;
     }
+
+    emit(1);
   }, [applyMediaEvent, applyTimerEvent, canControlMedia, roomId, sendEvent]);
 
   // Keep late joiners in sync even while the host has temporarily switched to
@@ -696,6 +758,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     if (stored && !restoredMedia) removeSessionValue(mediaStorageKey(roomId));
     mediaStateRef.current = restoredMedia;
     lastMediaRevisionRef.current = null;
+    stateVersionsRef.current = { media: 0, timer: 0 };
     pendingEventsRef.current = [];
 
     const restoreTimer = window.setTimeout(() => {
@@ -731,6 +794,47 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   }, [resolveMedia, roomId, updateMediaState]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (!roomId) return () => { cancelled = true; };
+
+    void getRoomRealtimeSnapshots(roomId).then((snapshots) => {
+      if (cancelled) return;
+      (snapshots as RealtimeSnapshot[]).forEach((snapshot) => {
+        const snapshotType = snapshot.snapshot_type === 'media' || snapshot.snapshot_type === 'timer'
+          ? snapshot.snapshot_type
+          : null;
+        if (!snapshotType) return;
+        const snapshotVersion = Number(snapshot.state_version);
+        if (!Number.isSafeInteger(snapshotVersion) || snapshotVersion <= stateVersionsRef.current[snapshotType]) return;
+        const value = snapshot.payload;
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+        const record = value as Record<string, unknown>;
+        const eventType = record.eventType;
+        const payload = record.payload;
+        if (!isRoomBroadcastEventType(eventType)) return;
+        // Snapshots written by older clients may hold URLs or titles; only the
+        // wire contract is applied, exactly as for a live Broadcast.
+        const wirePayload = toRoomBroadcastPayload(eventType, payload);
+        if (!wirePayload) return;
+        stateVersionsRef.current[snapshotType] = snapshotVersion;
+        if (snapshotType === 'timer') {
+          applyTimerEvent(eventType, wirePayload);
+          return;
+        }
+        const meta: MediaEventMeta = {
+          eventId: `snapshot:${snapshotType}:${snapshotVersion}`,
+          timestamp: new Date(snapshot.updated_at).getTime(),
+          source: 'restored',
+        };
+        if (eventType === 'stop_cast') applyMediaEvent(eventType, wirePayload, meta);
+        else applyResolvedMediaEvent(eventType, wirePayload, meta, false);
+      });
+    }).catch(() => undefined);
+
+    return () => { cancelled = true; };
+  }, [applyMediaEvent, applyResolvedMediaEvent, applyTimerEvent, roomId]);
+
+  useEffect(() => {
     let isMounted = true;
     const readyChannels = new Set<RoomChannelKind>();
     const previousChannels = Object.values(channelRefs.current);
@@ -740,7 +844,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
         void supabase.removeChannel(channel);
       }
     });
-    channelRefs.current = { general: null, control: null };
+    channelRefs.current = { general: null, chat: null, study: null, watch: null, control: null };
 
     currentUserIdRef.current = null;
     pendingEventsRef.current = [];
@@ -764,6 +868,18 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       {
         kind: 'general',
         channel: supabase.channel(`sync:${roomId}`, { config: { private: true } }),
+      },
+      {
+        kind: 'chat',
+        channel: supabase.channel(`sync-chat:${roomId}`, { config: { private: true } }),
+      },
+      {
+        kind: 'study',
+        channel: supabase.channel(`sync-study:${roomId}`, { config: { private: true } }),
+      },
+      {
+        kind: 'watch',
+        channel: supabase.channel(`sync-watch:${roomId}`, { config: { private: true } }),
       },
       {
         kind: 'control',
@@ -816,7 +932,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       isMounted = false;
       window.clearTimeout(connectingTimer);
       readyChannels.clear();
-      channelRefs.current = { general: null, control: null };
+      channelRefs.current = { general: null, chat: null, study: null, watch: null, control: null };
       connectionStateRef.current = 'idle';
       channels.forEach(({ channel }) => {
         void channel.unsubscribe();

@@ -1,20 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent, type FormEvent } from 'react';
 import dynamic from 'next/dynamic';
-import { attachRoomMediaSubtitle, getActiveTemporaryMedia, logCastHistory, logTemporaryMedia, getSignedStorageUrl } from '@/actions/media';
+import { attachRoomMediaSubtitle, cleanupUnregisteredTemporaryMedia, getActiveTemporaryMedia, logCastHistory, logTemporaryMedia, resolveRoomMedia } from '@/actions/media';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
-import { uploadFileWithProgress } from '@/lib/storage';
-import {
-  getRoomMediaKind,
-  roomFileExtension,
-  roomMediaStorageMimeType,
-  roomStorageObjectPath,
-  roomSubtitleStorageMimeType,
-  validateRoomMediaUpload,
-  validateRoomSubtitleUpload,
-} from '@/lib/room-file-validation';
+import { createRoomObjectPath, assertRoomFileInput, ROOM_ATTACHMENT_BUCKET } from '@/lib/room-file-contract';
+import { validateRoomMediaUpload, validateRoomSubtitleUpload, withRoomStorageMimeType } from '@/lib/room-file-validation';
+import { startUploadFileWithProgress } from '@/lib/storage';
 import { createClient } from '@/utils/supabase/client';
 
 const Player = dynamic(() => import('react-player').then((module) => module.default), { ssr: false });
@@ -35,7 +28,7 @@ interface AudioTrackListLike {
   [index: number]: AudioTrackLike;
 }
 
-interface HTMLVideoElementWithAudioTracks extends HTMLVideoElement {
+interface HTMLMediaElementWithAudioTracks extends HTMLMediaElement {
   audioTracks?: AudioTrackListLike;
 }
 
@@ -65,6 +58,14 @@ function formatBytes(bytes: number) {
 function formatHoursUntil(expiresAt: string) {
   const hours = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 3_600_000));
   return `${hours}h left`;
+}
+
+function isFlacPath(value: string | null | undefined) {
+  return typeof value === 'string' && /\.flac(?:$|\?)/i.test(value);
+}
+
+function subscribeToNothing() {
+  return () => undefined;
 }
 
 function normalizeCastUrl(value: string) {
@@ -111,7 +112,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     currentUserId,
   } = useRoomRealtime();
 
-  const playerRef = useRef<HTMLVideoElementWithAudioTracks>(null);
+  const playerRef = useRef<HTMLMediaElementWithAudioTracks>(null);
   const subtitleFileRef = useRef<HTMLInputElement>(null);
   const localFileRef = useRef<HTMLInputElement>(null);
   const isSyncing = useRef(false);
@@ -166,9 +167,19 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
   const displayedVolume = canCast ? volume : (localVolume ?? volume);
   const displayedMuted = canCast ? muted : (localMuted ?? muted);
   const playbackSpeed = mediaState?.speed ?? 1;
-  const isReady = activeMediaUrl !== null && readyCastId === activeCastId;
-  const playerKey = activeMediaUrl && activeCastId ? `${activeCastId}:${retryNonce}` : 'empty';
-  const displayedPlayerError = errorUrl === activeMediaUrl ? playerError : null;
+  // Each viewer's URL comes from its own resolveRoomMedia call (see
+  // useRoomSync); Broadcast carries only the media id.
+  const playbackUrl = activeMediaUrl;
+  const playbackSubtitleUrl = activeSubtitleUrl;
+  const isReady = playbackUrl !== null && readyCastId === activeCastId;
+  const isFlacPlayback = isFlacPath(mediaTitle) || isFlacPath(playbackUrl);
+  const flacPlaybackSupported = useSyncExternalStore(
+    subscribeToNothing,
+    () => !isFlacPlayback || document.createElement('audio').canPlayType('audio/flac') !== '',
+    () => true,
+  );
+  const playerKey = playbackUrl && activeCastId ? `${activeCastId}:${retryNonce}` : 'empty';
+  const displayedPlayerError = errorUrl === playbackUrl ? playerError : null;
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -391,22 +402,17 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     readyCastIdRef.current = null;
     setReadyCastId(null);
 
-    // Check if this is a URL cast (external URL) or file path (needs signed URL)
-    let castUrl = item.file_url;
-    if (!item.file_url.startsWith('http')) {
-      // This is a file path, generate signed URL
-      const result = await getSignedStorageUrl(item.file_url, roomId);
-      if (!result.success || !result.url) {
-        setPlayerError(result.error ?? 'Unable to generate playback URL.');
-        return;
-      }
-      castUrl = result.url;
+    const resolved = await resolveRoomMedia(roomId, item.id);
+    if (!resolved.success || !resolved.media) {
+      setPlayerError(resolved.error ?? 'Unable to load this media.');
+      return;
     }
 
     broadcastEvent('cast', {
-      url: castUrl,
-      title: item.file_name,
-      sourceType: item.media_type === 'url' ? 'url' : 'upload',
+      url: resolved.media.url,
+      title: resolved.media.title,
+      subtitleUrl: resolved.media.subtitleUrl,
+      sourceType: resolved.media.sourceType,
       mediaId: item.id,
       speed: 1,
       playing: true,
@@ -416,7 +422,10 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
 
   const startSubtitleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !canCast) return;
+    if (!file || !canCast || !activeMediaId) {
+      setPlayerError('Subtitles can be attached only to an uploaded room-media item.');
+      return;
+    }
 
     const validationError = validateRoomSubtitleUpload(file);
     if (validationError) {
@@ -426,22 +435,19 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     }
 
     setIsUploadingSub(true);
+    let filePath: string | null = null;
     try {
       const mediaId = activeMediaId;
-      if (!mediaId) throw new Error('Subtitles can be added only to media shared with the room.');
-      const contentType = roomSubtitleStorageMimeType(file.name);
-      if (!contentType) throw new Error('Choose a VTT or SRT subtitle file.');
-      const filePath = roomStorageObjectPath(roomId, 'subtitles', crypto.randomUUID(), roomFileExtension(file.name));
-      const { error } = await supabase.storage
-        .from('room_attachments')
-        .upload(filePath, new Blob([file], { type: contentType }), { cacheControl: '3600', contentType });
-      if (error) throw error;
+      const checked = assertRoomFileInput(withRoomStorageMimeType(file, 'subtitle'), 'subtitle');
+      filePath = createRoomObjectPath(roomId, 'subtitle', crypto.randomUUID(), checked.fileName);
+      await startUploadFileWithProgress(supabase, ROOM_ATTACHMENT_BUCKET, filePath, file, undefined, checked.mimeType).promise;
       // Bind the subtitle to its media row. Members re-resolve the media and
       // receive their own signed subtitle URL; only the id is broadcast.
       const result = await attachRoomMediaSubtitle(roomId, mediaId, filePath);
       if (!result.success || !result.subtitleUrl) throw new Error(result.error ?? 'Unable to attach the subtitle.');
       broadcastEvent('subtitle_upload', { mediaId, subtitleUrl: result.subtitleUrl });
     } catch (error) {
+      if (filePath) await cleanupUnregisteredTemporaryMedia(roomId, filePath, 'subtitle').catch(() => undefined);
       alert(`Subtitle upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsUploadingSub(false);
@@ -461,34 +467,31 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     }
 
     setHistoryError(null);
-    setLocalUpload({ fileName: file.name, total: file.size, loaded: 0, percent: 0, phase: 'uploading' });
+    let filePath: string | null = null;
 
     try {
-      const mediaType = getRoomMediaKind(file);
-      const mimeType = roomMediaStorageMimeType(file);
-      if (!mediaType || !mimeType) throw new Error('Choose a supported audio or video file.');
-      const filePath = roomStorageObjectPath(roomId, 'media', crypto.randomUUID(), roomFileExtension(file.name));
-      await uploadFileWithProgress(supabase, 'room_attachments', filePath, file, (progress) => {
+      const checked = assertRoomFileInput(withRoomStorageMimeType(file, 'media'), 'media');
+      filePath = createRoomObjectPath(roomId, 'media', crypto.randomUUID(), checked.fileName);
+      setLocalUpload({ fileName: checked.fileName, total: checked.size, loaded: 0, percent: 0, phase: 'uploading' });
+      await startUploadFileWithProgress(supabase, ROOM_ATTACHMENT_BUCKET, filePath, file, (progress) => {
         setLocalUpload((current) => current ? { ...current, loaded: progress.loaded, percent: progress.percent } : current);
-      }, mimeType);
+      }, checked.mimeType).promise;
 
       setLocalUpload((current) => current ? { ...current, loaded: current.total, percent: 100, phase: 'saving' } : current);
-      // Store file path (not public URL) for private storage compatibility
-      const result = await logTemporaryMedia(roomId, file.name, filePath, mediaType, { mimeType, sizeBytes: file.size });
+      const mediaType = checked.mimeType.startsWith('audio/') ? 'audio' : 'video';
+      // The server verifies the stored object's type and size before
+      // registering it, and returns the id members resolve the media by.
+      const result = await logTemporaryMedia(roomId, checked.fileName, filePath, mediaType, checked.mimeType, checked.size);
       if (!result.success || !result.mediaId) throw new Error(result.error ?? 'Unable to save the uploaded media.');
-
-      // Generate signed URL for immediate casting
-      const signedUrlResult = await getSignedStorageUrl(filePath, roomId);
-      if (!signedUrlResult.success || !signedUrlResult.url) {
-        throw new Error(signedUrlResult.error ?? 'Unable to generate playback URL.');
-      }
+      const resolved = await resolveRoomMedia(roomId, result.mediaId);
+      if (!resolved.success || !resolved.media) throw new Error(resolved.error ?? 'Unable to generate playback URL.');
 
       // The file is immediately available to the room and is also added to
-      // the same 24-hour history used by the Files tab. Only the media id is
-      // broadcast; the signed URL stays on this client.
+      // the room's temporary media history. Only the media id is broadcast;
+      // the signed URL stays on this client.
       broadcastEvent('cast', {
-        url: signedUrlResult.url,
-        title: file.name,
+        url: resolved.media.url,
+        title: resolved.media.title,
         mediaId: result.mediaId,
         sourceType: 'upload',
         speed: 1,
@@ -496,6 +499,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
       });
       await loadHistory();
     } catch (error) {
+      if (filePath) await cleanupUnregisteredTemporaryMedia(roomId, filePath, 'media').catch(() => undefined);
       setHistoryError(error instanceof Error ? error.message : 'Upload failed.');
     } finally {
       setLocalUpload(null);
@@ -534,12 +538,12 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
       >
         <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/90 to-transparent p-4 pointer-events-auto">
           <div className="flex min-w-0 flex-col">
-            <span className="truncate text-sm font-bold text-white drop-shadow-md">{activeMediaUrl ? mediaTitle : 'Watch Party Stage'}</span>
-            {activeMediaUrl && <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400">{playbackSpeed}x speed</span>}
+            <span className="truncate text-sm font-bold text-white drop-shadow-md">{playbackUrl ? mediaTitle : 'Watch Party Stage'}</span>
+            {playbackUrl && <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400">{playbackSpeed}x speed</span>}
           </div>
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            {activeMediaUrl && canCast && (
+            {playbackUrl && canCast && (
               <div className="hidden overflow-hidden rounded border border-neutral-700 bg-neutral-900/80 backdrop-blur-md md:flex">
                 {[0.5, 1, 1.5, 2].map((speed) => (
                   <button key={speed} type="button" onClick={() => changePlaybackSpeed(speed)} className={`cursor-pointer px-2 py-1 text-[10px] font-bold transition ${playbackSpeed === speed ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-800'}`}>
@@ -553,7 +557,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
               History
             </button>
 
-            {activeMediaUrl && (
+            {playbackUrl && (
               <div className="relative">
                 <button type="button" onClick={() => setShowSettings((visible) => !visible)} className="rounded-md border border-neutral-600 bg-neutral-800/80 p-1.5 text-white transition hover:bg-neutral-700" aria-label="Player settings">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1.51 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06A2 2 0 1 1 7.04 4.3l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10.6 3.09V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 16.1 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82A1.65 1.65 0 0 0 20.31 11H21a2 2 0 0 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15Z" /></svg>
@@ -581,8 +585,8 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
               </div>
             )}
 
-            {activeMediaUrl && canCast && <button type="button" onClick={stopCasting} className="rounded border border-red-500/30 bg-red-500/20 px-3 py-1 text-xs font-bold text-red-400 transition hover:bg-red-500/30">Stop</button>}
-            {activeMediaUrl && <button type="button" onClick={canCast ? forceSyncToRoom : () => broadcastEvent('request_sync')} className="hidden rounded border border-violet-500/30 bg-violet-500/20 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-violet-300 transition hover:bg-violet-500/30 sm:block">{canCast ? 'Force sync' : 'Sync to host'}</button>}
+            {playbackUrl && canCast && <button type="button" onClick={stopCasting} className="rounded border border-red-500/30 bg-red-500/20 px-3 py-1 text-xs font-bold text-red-400 transition hover:bg-red-500/30">Stop</button>}
+            {playbackUrl && <button type="button" onClick={canCast ? forceSyncToRoom : () => broadcastEvent('request_sync')} className="hidden rounded border border-violet-500/30 bg-violet-500/20 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-violet-300 transition hover:bg-violet-500/30 sm:block">{canCast ? 'Force sync' : 'Sync to host'}</button>}
           </div>
         </div>
 
@@ -602,12 +606,33 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
         )}
 
         <div data-media-area className="relative flex min-h-0 flex-1 flex-col items-center justify-center bg-black p-4">
-          {activeMediaUrl ? (
+          {playbackUrl ? (
             <div className="relative h-full w-full overflow-hidden rounded-xl border border-neutral-800">
-              <Player
+              {isFlacPlayback ? (
+                flacPlaybackSupported ? <audio
+                  key={playerKey}
+                  ref={(node) => { playerRef.current = node; }}
+                  src={playbackUrl}
+                  muted={displayedMuted}
+                  controls
+                  preload="metadata"
+                  crossOrigin="anonymous"
+                  className="h-full w-full bg-black"
+                  onLoadedMetadata={handleReady}
+                  onTimeUpdate={handleTimeUpdate}
+                  onPlay={handlePlay}
+                  onPause={handlePause}
+                  onSeeked={handleSeeked}
+                  onVolumeChange={handleVolumeChange}
+                  onError={() => {
+                    setErrorUrl(playbackUrl);
+                    setPlayerError('This browser could not play this FLAC file. Try another supported browser or download the private file.');
+                  }}
+                /> : <div role="alert" className="flex h-full items-center justify-center p-6 text-center text-sm text-amber-200">This browser cannot play FLAC audio. Download the private file or use a browser with FLAC playback support.</div>
+              ) : <Player
                 key={playerKey}
-                ref={playerRef}
-                src={activeMediaUrl}
+                ref={(node) => { playerRef.current = node; }}
+                src={playbackUrl}
                 playing={playing}
                 muted={displayedMuted}
                 volume={displayedVolume}
@@ -623,21 +648,21 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
                 onSeeked={handleSeeked}
                 onVolumeChange={handleVolumeChange}
                 onError={() => {
-                  setErrorUrl(activeMediaUrl);
+                  setErrorUrl(playbackUrl);
                   setPlayerError('This stream could not be loaded. Try again or choose another history item.');
                 }}
                 config={{ youtube: { rel: 0, iv_load_policy: 3 }, hls: { capLevelToPlayerSize: false, maxBufferLength: 30, backBufferLength: 60 } }}
               >
-                {activeSubtitleUrl && showSubtitles && <track kind="subtitles" src={activeSubtitleUrl} srcLang="en" default label="English" />}
-              </Player>
+                {playbackSubtitleUrl && showSubtitles && <track kind="subtitles" src={playbackSubtitleUrl} srcLang="en" default label="English" />}
+              </Player>}
               {displayedPlayerError && <div className="absolute inset-x-4 bottom-4 z-20 flex items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-black/85 px-4 py-3 text-xs text-red-200"><span>{displayedPlayerError}</span><button type="button" onClick={() => { setPlayerError(null); setErrorUrl(null); readyCastIdRef.current = null; setReadyCastId(null); setRetryNonce((value) => value + 1); }} className="shrink-0 cursor-pointer rounded bg-red-500/20 px-3 py-1.5 font-bold text-red-300 hover:bg-red-500/30">Retry</button></div>}
-              {canCast && !activeSubtitleUrl && !activeMediaUrl.includes('youtube.com') && <div className="absolute bottom-16 right-4 z-20"><input type="file" ref={subtitleFileRef} onChange={startSubtitleUpload} className="hidden" accept=".vtt,.srt" /><button type="button" onClick={() => subtitleFileRef.current?.click()} disabled={isUploadingSub} className="cursor-pointer rounded-lg border border-indigo-500/50 bg-indigo-600/80 px-4 py-2 text-xs font-bold text-white shadow-2xl transition hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50">{isUploadingSub ? 'Uploading subtitle...' : '+ Add .SRT / .VTT'}</button></div>}
+              {canCast && !activeSubtitleUrl && !playbackUrl.includes('youtube.com') && <div className="absolute bottom-16 right-4 z-20"><input type="file" ref={subtitleFileRef} onChange={startSubtitleUpload} className="hidden" accept=".vtt,.srt" /><button type="button" onClick={() => subtitleFileRef.current?.click()} disabled={isUploadingSub} className="cursor-pointer rounded-lg border border-indigo-500/50 bg-indigo-600/80 px-4 py-2 text-xs font-bold text-white shadow-2xl transition hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50">{isUploadingSub ? 'Uploading subtitle...' : '+ Add .SRT / .VTT'}</button></div>}
             </div>
           ) : (
             <div className="flex w-full max-w-xl flex-col items-center">
               <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-white/5"><svg viewBox="0 0 24 24" className="ml-0.5 h-7 w-7 text-white" fill="currentColor"><path d="M8 5.14v13.72L19.06 12 8 5.14z" /></svg></div>
               <h2 className="mb-2 text-lg font-bold text-white">Stage is empty</h2>
-              {canCast ? <div className="mt-4 w-full"><p className="text-center text-xs text-neutral-400">Paste a YouTube, Twitch, direct HTTPS media, or Kick HLS (.m3u8) URL to cast it immediately, or upload local media for the room.</p><form onSubmit={startUrlCasting} className="mt-4 flex gap-2"><input type="url" value={castInput} onChange={(event) => setCastInput(event.target.value)} placeholder="Paste YouTube, Twitch, MP4, or media URL..." className="min-w-0 flex-1 rounded-lg border border-neutral-800 bg-[#121212] px-3 py-2 text-sm text-white transition focus:border-indigo-500 focus:outline-none" /><button type="submit" disabled={isCastingUrl || Boolean(localUpload)} className="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-60">Cast</button></form><input type="file" ref={localFileRef} onChange={handleLocalFileUpload} className="hidden" accept="video/*,audio/*" />{localUpload ? <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-left" aria-live="polite"><div className="flex items-center justify-between gap-2 text-xs font-bold text-white"><span className="truncate" title={localUpload.fileName}>{localUpload.fileName} · {formatBytes(localUpload.total)}</span><span className="shrink-0 text-emerald-400">{localUpload.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-neutral-800"><div className="h-full rounded-full bg-emerald-500 transition-[width] duration-150" style={{ width: `${localUpload.percent}%` }} /></div><p className="mt-2 text-[10px] text-neutral-500">{localUpload.phase === 'saving' ? 'Finishing upload...' : `${formatBytes(localUpload.loaded)} of ${formatBytes(localUpload.total)}`}</p></div> : <button type="button" onClick={() => localFileRef.current?.click()} className="mx-auto mt-4 block cursor-pointer rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2 text-xs font-bold text-neutral-200 transition hover:border-neutral-600 hover:text-white">Upload local media (under 50MB)</button>}{historyError && <p className="mt-3 text-center text-[10px] text-amber-300">{historyError}</p>}</div> : <p className="mt-2 text-sm text-zinc-500">Waiting for a room admin to cast media...</p>}
+              {canCast ? <div className="mt-4 w-full"><p className="text-center text-xs text-neutral-400">Paste a YouTube, Twitch, direct HTTPS media, or Kick HLS (.m3u8) URL to cast it immediately, or upload local media including FLAC for the room.</p><form onSubmit={startUrlCasting} className="mt-4 flex gap-2"><input type="url" value={castInput} onChange={(event) => setCastInput(event.target.value)} placeholder="Paste YouTube, Twitch, MP4, or media URL..." className="min-w-0 flex-1 rounded-lg border border-neutral-800 bg-[#121212] px-3 py-2 text-sm text-white transition focus:border-indigo-500 focus:outline-none" /><button type="submit" disabled={isCastingUrl || Boolean(localUpload)} className="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-60">Cast</button></form><input type="file" ref={localFileRef} onChange={handleLocalFileUpload} className="hidden" accept="audio/flac,.flac,audio/*,video/*" />{localUpload ? <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-left" aria-live="polite"><div className="flex items-center justify-between gap-2 text-xs font-bold text-white"><span className="truncate" title={localUpload.fileName}>{localUpload.fileName} · {formatBytes(localUpload.total)}</span><span className="shrink-0 text-emerald-400">{localUpload.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-neutral-800"><div className="h-full rounded-full bg-emerald-500 transition-[width] duration-150" style={{ width: `${localUpload.percent}%` }} /></div><p className="mt-2 text-[10px] text-neutral-500">{localUpload.phase === 'saving' ? 'Finishing upload...' : `${formatBytes(localUpload.loaded)} of ${formatBytes(localUpload.total)}`}</p></div> : <button type="button" onClick={() => localFileRef.current?.click()} className="mx-auto mt-4 block cursor-pointer rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2 text-xs font-bold text-neutral-200 transition hover:border-neutral-600 hover:text-white">Upload local media including FLAC (under 50MB)</button>}{historyError && <p className="mt-3 text-center text-[10px] text-amber-300">{historyError}</p>}</div> : <p className="mt-2 text-sm text-zinc-500">Waiting for a room admin to cast media...</p>}
               {connectionState === 'error' && <p className="mt-4 text-[10px] text-amber-400">Realtime connection interrupted. Reconnect or refresh to sync with the host.</p>}
             </div>
           )}

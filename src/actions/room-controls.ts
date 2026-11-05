@@ -113,6 +113,60 @@ export async function getRoomMemberControlStates(roomId: string) {
   return data ?? [];
 }
 
+export async function setRoomGhostMode(roomId: string, isGhostMode: boolean) {
+  assertUuid(roomId, 'room ID');
+  if (typeof isGhostMode !== 'boolean') throw new Error('Invalid ghost mode.');
+  const supabase = await authenticatedClient();
+  const { data, error } = await supabase.rpc('set_room_ghost_mode', {
+    p_room_id: roomId,
+    p_is_ghost_mode: isGhostMode,
+  });
+  if (error) throw new Error(error.message);
+  return data === true;
+}
+
+export async function getMyRoomPresenceMode(roomId: string) {
+  assertUuid(roomId, 'room ID');
+  const supabase = await authenticatedClient();
+  const { data, error } = await supabase.rpc('get_my_room_presence_mode', { p_room_id: roomId });
+  if (error) throw new Error(error.message);
+  return data?.[0] ?? { is_ghost_mode: false, can_view_ghost_presence: false };
+}
+
+export async function getRoomRealtimeSnapshots(roomId: string) {
+  assertUuid(roomId, 'room ID');
+  const supabase = await authenticatedClient();
+  const { data, error } = await supabase.rpc('get_room_realtime_snapshots', { p_room_id: roomId });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function saveRoomRealtimeSnapshot(
+  roomId: string,
+  snapshotType: 'media' | 'timer' | 'settings',
+  stateVersion: number,
+  payload: Record<string, unknown>,
+) {
+  assertUuid(roomId, 'room ID');
+  if (!Number.isSafeInteger(stateVersion) || stateVersion < 1) throw new Error('Invalid realtime state version.');
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Invalid realtime snapshot payload.');
+  const supabase = await authenticatedClient();
+  const { data, error } = await supabase.rpc('upsert_room_realtime_snapshot', {
+    p_room_id: roomId,
+    p_snapshot_type: snapshotType,
+    p_state_version: stateVersion,
+    p_payload: payload,
+  });
+  if (error) throw new Error(error.message);
+  const row = data?.[0] as { snapshot_type?: string; state_version?: number | string; updated_at?: string } | undefined;
+  if (!row || row.state_version === undefined) return null;
+  const authoritativeVersion = Number(row.state_version);
+  if (!Number.isSafeInteger(authoritativeVersion) || authoritativeVersion < 1) {
+    throw new Error('Invalid authoritative realtime state version.');
+  }
+  return { ...row, state_version: authoritativeVersion };
+}
+
 export async function leaveRoom(roomId: string) {
   assertUuid(roomId, 'room ID');
   const supabase = await authenticatedClient();
@@ -238,19 +292,21 @@ export async function updateRoomAnnouncement(announcementId: string, body: strin
 export async function getRoomControlState(roomId: string) {
   assertUuid(roomId, 'room ID');
   const supabase = await authenticatedClient();
-  const [settings, permissions, announcements, membership, profile] = await Promise.all([
+  const [settings, permissions, announcements, membership, profile, presence] = await Promise.all([
     supabase.from('room_control_settings').select('rules, welcome_message, is_locked, feature_flags, updated_at').eq('room_id', roomId).maybeSingle(),
     supabase.from('room_role_permissions').select('role, capability, allowed').eq('room_id', roomId),
     supabase.from('room_announcements').select('id, author_id, body, is_pinned, created_at, updated_at').eq('room_id', roomId).order('is_pinned', { ascending: false }).order('created_at', { ascending: false }),
     supabase.rpc('get_room_member_control_states', { p_room_id: roomId }),
     supabase.rpc('get_room_member_profile', { p_room_id: roomId, p_user_id: null }),
+    supabase.rpc('get_my_room_presence_mode', { p_room_id: roomId }),
   ]);
-  if (settings.error || permissions.error || announcements.error || membership.error || profile.error) throw new Error(settings.error?.message || permissions.error?.message || announcements.error?.message || membership.error?.message || profile.error?.message || 'Unable to load room controls.');
+  if (settings.error || permissions.error || announcements.error || membership.error || profile.error || presence.error) throw new Error(settings.error?.message || permissions.error?.message || announcements.error?.message || membership.error?.message || profile.error?.message || presence.error?.message || 'Unable to load room controls.');
   return {
     settings: settings.data,
     permissions: permissions.data ?? [],
     announcements: announcements.data ?? [],
     memberStates: membership.data ?? [],
     myRoomProfile: profile.data?.[0] ?? null,
+    myPresenceMode: presence.data?.[0] ?? { is_ghost_mode: false, can_view_ghost_presence: false },
   };
 }
