@@ -77,4 +77,10 @@ rooms, notifications, owner controls.
       Action 17).
 - [ ] 12.14 Searchable history (messages, notes, tasks, polls, events,
       clips, transcripts; capability-scoped).
+- [ ] 12.15 Timer-created owner notification (roadmap feature list, tagged
+      12; built in Action 08 — verify two-user).
+- [ ] 12.16 Shared PDFs (roadmap feature list, tagged 10/12): present /
+      follow page, live annotations.
+- [ ] 12.17 Scheduled rooms (feature list, tagged 12): already shipped in
+      earlier actions; no Action 12 change (recorded, not re-built).
 - [ ] Probes, dry run, push, two-account browser (desktop + mobile), ledger.

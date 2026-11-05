@@ -42,9 +42,20 @@ const leakyPayload = () => ({
   storage_path: `${randomUUID()}/media/${randomUUID()}.mp4`,
 });
 
+// Action 12 events need their own required fields; everything protected in
+// leakyPayload must still be stripped.
+const REQUIRED_EXTRAS: Record<string, Record<string, unknown>> = {
+  study_changed: { kind: 'notes' },
+  collab_changed: { kind: 'polls' },
+  cursor: { x: 120.5, y: -40 },
+  note_editing: { noteId: randomUUID(), editing: true },
+  pdf_follow: { fileId: randomUUID(), page: 3 },
+  rtc_signal: { kind: 'hello' },
+};
+
 test('no Broadcast event type can carry chat text, titles, URLs or storage paths', () => {
   for (const eventType of ROOM_BROADCAST_EVENT_TYPES) {
-    const wire = toRoomBroadcastPayload(eventType, leakyPayload());
+    const wire = toRoomBroadcastPayload(eventType, { ...leakyPayload(), ...(REQUIRED_EXTRAS[eventType] ?? {}) });
     assert.ok(wire, `${eventType} should produce a wire payload`);
     const serialized = JSON.stringify(wire);
     assert.ok(!serialized.includes(SECRET_MARKER), `${eventType} leaked protected content: ${serialized}`);
@@ -53,6 +64,22 @@ test('no Broadcast event type can carry chat text, titles, URLs or storage paths
       assert.ok(!(key in wire), `${eventType} kept ${key}`);
     }
   }
+});
+
+test('Action 12 events: hints carry only a version and kind, signaling is shape-checked', () => {
+  assert.deepEqual(toRoomBroadcastPayload('collab_changed', { version: 7, kind: 'polls', question: SECRET_MARKER }), { version: 7, kind: 'polls' });
+  assert.equal(toRoomBroadcastPayload('collab_changed', { version: 7, kind: 'messages' }), null, 'unknown kind');
+  assert.equal(toRoomBroadcastPayload('study_changed', { kind: 'notes' }), null, 'needs a version');
+  assert.equal(toRoomBroadcastPayload('cursor', { x: Number.NaN, y: 1 }), null);
+  assert.equal(toRoomBroadcastPayload('note_editing', { noteId: 'https://evil.example', editing: true }), null);
+  assert.equal(toRoomBroadcastPayload('pdf_follow', { fileId: randomUUID(), page: 0 }), null);
+  const to = randomUUID();
+  assert.equal(toRoomBroadcastPayload('rtc_signal', { kind: 'offer', to }), null, 'offer needs an SDP');
+  assert.equal(toRoomBroadcastPayload('rtc_signal', { kind: 'offer', to, sdp: `https://evil.example/${SECRET_MARKER}` }), null, 'SDP must look like SDP');
+  assert.equal(toRoomBroadcastPayload('rtc_signal', { kind: 'offer', sdp: 'v=0\r\n' }), null, 'offer needs a recipient');
+  assert.deepEqual(toRoomBroadcastPayload('rtc_signal', { kind: 'offer', to, sdp: 'v=0\r\no=- 1 2 IN IP4 0.0.0.0\r\n', content: SECRET_MARKER }), { to, kind: 'offer', sdp: 'v=0\r\no=- 1 2 IN IP4 0.0.0.0\r\n' });
+  assert.equal(toRoomBroadcastPayload('rtc_signal', { kind: 'ice', to, candidate: SECRET_MARKER }), null, 'ICE must be a candidate line');
+  assert.equal(toRoomBroadcastPayload('rtc_signal', { kind: 'offer', to, sdp: `v=0${'x'.repeat(30_001)}` }), null, 'SDP is bounded');
 });
 
 test('chat events are not part of the Broadcast contract', () => {

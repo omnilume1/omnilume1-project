@@ -12,7 +12,9 @@ export type NotificationType =
   | 'access'
   | 'security'
   | 'permanent_conversion'
-  | 'room_deletion';
+  | 'room_deletion'
+  | 'task'
+  | 'room_event';
 
 export type NotificationItem = {
   id: string;
@@ -51,6 +53,8 @@ const PRESENTATION: Record<string, Presentation> = {
   security: { icon: 'shield', label: 'Security' },
   permanent_conversion: { icon: 'spark', label: 'Room update' },
   room_deletion: { icon: 'trash', label: 'Room deletion' },
+  task: { icon: 'spark', label: 'Task' },
+  room_event: { icon: 'clock', label: 'Room event' },
 };
 
 export function notificationPresentation(type: string): Presentation {

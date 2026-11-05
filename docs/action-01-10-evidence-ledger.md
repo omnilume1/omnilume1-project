@@ -1642,3 +1642,127 @@ Not verifiable in the browser harness: forcing a real Realtime disconnect.
 11.10 reconnect is covered by source + unit contract (`connectionGeneration
 > 1` → `request_sync`, the same path as late join, which was verified live).
 Native FLAC speed uses the same `playbackRate` sync path (static).
+
+### Action 12 — Study and non-AI collaboration
+
+Database (`20261107100000_action12_collaboration.sql` +
+`20261107110000_action12_transcript_conflict_code.sql`, both applied after
+rolled-back dry runs as `authenticated`; migration list local = remote, 45
+rows). Every new table has RLS; `REVOKE ALL` and at most `GRANT SELECT`;
+all writes through SECURITY DEFINER RPCs with `search_path = ''`, EXECUTE
+for `authenticated` only (anon none). Policy helpers used in RLS/storage
+policies (`can_view_room_recording`, `room_recording_object_access`) are
+executable by `authenticated`. Capability map: `study` (notes, tasks,
+resources), `chat` (hands, polls, countdowns, voice, recordings, reading
+events), `manage_announcements` (events), `manage_members` (moderation,
+recording requests). Notification types widened with `task`, `room_event`.
+
+- Notes: `last_edited_by`, `locked`, version history (trigger keeps the last
+  50), `list_study_note_versions`, `restore_study_note_version`,
+  `set_study_note_locked`; `update_study_note` refuses non-author edits of a
+  locked note (42501).
+- `room_hand_raises`, `room_polls` + `room_poll_votes` (one vote, members
+  read only their own vote; totals through `get_room_poll_results`),
+  `room_countdowns`, `room_tasks` (assignee notified), `room_events`
+  (members notified on schedule/cancel), `room_study_resources` +
+  `room_resource_progress` (own rows) + `room_resource_notes` (room or
+  personal), `room_voice_moderation`, `room_recordings` +
+  `room_recording_consents` + `room_recording_transcripts`,
+  `search_room_history` (per-source capability checks).
+- Recordings: private bucket `room_recordings`
+  (`<room>/<recording>.webm`); upload only by the requester while status is
+  `recording` (set by the database only after every listed participant
+  agreed), read only by participants/managers once stopped, 7-day
+  retention (`expire_room_recordings`, service role, called by the cleanup
+  job), objects removed with the room by the destroy job.
+
+Evidence:
+
+- database-security, dry run (owner/member/outsider/anon, Study off): member
+  edit v2 attributed; member lock refused; locked edit refused; history 1;
+  owner restore v1→v3; member cannot lower others' hands; double vote 23505;
+  duplicate options 22023; direct poll insert 42501; past countdown 22023;
+  member event 42501; bad YouTube URL 22023; foreign media P0002; member mute
+  and member recording request 42501; outsider polls/search 42501 and 0 rows;
+  poll totals `{1,1}` with own vote only; member notified 3 (task + event
+  scheduled + cancelled); assignee delete 42501; consent → `recording`;
+  non-requester finish 42501; wrong path 22023; upload refused after stop;
+  participant read allowed; stale transcript refused; search kinds
+  event, poll, resource, task, transcript; Study off → tasks 0 rows and
+  create 42501; anon EXECUTE/SELECT refused. (The first dry run caught the
+  `room_notifications_type_allowed` CHECK; widened in the same migration.)
+- database-security, `scripts/security/collab-probe.mjs` (live, disposable
+  rooms, owner/member/admin/outsider/anon, private bucket and Realtime):
+  **24 pass, 0 fail**. Includes: admins lower hands but cannot mute the
+  owner; nothing uploads before consent, a single decline cancels and blocks
+  upload, only the requester uploads; anon/outsider cannot read recordings;
+  hints/signaling on `sync-chat` and cursors on `sync-study` are delivered;
+  with Study off the study topic refuses the member. The first run found the
+  transcript conflict used SQLSTATE 40001 (PostgREST treats it as a
+  serialization failure, so clients saw no code) → follow-up migration uses
+  23514, dry-run and pushed.
+- database-security, full probe suite re-run after Action 12 (regression):
+  authorization 175, lifecycle 26, site-owner 43, notification 26,
+  messaging 37, workspace 20, media 12, watch 20, collab 24 — all pass,
+  0 fail. tsc clean; lint 0 errors / 13 warnings (unchanged); build ok.
+- static, unit tests **105/105** (`tests/collab.test.ts`: study statistics
+  and streaks, poll percentages, countdowns, the offer rule, YouTube ids,
+  cursor throttle, migration RLS/grant/search_path/consent contract,
+  one realtime path with mute enforced on both ends; contract tests for the
+  new events: hints carry only version + kind, signaling is shape-checked
+  and bounded, no protected field survives).
+
+Walkthrough (multi-user, local runtime, desktop 1280 px and mobile 390 px;
+the harness has no microphone/screen, so a WebAudio oscillator and a canvas
+stream were injected in place of `getUserMedia`/`getDisplayMedia`):
+
+| Item | Result |
+| --- | --- |
+| 12.1 Live notes | A edits → B sees "user4 is editing…" then the new text without reload ("Updated with the latest version") |
+| 12.2 Collaborative docs | history v1–v4 with editor/time; A locks → B read-only with badge; A restores v2 → B updated live |
+| 12.3 Whiteboard cursors | B's pointer shows on A as a labelled "Rohan" cursor, "1 other on the board" |
+| 12.4 Voice + owner mute | P2P connected both ways, remote audio level 1.0; owner mute → B locked ("muted by a manager") and A's playback of B muted; unmute restores |
+| 12.5 Screen share | A shares → B sees "user4 is sharing their screen" with live video; stop removes it |
+| 12.6 Raise hand | B raises → A sees the queue and lowers it; B cannot lower others (probe) |
+| 12.7 Polls | B creates, A votes live, B votes → 50/50 totals on both; votes anonymous |
+| 12.8 Countdowns | B starts 2 min → A sees it ticking live |
+| 12.9 Tasks | A assigns to Rohan → B notified, completes it; no Delete for the assignee |
+| 12.10 Room events | A schedules → B sees it, cannot schedule, bell shows "Room event" notice |
+| 12.11 Study history + music | 10 s session → streak 1 day, today/total 1m, Physics bar; music card: Queue for members, Play/Pause for controllers, shows now playing + next |
+| 12.12 YouTube/lecture | B adds YouTube lecture, watches inline, progress saved ("continue at 1:03"), timestamped note at 1:03 visible to A; A "Watch together" casts it and B's Now Playing follows |
+| 12.13 Recording + transcript | A asks → B consents (dock shows "Recording") → A records, stop and save (0:14, deleted after 7 days) → B plays it from the private bucket, writes and saves a manual transcript |
+| 12.14 Search | B finds the poll ("chapter"), the transcript ("entropy"), the event ("review") |
+| 12.15 Timer notification | B starts a timer → owner A's bell: "Rohan started a 1-minute study timer." |
+| 12.16 Shared PDFs | A presents walkthrough.pdf → B follows to page 3; A's annotation appears on B live |
+| Mobile 390 px | Voice, Collaborate, Study (Tasks/Resources), home: no horizontal overflow on either account |
+
+Bugs found in the walkthrough and fixed (re-verified):
+
+1. Notes (pre-existing since Action 10, exposed by live notes): the initial
+   load effect depended on the selection, so opening a new note re-fetched
+   the list and overwrote freshly typed text with stale server text. Load
+   now runs once per room, never replaces unsaved edits, and a reload/refresh
+   keeps the open note's base version so a later save still reports the
+   conflict instead of overwriting.
+2. Study panel stretched phones to 705 px: a pre-existing phone rule gives
+   the stage panels `flex: none` (content width) → width pinned to the slot.
+3. The room notification strip (pre-existing) laid notices side by side and
+   pushed the page to 596 px once task/event notices accumulated → notices
+   wrap with a capped, scrollable height.
+4. On phones the fixed Now Playing bar could cover the end of the page →
+   room shell reserves space while it is shown.
+
+Provider substitutions and limits (free path, no external keys):
+
+- Voice/screen: P2P WebRTC mesh with public STUN, no TURN relay and no SFU
+  (master plan suggests LiveKit/Daily/Agora/Twilio; none configured).
+  Suitable for small rooms; members behind symmetric NAT/strict firewalls may
+  not connect. Signaling `sender_id` is client-asserted on the private chat
+  topic (only room members with chat can publish); moderation is enforced
+  from the database on the muted member's client and on every listener.
+- Recording: client-side MediaRecorder mix by the requester; automatic
+  transcription is AI → Action 17 (manual transcript only).
+- Search: ILIKE over capability-checked sources (no full-text index yet;
+  adequate for room-sized data).
+- 12.17 Scheduled rooms already ship (`scheduled_for` in create-room and the
+  room access gate); no Action 12 change.

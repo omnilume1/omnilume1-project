@@ -4,6 +4,7 @@ import { unwrapAction } from '@/lib/action-result';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { getRoomWhiteboard, saveRoomWhiteboard, type RoomWhiteboard } from '@/actions/study-collaboration';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
+import { useWhiteboardCursors } from '@/components/room/WhiteboardCursors';
 import {
   LEGACY_IMAGE_KEY,
   WHITEBOARD_MAX_ELEMENTS,
@@ -167,6 +168,7 @@ export default function StudyWhiteboardPanel({ roomId }: { roomId: string }) {
   const [showGrid, setShowGrid] = useState(true);
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
   const viewportRef = useRef(viewport);
+  const cursors = useWhiteboardCursors(roomId, viewport);
   const [selection, setSelection] = useState<string[]>([]);
   const [draft, setDraft] = useState<WhiteboardElement | null>(null);
   const [editor, setEditor] = useState<TextEditor | null>(null);
@@ -492,6 +494,8 @@ export default function StudyWhiteboardPanel({ roomId }: { roomId: string }) {
   const shapeOrigins = useRef(new Map<string, { x: number; y: number }>());
 
   const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const canvasRect = event.currentTarget.getBoundingClientRect();
+    cursors.trackPointer(event.clientX - canvasRect.left, event.clientY - canvasRect.top);
     if (pointersRef.current.has(event.pointerId)) pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     const pinch = pinchRef.current;
     if (pinch && pointersRef.current.size === 2) {
@@ -899,6 +903,8 @@ export default function StudyWhiteboardPanel({ roomId }: { roomId: string }) {
             )}
           </g>
         </svg>
+        {cursors.overlay}
+        {cursors.activeCount > 0 && <p className="wb-cursor-count" aria-live="polite">{cursors.activeCount} other{cursors.activeCount === 1 ? '' : 's'} on the board</p>}
 
         {editor && (
           <textarea

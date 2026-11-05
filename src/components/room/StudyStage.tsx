@@ -11,6 +11,9 @@ import StudySubTimer from '@/components/room/StudySubTimer';
 import StudyNotesPanel from '@/components/room/StudyNotesPanel';
 import StudyWhiteboardPanel from '@/components/room/StudyWhiteboardPanel';
 import StudyPdfPanel from '@/components/room/StudyPdfPanel';
+import StudyTasksPanel from '@/components/room/StudyTasksPanel';
+import StudyResourcesPanel from '@/components/room/StudyResourcesPanel';
+import { StudyHistoryStats, StudyMusicCard } from '@/components/room/StudyExtras';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import type { TimerState } from '@/hooks/useRoomSync';
@@ -24,12 +27,13 @@ import {
   type FocusLockState,
 } from '@/lib/focus-lock';
 
-type StudyTab = 'TIMER' | 'NOTES' | 'WHITEBOARD' | 'PDF';
+type StudyTab = 'TIMER' | 'NOTES' | 'WHITEBOARD' | 'PDF' | 'TASKS' | 'RESOURCES';
 
 interface StudyStageProps {
   roomId: string;
   focusRoomPath: string;
   timerNavigationRequest?: number;
+  onOpenWatch?: () => void;
 }
 
 interface StudyMiniTimerProps {
@@ -170,7 +174,7 @@ export function StudyMiniTimer({ timerState, roomId, focusLockExpiresAt, onOpen 
   );
 }
 
-export default function StudyStage({ roomId, focusRoomPath, timerNavigationRequest = 0 }: StudyStageProps) {
+export default function StudyStage({ roomId, focusRoomPath, timerNavigationRequest = 0, onOpenWatch }: StudyStageProps) {
   const { timerState, broadcastEvent, currentUserId } = useRoomRealtime();
   const {
     panelRef,
@@ -441,7 +445,8 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
         </div>
         <button type="button" onClick={() => setShowHistory(false)} className="cursor-pointer text-lg text-neutral-500 hover:text-white" aria-label="Close study history">×</button>
       </div>
-      <div className="max-h-80 overflow-y-auto p-3">
+      <div className="max-h-[28rem] overflow-y-auto p-3">
+        <StudyHistoryStats roomId={roomId} refreshKey={studyHistory.reduce((total, entry) => total + entry.totalMinutes, 0)} />
         {historyLoading && <p className="px-2 py-4 text-xs text-neutral-500">Loading history...</p>}
         {!historyLoading && studyHistory.length === 0 && <p className="px-2 py-6 text-center text-xs text-neutral-500">No study sessions recorded yet.</p>}
         <div className="flex flex-col gap-2">
@@ -485,7 +490,7 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
     <div
       ref={panelRef}
       style={panelHeight === null ? undefined : { height: `${panelHeight}px`, flex: '0 1 auto' }}
-      className={`room-study-resizable glass-panel relative flex min-h-0 flex-1 flex-col p-4 transition-all duration-300 sm:p-6 ${isResizing ? 'is-resizing' : ''}`}
+      className={`room-study-resizable glass-panel relative flex min-h-0 min-w-0 flex-1 flex-col p-4 transition-all duration-300 sm:p-6 ${isResizing ? 'is-resizing' : ''}`}
     >
       {renderHistoryPanel}
       {focusWarning}
@@ -493,7 +498,7 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
       <div className="mb-5 flex items-center justify-between gap-4 border-b border-neutral-800 pb-4">
         <h2 className="hidden text-lg font-bold text-white sm:block">Study Workspace</h2>
         <div className="flex min-w-0 gap-1 overflow-x-auto rounded-xl bg-[#121212] p-1">
-          {(['TIMER', 'NOTES', 'WHITEBOARD', 'PDF'] as const).map((tab) => (
+          {(['TIMER', 'NOTES', 'WHITEBOARD', 'PDF', 'TASKS', 'RESOURCES'] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -576,12 +581,15 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
               <StudySubTimer roomId={roomId} currentUserId={currentUserId} slot={1} />
               <StudySubTimer roomId={roomId} currentUserId={currentUserId} slot={2} />
             </div>
+            <div className="w-full pb-4"><StudyMusicCard roomId={roomId} onOpenWatch={onOpenWatch} /></div>
           </div>
         </div>
 
         {activeTab === 'NOTES' && <StudyNotesPanel roomId={roomId} />}
         {activeTab === 'WHITEBOARD' && <StudyWhiteboardPanel roomId={roomId} />}
         {activeTab === 'PDF' && <StudyPdfPanel roomId={roomId} />}
+        {activeTab === 'TASKS' && <div className="min-h-0 flex-1 overflow-y-auto"><StudyTasksPanel roomId={roomId} /></div>}
+        {activeTab === 'RESOURCES' && <StudyResourcesPanel roomId={roomId} onOpenWatch={onOpenWatch} />}
       </div>
 
       <div

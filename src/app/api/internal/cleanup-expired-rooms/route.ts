@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
-import { cleanupDestroyedRooms, cleanupExpiredMedia, cleanupPendingRoomFiles } from '@/lib/room-cleanup';
+import { cleanupDestroyedRooms, cleanupExpiredMedia, cleanupExpiredRecordings, cleanupPendingRoomFiles } from '@/lib/room-cleanup';
 
 function getAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -48,7 +48,8 @@ async function cleanupExpiredRooms(request: Request) {
     const media = await cleanupExpiredMedia(supabase, now);
     const files = await cleanupPendingRoomFiles(supabase);
     const rooms = await cleanupDestroyedRooms(supabase, now);
-    const failures = [...media.failures, ...files.failures, ...rooms.failures];
+    const recordings = await cleanupExpiredRecordings(supabase);
+    const failures = [...media.failures, ...files.failures, ...rooms.failures, ...recordings.failures];
 
     return NextResponse.json(
       {
@@ -56,6 +57,7 @@ async function cleanupExpiredRooms(request: Request) {
         expiredMediaRemoved: media.removed,
         pendingRoomFilesRemoved: files.removed,
         destroyedRoomsRemoved: rooms.removed,
+        expiredRecordingsRemoved: recordings.removed,
         // Items an overlapping run had already cleaned (not failures).
         alreadyCleanedSkipped: media.skipped + rooms.skipped,
         failures,

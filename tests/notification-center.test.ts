@@ -34,7 +34,7 @@ test('badge and accessible label', () => {
 });
 
 test('every notification type has an icon, a label and a destination', () => {
-  for (const type of ['mention', 'reply', 'announcement', 'pdf_shared', 'timer', 'recovery_request', 'recovery_decision', 'access', 'security', 'permanent_conversion', 'room_deletion']) {
+  for (const type of ['mention', 'reply', 'announcement', 'pdf_shared', 'timer', 'recovery_request', 'recovery_decision', 'access', 'security', 'permanent_conversion', 'room_deletion', 'task', 'room_event']) {
     const presentation = notificationPresentation(type);
     assert.notEqual(presentation.icon, 'bell', `${type} needs its own icon`);
     assert.ok(presentation.label.length > 0);
