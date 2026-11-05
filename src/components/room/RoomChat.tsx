@@ -25,6 +25,7 @@ import {
 } from '@/lib/room-chat-model';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import GifPicker from '@/components/room/GifPicker';
+import { useBookmarks } from '@/components/room/BookmarkButton';
 import type { GifResult } from '@/actions/gifs';
 
 const ROOM_CHAT_PAGE_SIZE = 50;
@@ -88,6 +89,7 @@ function messageError(error: { code?: string; message?: string } | null | undefi
 }
 
 export default function RoomChat({ roomId }: RoomChatProps) {
+  const bookmarks = useBookmarks('message', roomId);
   const [messages, setMessages] = useState<RoomChatMessage[]>([]);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
@@ -823,6 +825,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
                     <button role="menuitem" onClick={(e) => { e.stopPropagation(); startReply(msg); }} className="room-chat-menu-item"><OmniIcon name="reply" size={13} /> Reply</button>
                     <button role="menuitem" onClick={(e) => { e.stopPropagation(); setActiveMenuId(null); setReactionPickerFor(msg.id); }} className="room-chat-menu-item"><OmniIcon name="smile" size={13} /> React</button>
                     {canEditMessage(msg, me) && <button role="menuitem" onClick={(e) => { e.stopPropagation(); startEdit(msg); }} className="room-chat-menu-item"><OmniIcon name="pen" size={13} /> Edit</button>}
+                    {!msg.is_deleted && msg.content && <button role="menuitem" disabled={bookmarks.busy === msg.id} onClick={(e) => { e.stopPropagation(); setActiveMenuId(null); void bookmarks.toggle(roomId, msg.id); }} className="room-chat-menu-item"><OmniIcon name="pin" size={13} /> {bookmarks.saved.has(msg.id) ? 'Remove from saved' : 'Save message'}</button>}
                     {canPin && <button role="menuitem" disabled={pendingAction === `pin:${msg.id}`} onClick={(e) => { e.stopPropagation(); void setPin(msg, !msg.pinned_at); }} className="room-chat-menu-item"><OmniIcon name="pin" size={13} /> {msg.pinned_at ? 'Unpin' : 'Pin'}</button>}
                     <button role="menuitem" onClick={(e) => { e.stopPropagation(); handleDeleteForMe(msg.id); }} className="room-chat-menu-item">Delete for me</button>
                     {isMe && <button role="menuitem" onClick={(e) => { e.stopPropagation(); handleDeleteForEveryone(msg.id); }} disabled={deletingMessageId === msg.id} className="room-chat-menu-item is-danger">{deletingMessageId === msg.id ? 'Deleting...' : 'Delete for everyone'}</button>}

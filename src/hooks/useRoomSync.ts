@@ -74,6 +74,9 @@ export type RoomSyncValue = {
   roomMessageEvents: RoomMessageEvent[];
   roomControlEvents: RoomControlEvent[];
   roomControlVersion: number;
+  // Action 13: bumps on every room_activity insert RLS lets this member see
+  // (same private channel as control events); feeds re-read through the RPC.
+  roomActivityVersion: number;
   // Increments each time Realtime confirms the room's Postgres Changes feed
   // (first join and every rejoin). Rows committed before that are never
   // replayed, so persistent views (chat) re-fetch through RLS when it changes.
@@ -123,7 +126,7 @@ export type RoomMessageEvent = {
 export type RoomControlEvent = {
   id: number;
   roomId: string;
-  eventType: 'membership_changed' | 'role_changed' | 'invite_changed' | 'restriction_changed' | 'ownership_changed' | 'settings_changed' | 'lock_changed' | 'announcement_changed' | 'guest_changed' | 'feature_changed';
+  eventType: 'membership_changed' | 'role_changed' | 'invite_changed' | 'restriction_changed' | 'ownership_changed' | 'settings_changed' | 'lock_changed' | 'announcement_changed' | 'guest_changed' | 'feature_changed' | 'group_converted';
   subjectUserId: string | null;
   payload: Record<string, unknown>;
   createdAt: string;
@@ -394,6 +397,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   const [roomMessageEvents, setRoomMessageEvents] = useState<RoomMessageEvent[]>([]);
   const [roomControlEvents, setRoomControlEvents] = useState<RoomControlEvent[]>([]);
   const [roomControlVersion, setRoomControlVersion] = useState(0);
+  const [roomActivityVersion, setRoomActivityVersion] = useState(0);
   const [connectionGeneration, setConnectionGeneration] = useState(0);
   const [whiteboardVersion, setWhiteboardVersion] = useState(0);
   const [mediaHeartbeat, setMediaHeartbeat] = useState<MediaHeartbeat | null>(null);
@@ -876,6 +880,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       setRoomMessageEvents([]);
       setRoomControlEvents([]);
       setRoomControlVersion(0);
+      setRoomActivityVersion(0);
       setConnectionGeneration(0);
       setWhiteboardVersion(0);
       setMediaHeartbeat(null);
@@ -1001,6 +1006,9 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       channel.on('broadcast', { event: 'room_action' }, handleIncomingEvent);
       if (kind === 'general') {
         channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_control_events', filter: `room_id=eq.${roomId}` }, handleRoomControlEvent);
+        channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_activity', filter: `room_id=eq.${roomId}` }, () => {
+          if (isMounted) setRoomActivityVersion((current) => current + 1);
+        });
         channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, handleRoomMessageChange);
         channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `room_id=eq.${roomId}` }, handleRoomMessageChange);
         // Postgres Changes starts delivering only after this system message,
@@ -1083,6 +1091,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     roomMessageEvents,
     roomControlEvents,
     roomControlVersion,
+    roomActivityVersion,
     connectionGeneration,
     whiteboardVersion,
     mediaHeartbeat,

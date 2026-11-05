@@ -11,7 +11,6 @@ import MediaStage from '@/components/room/MediaStage';
 import StudyStage, { StudyMiniTimer } from '@/components/room/StudyStage';
 import StudyWhiteboardPanel from '@/components/room/StudyWhiteboardPanel';
 import { getRoomAccess } from '@/actions/members';
-import { convertRoomToGroup } from '@/actions/rooms';
 import {
   getPermanentRoomRequests,
   getRecoveryRequestStatus,
@@ -43,6 +42,10 @@ import { roomWorkspacePreferenceKey } from '@/lib/room-workspace-preferences';
 import { minimizeRoom } from '@/lib/minimized-rooms';
 import RoomDashboard from '@/components/room/RoomDashboard';
 import NowPlayingBar from '@/components/room/NowPlayingBar';
+import RoomPulseBar from '@/components/room/RoomPulseBar';
+import RoomConversionDialog, { type ConversionResult } from '@/components/room/RoomConversionDialog';
+import { BookmarkToggle } from '@/components/room/BookmarkButton';
+import { getRoomGroup } from '@/lib/management-data';
 import {
   DEFAULT_ROOM_APPEARANCE,
   HOME_CHAT_WIDTH,
@@ -117,11 +120,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [lifecycleActionError, setLifecycleActionError] = useState<string | null>(null);
 
   const [showConvertModal, setShowConvertModal] = useState(false);
-  const [groupUsername, setGroupUsername] = useState('');
-  const [converting, setConverting] = useState(false);
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const [conversionTarget, setConversionTarget] = useState<string | null>(null);
-  const conversionNavigating = useRef(false);
+  const [groupInfo, setGroupInfo] = useState<{ name: string; member_count: number } | null>(null);
   const [showControlCenter, setShowControlCenter] = useState(false);
   const [showLeaveConfirmation, setShowLeaveConfirmation] = useState(false);
   const [ownerLeaveStep, setOwnerLeaveStep] = useState<'choice' | 'transfer'>('choice');
@@ -185,45 +184,6 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDragging]);
-
-  const handleConvert = async () => {
-    if (!groupUsername.trim()) return alert("Please provide a group username.");
-    if (!roomData) return;
-    // Mirror the server-side cleaning in convertRoomToGroup so navigation
-    // lands on the exact handle that gets claimed.
-    const target = groupUsername.toLowerCase().replace(/[^a-z0-9_.]/g, '');
-    if (!target) return alert("Please provide a group username.");
-    setConverting(true);
-    try {
-      await convertRoomToGroup(roomData.id, groupUsername).then(unwrapAction);
-      setConverting(false);
-      setShowConvertModal(false);
-      setConversionTarget(target);
-      setCountdown(5);
-    } catch (error: unknown) {
-      alert(error instanceof Error ? error.message : 'Unable to upgrade this room.');
-      setConverting(false);
-    }
-  };
-
-  // Pure countdown ticker. The updater only computes the next value; side
-  // effects (navigation) live in the dedicated effect below.
-  useEffect(() => {
-    if (countdown === null || countdown <= 0) return;
-    const timer = setInterval(() => {
-      setCountdown((prev) => (prev === null ? null : Math.max(0, prev - 1)));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [countdown]);
-
-  // Navigation runs in the effect phase once the countdown reaches zero and
-  // the claimed group handle is known. The ref guards against repeated pushes.
-  useEffect(() => {
-    if (countdown !== 0 || !conversionTarget) return;
-    if (conversionNavigating.current) return;
-    conversionNavigating.current = true;
-    router.push(`/room/${conversionTarget}`);
-  }, [countdown, conversionTarget, router]);
 
   useEffect(() => {
     async function checkAccess() {
@@ -502,6 +462,27 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     router.push('/explore?roomNotice=minimized');
   };
 
+  // Action 14: the conversion changes what the room is (permanent, private,
+  // closed to joins). The owner's dialog and every member's control-event feed
+  // apply the same local update; the database already enforces all of it.
+  const applyConversion = useCallback((name: string | null) => {
+    setRoomData((current) => current ? { ...current, is_group: true, is_private: true, expiration_type: 'permanent', expires_at: null, reopened_until: null, username: null } : current);
+    if (name) setGroupInfo((current) => ({ name, member_count: current?.member_count ?? 0 }));
+  }, []);
+  const convertedEvents = roomSync.roomControlEvents.filter((event) => event.eventType === 'group_converted').length;
+  const roomIdForGroup = roomData?.id;
+  const isGroupRoom = Boolean(roomData?.is_group);
+  useEffect(() => {
+    if (!roomIdForGroup || (!isGroupRoom && convertedEvents === 0)) return;
+    let active = true;
+    void getRoomGroup(roomIdForGroup).then((result) => {
+      if (!active || !result.ok || !result.data) return;
+      setGroupInfo({ name: result.data.name, member_count: result.data.member_count });
+      applyConversion(null);
+    });
+    return () => { active = false; };
+  }, [roomIdForGroup, isGroupRoom, convertedEvents, applyConversion]);
+
   if (accessStatus === 'loading') return <div className="omni-state-screen text-sm text-neutral-500">Verifying secure access...</div>;
   if (accessStatus === 'not_found') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl">❌ Space Not Found</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Explore</Link></div>;
   if (accessStatus === 'pending') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-amber-500">⏳ Waiting for Approval</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
@@ -512,41 +493,6 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   if (accessStatus === 'unauthorized' || accessStatus === 'public_not_joined' || accessStatus === 'private_not_joined') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-red-500">🔒 Access Restricted</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Go to Explore to Join</Link></div>;
 
   if (!roomData) return <div className="omni-state-screen text-sm text-neutral-500">Loading room...</div>;
-
-  if (showConvertModal) {
-    return (
-      <div className="h-screen bg-black/90 text-white flex flex-col items-center justify-center p-6 text-center absolute inset-0 z-50">
-        <div className="max-w-md w-full border border-indigo-900/50 bg-[#0a0a0a] p-8 rounded-2xl shadow-2xl flex flex-col items-center">
-          <div className="w-16 h-16 rounded-full bg-indigo-500/10 flex items-center justify-center text-2xl mb-4 border border-indigo-500/20">🚀</div>
-          <h2 className="text-xl font-bold mb-2">Upgrade to Permanent Group</h2>
-          <p className="text-sm text-neutral-400 mb-6">This will stop the self-destruct timer permanently. Your chat, files, and members will be preserved.</p>
-          <div className="w-full text-left mb-6">
-            <label className="block text-[10px] uppercase tracking-wider text-neutral-500 mb-2">Claim Group Username *</label>
-            <div className="flex border border-neutral-800 rounded-md bg-[#050505] overflow-hidden focus-within:border-neutral-500 transition">
-              <span className="bg-neutral-900 px-3 py-2.5 text-sm text-neutral-500 border-r border-neutral-800">omnilume.com/r/</span>
-              <input type="text" value={groupUsername} onChange={(e) => setGroupUsername(e.target.value)} placeholder="my_awesome_group" className="w-full bg-transparent px-3 py-2.5 text-sm text-white outline-none" />
-            </div>
-          </div>
-          <div className="flex w-full gap-3">
-            <button onClick={() => setShowConvertModal(false)} className="flex-1 py-2.5 bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 rounded-lg text-sm font-semibold transition">Cancel</button>
-            <button onClick={handleConvert} disabled={converting || !groupUsername} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-semibold transition disabled:opacity-50 text-white">{converting ? 'Upgrading...' : 'Confirm Upgrade'}</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (countdown !== null) {
-    return (
-      <div className="h-screen bg-black/95 backdrop-blur-md text-white flex flex-col items-center justify-center p-6 text-center absolute inset-0 z-50 animate-in fade-in duration-300">
-        <div className="w-20 h-20 rounded-full bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-3xl mb-6 animate-pulse">🚀</div>
-        <h2 className="text-2xl font-bold mb-2">Transforming Space into Group...</h2>
-        <p className="text-sm text-neutral-400 mb-8 max-w-sm">Pausing active streams, transferring room history, and securing permanent cloud archives.</p>
-        <div className="text-5xl font-mono font-bold text-indigo-400 tracking-wider">00:0{countdown}</div>
-        <p className="text-xs text-neutral-600 mt-6">Redirecting to your new permanent link shortly...</p>
-      </div>
-    );
-  }
 
   if ((accessStatus === 'expired' || accessStatus === 'recovery_window' || isExpired) && roomData) {
     const isIrreversible = roomData.expiration_type === 'irreversible';
@@ -586,7 +532,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           </div>
         </div>
         <div className="room-actions flex items-center gap-4">
-          {userRole === 'owner' && roomData?.expiration_type === 'recoverable' && !roomData.reopened_until && <button onClick={() => setShowConvertModal(true)} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition">Upgrade to Group</button>}
+          {userRole === 'owner' && roomData && !roomData.is_group && roomData.expiration_type !== 'irreversible' && !roomData.deletion_scheduled_at && <button type="button" onClick={() => setShowConvertModal(true)} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition">Convert to group</button>}
           {roomData.reopened_until && <button onClick={handlePermanentRequest} disabled={permanentSubmitting || permanentRequests.some((request) => request.status === 'pending')} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition disabled:cursor-wait disabled:opacity-50">{permanentSubmitting ? 'Requesting...' : 'Request Permanent Room'}</button>}
           <div className="room-layout-menu" ref={layoutMenuRef}>
             <button type="button" className="room-action" aria-haspopup="dialog" aria-expanded={showLayoutMenu} onClick={() => setShowLayoutMenu((open) => !open)} title="Layout and theme"><OmniIcon name="rooms" size={14} /><span>Layout</span></button>
@@ -616,6 +562,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
               </div>
             )}
           </div>
+          <BookmarkToggle roomId={roomData.id} kind="room" entityId={roomData.id} className="room-action" labels={['☆ Save', '★ Saved']} subject="room" />
           <NotificationBell roomId={roomData.id} />
           <button type="button" onClick={() => setShowControlCenter(true)} className="room-action room-action-controls"><OmniIcon name="settings" size={14} /><span>Controls</span></button>
           <button type="button" onClick={minimizeActiveRoom} className="room-action" title="Return to Rooms without leaving"><span aria-hidden="true">—</span><span>Minimize room</span></button>
@@ -625,6 +572,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
       <RoomNotifications roomId={roomData.id} />
       <RoomRoleChangeNotification events={roomSync.roomControlEvents} currentUserId={roomSync.currentUserId} />
+      {roomData.is_group && <p className="group-banner" role="status">This room is now a group{groupInfo ? `: “${groupInfo.name}”` : ''}. Members and history are kept; new joins are closed.</p>}
+      <RoomPulseBar roomId={roomData.id} />
       <RoomAnnouncementBanner roomId={roomData.id} />
       <RoomEntryPrompts roomId={roomData.id} onOpenRoomProfile={() => { setControlCenterTab('profile'); setShowControlCenter(true); }} />
 
@@ -795,6 +744,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         )}
       </div>
       </div>
+      {showConvertModal && <RoomConversionDialog roomId={roomData.id} roomName={roomData.name} onClose={() => setShowConvertModal(false)} onConverted={(result: ConversionResult) => { applyConversion(result.name); setGroupInfo({ name: result.name, member_count: result.memberCount }); }} />}
       <RoomControlCenter
         open={showControlCenter}
         roomId={roomData.id}

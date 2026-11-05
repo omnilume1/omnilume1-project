@@ -16,6 +16,8 @@ import {
 } from "@/actions/room-controls";
 import { useRoomRealtime } from "@/components/room/RoomRealtimeProvider";
 import { OmniIcon } from "@/components/ui/OmniIcon";
+import { getRoomTrustLevels } from "@/lib/management-data";
+import { TRUST_HINTS, TRUST_LABELS, type TrustLevel } from "@/lib/room-management-model";
 
 interface MembersTabProps {
   roomId: string;
@@ -90,15 +92,20 @@ export default function MembersTab({
   const { onlineUserIds, currentUserId, roomControlVersion } =
     useRoomRealtime();
   const canManage = currentUserRole === "owner" || canManageMembers;
+  const [trust, setTrust] = useState<Map<string, TrustLevel>>(new Map());
 
   const fetchMembers = useCallback(async () => {
     setLoading(true);
     try {
-      const [memberData, controlStateData, identityData] = await Promise.all([
+      const [memberData, controlStateData, identityData, trustData] = await Promise.all([
         getRoomMembersList(roomId).then(unwrapAction),
         getRoomMemberControlStates(roomId).then(unwrapAction),
         getRoomMemberIdentities(roomId).then(unwrapAction),
+        getRoomTrustLevels(roomId),
       ]);
+      // Trust is derived by the database: managers receive everyone, members
+      // only themselves. A failure only hides the badges.
+      setTrust(trustData.ok ? new Map(trustData.data.map((row) => [row.user_id, row.level])) : new Map());
       setMembers((memberData as RoomMember[]) || []);
       setMemberStates((controlStateData as MemberState[]) || []);
       setIdentities((identityData as MemberIdentity[]) || []);
@@ -303,6 +310,11 @@ export default function MembersTab({
                       >
                         {member.role}
                       </span>
+                      {trust.get(member.user_id) && (
+                        <span className="ml-2 rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-neutral-300" title={TRUST_HINTS[trust.get(member.user_id) as TrustLevel]}>
+                          {TRUST_LABELS[trust.get(member.user_id) as TrustLevel]}
+                        </span>
+                      )}
                       {member.role === "guest" && (
                         <span className="mt-1 block text-[10px] text-amber-300">
                           Temporary guest · expires{" "}

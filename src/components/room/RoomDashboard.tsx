@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { listRoomFiles } from '@/actions/room-files';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
+import RoomActivityFeed from '@/components/room/RoomActivityFeed';
 import { OmniIcon, type OmniIconName } from '@/components/ui/OmniIcon';
 import { roomDeletionPolicy } from '@/lib/room-deletion-policy';
 import { ROOM_MESSAGE_COLUMNS, replyPreview, type RoomChatMessage } from '@/lib/room-chat-model';
@@ -192,6 +193,7 @@ export default function RoomDashboard({ roomId, room, timeLeft, featureFlags, on
           )}
         </>
       )}
+      <RoomActivityFeed roomId={roomId} />
     </section>
   );
 }

@@ -1766,3 +1766,146 @@ Provider substitutions and limits (free path, no external keys):
   adequate for room-sized data).
 - 12.17 Scheduled rooms already ship (`scheduled_for` in create-room and the
   room access gate); no Action 12 change.
+
+## Actions 13–14
+
+**Branch:** `feat/actions-13-14` from `main` at `783ba5d` (PR #19 merged).
+Plan and resume point: `docs/action-13-14-plan.md`. Baseline: migration list
+local = remote (45 rows), `tsc` clean.
+
+### Action 13 — Activity, discovery, events and management
+
+Database (`20261108100000_action13_activity_discovery.sql`, applied after a
+rolled-back dry run as `authenticated`/`anon`; owner/member/admin/outsider/anon
+all checked). New tables, all RLS, `REVOKE ALL` + `GRANT SELECT` only:
+`room_activity` (kind + actor + entity id only; labels resolved at read by
+capability; in the realtime publication), `room_bookmarks`, `room_templates`
+(+3 built-in), `room_exports` (audit), `room_event_rsvps`. 17 SECURITY
+DEFINER functions (`search_path = ''`, EXECUTE `authenticated`; only
+`discover_rooms` also `anon`). Trust levels are derived, never stored.
+
+- database-security, dry run: public discovery returned the public room and
+  none of the private, locked or scheduled ones (member and anon); a
+  non-member's text search for a private room's description found nothing;
+  history/pulse/export refused for outsiders (42501); direct inserts refused;
+  export rate limit P0429 on the 4th call; export held no key, ciphertext or
+  link; room deletion still cascades (activity trigger guards a gone room).
+- database-security, `scripts/security/management-probe.mjs` (live,
+  disposable accounts): **26 pass, 0 fail**, including: an outsider receives
+  no live `room_activity` over Postgres Changes for the private room while the
+  member does; saved items are private; member/admin/owner differences for
+  templates, trust, export.
+- static, `tests/room-management.test.ts` (in the 116/116 run): activity
+  wording per kind, merge/de-dup of live + refetched rows, day grouping,
+  pulse chips (capability-gated numbers hidden), smart organization buckets,
+  discovery argument bounds, export file names, migration contract
+  (RLS/grants/search_path/anon only for discovery), realtime stays on the
+  existing five private channels, export never selects keys/paths/links.
+  Lint 0 errors / 13 warnings (unchanged); `next build` ok.
+
+Walkthrough (multi-user, local runtime): owner A on `localhost:3000`, member B
+on `127.0.0.1:3000`, disposable rooms `qa13 browser public/private`.
+
+| Check | Result |
+| --- | --- |
+| 13.2 Activity feed | Seeded rows shown grouped under Today; A started a poll → B's feed and pulse updated without reload (2 online, 5 updates) |
+| 13.3 Pulse bar | "N online · messages in 15 min · updates this hour · Next: event in 3h · task for you" (B), counts only |
+| 13.1 Search/filters | B: name search → 1 result; lifespan "permanent" → 0; feature Watch → 1, Study → 0 (after template turned Study off); My rooms → public room only (A's private room never listed); Save toggle works |
+| 13.5 Bookmarks | B saved a chat message from the message menu (menu then offers "Remove from saved"), the room from Explore; both listed on Home and removable |
+| 13.6 Templates | A saved a template, applied "Watch party" → B saw Study disabled and the rose theme live; create-room with "Study session" prefilled private + 24 h and created a room with emerald theme, Watch off and the rules text |
+| 13.10 Export | A downloaded `omnilume-…json` (2.6 kB) and the SHA-256 was shown; audit rows recorded |
+| 13.8 Trust | A sees "Steward" for self; member list badges (managers see all) |
+| 13.11 RSVP | B pressed Going → "Going · 1" selected; Home shows the same event with RSVP buttons |
+| 13.4/13.7/13.9 Home | Room home has the activity feed; Home groups rooms into Expiring soon / Needs attention / …, upcoming events, assigned tasks (hidden when Study is off) and Saved |
+| Mobile 390 px (same-origin iframe: the preview tab cannot be resized while hidden) | `/home`, `/explore`, room page: no horizontal overflow (scrollWidth 375); filters wrap to two columns |
+
+Bugs found in the walkthrough and fixed: (1) every temporary room was
+bucketed "Expiring soon" because the threshold was 24 h; now the last 3 h
+(unit-tested). (2) lint: `Date.now()` during render in the new RSVP row (now
+set when events load) and `aria-pressed` on a menu item (removed).
+
+Decisions / notes: E2EE exists for personal chats only, so "E2EE rooms" are
+not a room type; discovery and export never read ciphertext. Locked rooms are
+treated as invite-only and hidden; legacy `is_group` rooms are hidden from
+discovery. Export is signed with a recorded SHA-256 digest (no signing secret
+is configured; a keyed signature would need an owner-provided secret).
+Template apply at creation is best-effort (scheduled rooms are not yet
+"active", so apply is skipped; the owner can apply from Controls).
+
+### Action 14 — Room-to-group conversion
+
+Database (`20261108110000_action14_room_group_conversion.sql`, applied after a
+rolled-back dry run as `authenticated`/`anon`). `groups` (no username or
+link; `source_room_id` UNIQUE, ON DELETE RESTRICT), `group_members` (one
+owner per group), `room_group_conversions` (audit + staged content counts +
+previous settings + what was resolved); RLS, select-only grants, policy
+helpers `is_group_member` / `is_group_manager` executable by `authenticated`.
+`convert_room_to_group(room)` is one SECURITY DEFINER transaction (row lock →
+idempotent): owner only; refuses inactive, irreversible, deletion-scheduled
+and owner-less rooms and encrypted rooms whose members lack keys; migrates
+approved, non-guest, unrestricted members with roles; keeps the room and all
+content by reference; closes the room (permanent, private, locked, invites
+revoked, username cleared, pending requests settled); one notice per member
+(`group_conversion`), one `group_converted` control event, one activity row.
+`destroy_expired_room`, `list_rooms_due_for_destruction` and
+`schedule_room_deletion` exclude converted rooms (the cleanup job removes
+storage *before* destroying, so the due list is the real guard);
+`prepare_account_deletion` moves group ownership to the replacement owner or
+removes a sole owner's group first; the legacy `convert_active_room_to_permanent`
+(group username) is no longer executable.
+
+- database-security, dry run: member/outsider/anon refused (42501); irreversible
+  and deletion-scheduled refused; encrypted room refused without keys and
+  converted with keys, ciphertext hash identical; a forced failure inside the
+  transaction left the room, group count and invites unchanged; double call:
+  first `false`, second `true`, same group; 1 group / 2 members / 1 record; room
+  permanent/NULL/NULL/private/group/locked; notices: member 1, actor 0; 1 control
+  event, 1 activity row; post-conversion RLS (member sees group + members, not the
+  record; outsider/anon nothing; direct inserts refused); `lifecycle_state` was
+  `destroyed` yet the due list excluded the room, `destroy_expired_room` returned
+  false and a direct DELETE hit the RESTRICT FK; account deletion → replacement
+  becomes group owner, sole owner's group+room removed.
+- database-security, `scripts/security/conversion-probe.mjs` (live, owner A,
+  member B and three throw-away users: guest, pending requester, outsider):
+  **19 pass, 0 fail** — incl. two simultaneous conversions → exactly one group,
+  guest/pending not migrated, exactly one notice and one received event, closed to
+  requests and old invites, not discoverable, deletion cannot be scheduled /
+  listed / destroyed / forced, encrypted room with untouched ciphertext.
+- static, `tests/group-conversion.test.ts` (in the 125/125 run): migration
+  contract (RLS, grants, RESTRICT FK, no username/link column, single definer
+  transaction, eligibility before first write, never deletes content or touches
+  ciphertext), lifecycle guards, cleanup ordering, account deletion order, server
+  action (no username, values), dialog contract, and the hook-order regression
+  below. Lint 0 errors / 13 warnings; `next build` ok.
+
+Walkthrough (multi-user, local runtime; owner A desktop 830 px, member B at
+390 px): A opened "Convert to group" → dialog lists what is kept/changes, no
+username field, focus on Cancel; double confirm → one request; A saw the group
+banner and the button disappeared; B (no reload) got the banner, header
+"GROUP / … PERMANENT" and a "Group" notification in the bell; B has no convert
+button; B page has no horizontal overflow (scrollWidth 375). Explore: converted
+room absent from Public rooms, listed under My rooms.
+
+Bugs found in the walkthrough and fixed: (1) the new hooks in the room page were
+placed after the page's early returns → "page couldn't load" (hook order); moved
+above them, with a source-order regression test. (2) two clicks in the same tick
+could send two requests and the later "already converted" answer overwrote the
+result text → an in-flight ref now allows one request.
+
+Regression (database-security, all `authenticated`/anon disposable-account
+probes re-run after Action 14): authorization 175, lifecycle 26, site-owner 43,
+notification 26, messaging 37, workspace 20, media 12, watch 20, collab 24,
+management 26, conversion 19 — **0 fail**. The first notification-probe run
+failed 3 checks (3): it used the legacy `convert_active_room_to_permanent` to
+create "room update" notices and a permanent room, and that RPC is now
+intentionally not callable. The probe now creates the permanent room directly
+and uses announcements for the mute / do-not-disturb checks (26/26); no
+product code changed for this.
+
+Decisions / notes: conversion is owner-only (the roadmap's "explicit admin
+permission" would need a new capability; not added). Group membership is a
+snapshot at conversion; later room-role changes do not mirror into the group
+(Action 15 owns group membership). Pending recovery requests (practically
+impossible on an active room) are deleted and pending permanent-room requests
+approved; both counts are in the conversion record. No external provider is
+needed for either action.

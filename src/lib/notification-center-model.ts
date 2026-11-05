@@ -14,7 +14,8 @@ export type NotificationType =
   | 'permanent_conversion'
   | 'room_deletion'
   | 'task'
-  | 'room_event';
+  | 'room_event'
+  | 'group_conversion';
 
 export type NotificationItem = {
   id: string;
@@ -55,6 +56,7 @@ const PRESENTATION: Record<string, Presentation> = {
   room_deletion: { icon: 'trash', label: 'Room deletion' },
   task: { icon: 'spark', label: 'Task' },
   room_event: { icon: 'clock', label: 'Room event' },
+  group_conversion: { icon: 'spark', label: 'Group' },
 };
 
 export function notificationPresentation(type: string): Presentation {

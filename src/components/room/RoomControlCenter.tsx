@@ -28,6 +28,7 @@ import {
   type RoomTheme,
 } from "@/lib/room-layout";
 import { useRoomRealtime } from "@/components/room/RoomRealtimeProvider";
+import RoomManagementPanel from "@/components/room/RoomManagementPanel";
 import RoomDeletionControls from '@/components/room/RoomDeletionControls';
 import { OmniIcon } from "@/components/ui/OmniIcon";
 
@@ -50,6 +51,7 @@ type Tab =
   | "permissions"
   | "announcements"
   | "profile"
+  | "management"
   | "user-control";
 
 type Settings = {
@@ -190,7 +192,7 @@ export default function RoomControlCenter({
   roomLifecycle?: { expirationType: string; deletionScheduledAt: string | null };
   onRoomLifecycleChange?: (deletionScheduledAt: string | null) => void;
 }) {
-  const { roomControlVersion } = useRoomRealtime();
+  const { roomControlVersion, currentUserId } = useRoomRealtime();
   const [tab, setTab] = useState<Tab>("overview");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [permissions, setPermissions] = useState<Permission[]>([]);
@@ -454,6 +456,7 @@ export default function RoomControlCenter({
                 ["user-control", "User control"],
                 ["announcements", "Announcements"],
                 ["profile", "Room profile"],
+                ...((currentUserRole === "owner" || currentUserRole === "admin" ? [["management", "Templates & export"]] : []) as Array<[Tab, string]>),
               ] as Array<[Tab, string]>
             ).map(([key, label]) => (
               <button
@@ -1374,6 +1377,10 @@ export default function RoomControlCenter({
                       </>
                     )}
                   </div>
+                )}
+
+                {tab === "management" && (currentUserRole === "owner" || currentUserRole === "admin") && (
+                  <RoomManagementPanel roomId={roomId} role={currentUserRole} currentUserId={currentUserId} />
                 )}
 
                 {tab === "profile" && (
