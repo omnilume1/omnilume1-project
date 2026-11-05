@@ -17,9 +17,17 @@ async function requireUser() {
 }
 
 function safeMutationError(fallback: string, error: unknown) {
-  const message = error instanceof Error ? error.message : '';
+  const message = error instanceof Error
+    ? error.message
+    : (error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message
+      : '');
   if (message.includes('duplicate') || message.includes('profiles_username_lower_unique_idx')) {
     return new Error('That username is already in use.');
+  }
+  // Raised by the profiles_enforce_minimum_age trigger.
+  if (message.includes('at least 13 years old')) {
+    return new Error('You must be at least 13 years old to use OmniLume.');
   }
   return new Error(fallback);
 }
