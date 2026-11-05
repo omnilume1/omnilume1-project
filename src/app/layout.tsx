@@ -4,6 +4,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "./management.css";
 import GlobalFocusTrap from "@/components/GlobalFocusTrap";
+import GlobalMiniPlayer from "@/components/music/GlobalMiniPlayer";
+import { MusicPlayerProvider } from "@/hooks/useMusicPlayer";
 import { Agentation } from "agentation";
 
 const geistSans = Geist({
@@ -34,7 +36,10 @@ export default function RootLayout({
         {/* Global Trap that enforces the URL redirect */}
         <GlobalFocusTrap />
 
-        {children}
+        <MusicPlayerProvider>
+          {children}
+          <GlobalMiniPlayer />
+        </MusicPlayerProvider>
 
         {/* Agentation - development only */}
         {process.env.NODE_ENV === "development" && (

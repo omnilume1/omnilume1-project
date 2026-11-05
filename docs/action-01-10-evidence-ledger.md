@@ -1950,3 +1950,49 @@ Personal/General stay E2EE; no group key distribution.
 Limits: unread counts refresh on inbox events (messages to me, requests,
 friendships), not on group messages; a chat created in the same tab and then
 revoked stays open until reload (RLS still refuses it).
+
+## Action 16.1 + 16.2 (Stage 1: music shell, player core, global mini player)
+
+Plan: `docs/action-16-plan.md` (owner decisions 2026-11-05). No database
+change, no network calls; fixtures only (`src/lib/music-fixtures.ts`: invented
+names, colour artwork, silent clock engine).
+
+- Database / database-security: n/a (no migration, RPC or realtime). `/music`
+  and `/music/*` added to `isAuthRequiredPath`; anon browser request to
+  `/music/album/glass-harbour` → `/login?next=…`.
+- static: `tests/music-queue.test.ts` (start list, play next/add + dedupe,
+  jump, shuffle leads + restore, repeat off/all/one, back > 10 s, back from a
+  hand-queued track, clear/remove/move, silent clock) and
+  `tests/music-shell-contract.test.ts` (auth path, every `music.css` selector
+  under `.music-app`, `globals.css` untouched, DM Sans only in the music
+  layout, provider in the root layout, reduced-motion + focus-visible, no
+  hand-written `-webkit-backdrop-filter`, shortcut typing guard).
+  `npm run test:unit` 145/145; lint 0 errors / 13 warnings (unchanged
+  baseline); `next build` ok.
+- local runtime / browser (`next start`, incognito, throw-away account deleted
+  after). 1440: sidebar 260 px; pill 668×56, radius 1000 px, grid
+  184 | 358 | 106; glass `saturate(2.2) blur(16px)` + 0.5 px inner stroke; h1
+  34/40 700, padding-top 32; gutter 40; album title 26/32 700; hero art
+  270×270 r10; rows 46 px r6; Play/Shuffle 36 px r24; square art r7; shelf
+  arrows shown. Up Next 300 px slides in and the pill re-centres (150 px); Esc
+  closes panel / drawer / full screen; full screen grid 461 + 576, art 461²,
+  mesh animates only while playing. Play → LCD + current row + Media Session
+  metadata/state; Ctrl+→ next; Space toggles (ignored in the search field);
+  `/` focuses search; Ctrl+↓ volume; shuffle/repeat/volume/mute restored after
+  reload; lyrics line click seeks to 0:12 and highlights in panel and full
+  screen; track ⋯ menu (popover) opens inside the viewport, Play Next queues.
+  Global mini player: "Back to OmniLume" keeps playing on `/home`, the mini
+  player sits above the dock (bottom 798 vs dock top 814); Stop clears it and
+  Media Session state → none; Music added to the dock. 390: 52 px top bar +
+  drawer (scrim, Esc), 374×52 mini bar (Pause, Next, open full screen), h1
+  28 px. Overflow sweep, 13 music routes × {390, 1440}: no horizontal
+  overflow; unknown paths/ids render the music not-found inside the shell.
+  Fixed during the check: Lightning CSS merged the hand-written
+  `-webkit-backdrop-filter` with the standard property and kept only the
+  prefix (Chrome showed no blur).
+
+Limits: no screenshots (the preview host timed out on every snapshot, login
+page included), so evidence is computed styles and DOM state; no real audio
+yet (silent engine), so OS media keys were not exercised; Up Next reorder is
+drag or Alt+↑/↓ (no touch drag handle); the mesh backdrop uses the fixture hue
+(artwork colour sampling comes with uploads in 16.4).

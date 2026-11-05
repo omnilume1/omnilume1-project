@@ -1,6 +1,6 @@
 # Action 16 plan (branch `feat/action-16`)
 
-**Status: PHASE A ONLY (teardown, feasibility, plan). Nothing implemented. Awaiting owner approval.**
+**Status: approved with the owner decisions below; Stage 1 (16.1 + 16.2) in progress.**
 Resume point. Tick an item only with its commit hash; evidence goes in
 `docs/action-01-10-evidence-ledger.md` (new section "Action 16", same layout as
 Actions 13-15: Database / database-security / static / local runtime / Limits).
@@ -37,16 +37,17 @@ dry run as `authenticated` before `npx supabase db push`, never push or merge.
 - **Not replaced:** `StudyMusicCard` (Action 12) stays as the *room* music surface (lists room audio from temporary media, casts through Watch). The Music section is the *personal* player. In 16.11 `StudyMusicCard` gains a "from My Music" entry; nothing is deleted.
 - **New:** `/music` route group, music-scoped tokens (own file, selector `.music-app`; `globals.css` is not edited), DM Sans via `next/font/google` in the music layout only (Geist stays everywhere else).
 
-## Owner decisions (defaults used unless you say otherwise; see "Questions")
+## Owner decisions (2026-11-05; override everything below where they differ)
 
-1. Scope: Action 16 = (a) uploads, (b) YouTube, (c) provider connections framework; Spotify/Apple/TIDAL only as far as access allows; Qobuz blocked.
-2. No BitChord code, assets, fonts (SF Pro), icons, copy, name or logo. Own tokens named `--mu-*`.
-3. Music section follows the OS light/dark setting **inside `/music` only**; rest of OmniLume stays dark. Accent = BitChord red (`#fa586a` dark / `#d60017` light) inside `/music` only.
-4. Uploads are **private to the owner**, **48 h from upload** (fixed, not extended by listening), cap 20 active files / 50 MB each (matches the Action 09 bucket limit) / 300 MB total per user, plus an "I have the right to use this file" confirmation. No room/group sharing of uploads in Action 16.
-5. Lyrics: embedded tags and a user-supplied `.lrc` only. No scraped lyric providers (BitChord uses several). Optional later: a provider that explicitly permits display.
-6. No OmniLume-native playlists in Action 16 (Library = uploads, read-only provider playlists, and the live queue). Listening history is not stored.
-7. Playback lives inside `/music` (leaving the section stops it). A global mini-player would need a root-layout provider and is out of scope.
-8. Search is a route handler (`GET /api/music/youtube/search`), not a server action: server actions run one at a time per client and would queue behind the ~20 actions the room page fires.
+1. **No audio providers for now** (YouTube/Spotify/Apple/TIDAL/Qobuz, quota, OAuth, lyric providers): 16.0, 16.3, 16.6-16.10 deferred until the owner says. Uploads stay in scope.
+2. **Look:** BitChord layout/behaviour from the teardown, own code only (no BitChord code/assets/names, no SF Pro). Dark only; accent `#b9a8ff` (text/icons) / `#8d7bff` (filled); glass blur 16px + saturate 2.2 + 0.5px inner stroke. Scoped `.music-app`, tokens `--mu-*`, DM Sans via `next/font` in the music layout only.
+3. **Uploads:** 7 days from upload (one constant), 300 MB/user, 50 MB/file, 40 files/user; tags via `music-metadata` (lazy, browser); lyrics embedded + `.lrc` only.
+4. **Sharing:** per-upload opt-in to a room/group, revocable, "I have the right to share" attestation, audience = that room/group's members, signed URL via RPC. Never public.
+5. **Presence:** friends see "Listening to …", also in rooms/groups; privacy setting friends/nobody (default friends).
+6. **Listen Together:** host + members, `{trackRef, positionMs, anchorMs, isPlaying, seq}`, drop `seq <= last`, playhead from anchor, queue deltas, optional host-only control; Supabase Realtime (private) only.
+7. **Playlists + listening history:** owner-only RLS, history clearable, expired uploads shown "expired".
+8. **Global mini player:** provider in the root layout, plays across pages; Study room music (Action 12) untouched.
+9. **Custom sources:** user-added HTTPS JSON manifest (search → tracks with direct audio URL), browser-only calls, per-user RLS rows, health check, owner-only playback, never shared; we ship none. Stages: 1 = 16.1+16.2 · 2 = 16.4+16.5+sharing/playlists/history · 3 = presence + Listen Together · 4 = custom sources.
 
 ## Phased tasks (each independently shippable)
 

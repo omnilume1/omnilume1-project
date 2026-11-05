@@ -1,0 +1,28 @@
+/* Global mini player (outside /music). Sits above the floating dock; scoped to .music-mini. */
+.music-mini {
+  position: fixed; z-index: 60; right: 20px; bottom: calc(max(18px, env(safe-area-inset-bottom)) + 84px);
+  display: flex; align-items: center; gap: 2px; width: min(340px, calc(100vw - 24px)); height: 56px; padding: 0 6px 0 8px;
+  overflow: hidden; border-radius: 14px; color: #ffffffeb;
+  background: #26262899; backdrop-filter: saturate(2.2) blur(16px);
+  box-shadow: 0 10px 40px #00000059, inset 0 0 0 0.5px #ffffff2e;
+}
+.music-mini-info { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; color: inherit; text-decoration: none; border-radius: 8px; }
+.music-mini-art {
+  flex: none; width: 38px; height: 38px; overflow: hidden; border-radius: 6px;
+  background: linear-gradient(135deg, hsl(var(--mm-hue) 70% 58%), hsl(calc(var(--mm-hue) + 40) 55% 26%));
+  box-shadow: inset 0 0 0 0.5px #ffffff40;
+}
+.music-mini-art img { width: 100%; height: 100%; object-fit: cover; }
+.music-mini-text { display: grid; min-width: 0; line-height: 1.2; }
+.music-mini-title { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.music-mini-artist { overflow: hidden; color: #ffffffa3; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.music-mini button {
+  display: inline-grid; flex: none; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 50%;
+  background: transparent; color: inherit; cursor: pointer;
+}
+.music-mini button:hover { background: #ffffff14; }
+.music-mini :focus-visible { outline: 3px solid #b9a8ff99; outline-offset: 1px; }
+.music-mini-progress { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: linear-gradient(90deg, #b9a8ff var(--mm-progress), #ffffff1a var(--mm-progress)); }
+@media (max-width: 720px) {
+  .music-mini { right: 8px; left: 8px; width: auto; bottom: calc(max(10px, env(safe-area-inset-bottom)) + 70px); }
+}

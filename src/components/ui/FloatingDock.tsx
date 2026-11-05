@@ -20,6 +20,7 @@ const defaultItems: FloatingDockItem[] = [
   { title: 'Rooms', href: '/explore', icon: 'rooms' },
   { title: 'Create', href: '/create-room', icon: 'plus', emphasis: true },
   { title: 'Messages', href: '/messages', icon: 'message' },
+  { title: 'Music', href: '/music', icon: 'music' },
   { title: 'Profile', href: '/profile', icon: 'user' },
 ];
 
