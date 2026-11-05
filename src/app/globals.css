@@ -855,3 +855,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .room-dashboard-card, .room-layout-popover, .room-panel-reopen { animation: none !important; }
   .room-dashboard-action { transition: none !important; }
 }
+
+/* Now playing (Action 10): artwork from the file's tags or generated art. */
+.media-now-playing { display: flex; min-height: 0; flex: 1; align-items: center; justify-content: center; gap: 18px; padding: 56px 20px 16px; background: radial-gradient(circle at 30% 20%, rgba(var(--room-accent-rgb, 168, 85, 247), .18), transparent 60%), #050506; animation: room-chat-pop 240ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.media-now-playing-art { width: clamp(88px, 24vh, 220px); height: clamp(88px, 24vh, 220px); flex-shrink: 0; border-radius: 16px; object-fit: cover; box-shadow: 0 18px 48px -12px rgba(0, 0, 0, .8); }
+.media-now-playing-art.is-generated { display: grid; place-items: center; color: rgba(255, 255, 255, .92); font-size: clamp(1.5rem, 5vh, 3rem); font-weight: 800; letter-spacing: .04em; }
+.media-now-playing-title { margin: 0; overflow: hidden; color: white; font-size: clamp(15px, 2.4vh, 22px); font-weight: 800; line-height: 1.25; text-overflow: ellipsis; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.media-now-playing-sub { margin: 4px 0 0; overflow: hidden; color: #d4d4d8; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.media-now-playing-source { margin: 8px 0 0; color: var(--omni-muted); font-size: 11px; }
+@media (max-width: 520px) {
+  .media-now-playing { flex-direction: column; text-align: center; padding-top: 64px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .media-now-playing { animation: none !important; }
+}

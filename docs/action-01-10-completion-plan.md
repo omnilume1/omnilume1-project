@@ -98,12 +98,12 @@ Commit after each section; typecheck + lint + tests before moving on.
 - [ ] GIFs re-verified with GIPHY_API_KEY.
 
 ## 5. Action 09 — adaptive workspace
-- [ ] Layout presets (user-scoped), owner-controlled default/lock.
-- [ ] Themes/appearance (user preference, CSS variables).
-- [ ] Room dashboard/home activity (no empty gaps).
-- [ ] Saved panel sizes (user-scoped, re-verify).
+- [x] (054c985) Layout presets (user-scoped), owner-controlled default/lock.
+- [x] (054c985) Themes/appearance (user preference, CSS variables).
+- [x] (054c985) Room dashboard/home activity (no empty gaps).
+- [x] (054c985) Saved panel sizes (user-scoped, re-verify).
 - [ ] Mobile rules (narrow-width layout).
-- [ ] No remounting of existing stages; disabled features denied by
+- [x] (054c985) No remounting of existing stages; disabled features denied by
       server/RLS/realtime (re-verify).
 
 ## 6. Action 10 — media metadata
