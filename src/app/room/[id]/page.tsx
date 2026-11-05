@@ -38,6 +38,28 @@ import { clearFocusLock } from '@/lib/focus-lock';
 import { isRoomExpired } from '@/lib/room-lifecycle';
 import { roomWorkspacePreferenceKey } from '@/lib/room-workspace-preferences';
 import { minimizeRoom } from '@/lib/minimized-rooms';
+import RoomDashboard from '@/components/room/RoomDashboard';
+import {
+  DEFAULT_ROOM_APPEARANCE,
+  HOME_CHAT_WIDTH,
+  ROOM_LAYOUTS,
+  ROOM_LAYOUT_DETAILS,
+  ROOM_THEMES,
+  ROOM_THEME_LABELS,
+  clampHomeChatWidth,
+  effectiveActivity,
+  effectiveLayout,
+  effectiveTheme,
+  effectiveTool,
+  isRoomLayout,
+  isRoomTheme,
+  sidePanelState,
+  type RoomActivity,
+  type RoomAppearance,
+  type RoomLayout,
+  type RoomTheme,
+  type RoomTool,
+} from '@/lib/room-layout';
 
 type AccessStatus = 'loading' | 'approved' | 'pending' | 'expired' | 'recovery_window' | 'guest_expired' | 'scheduled' | 'not_found' | 'unauthorized' | 'public_not_joined' | 'private_not_joined' | 'blocked' | 'banned' | 'kicked';
 
@@ -109,6 +131,18 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [presenceRefreshVersion, setPresenceRefreshVersion] = useState(0);
   const [controlCenterTab, setControlCenterTab] = useState<'user-control' | 'profile' | null>(null);
   const [controlCenterMemberId, setControlCenterMemberId] = useState<string | null>(null);
+  // Action 09: owner-controlled appearance plus this member's own preset,
+  // theme and panel sizes (browser storage keyed by room and user).
+  const [appearance, setAppearance] = useState<RoomAppearance>(DEFAULT_ROOM_APPEARANCE);
+  const [personalLayout, setPersonalLayout] = useState<RoomLayout | null>(null);
+  const [personalTheme, setPersonalTheme] = useState<RoomTheme | null>(null);
+  const [homeChatWidth, setHomeChatWidth] = useState<number>(HOME_CHAT_WIDTH.initial);
+  const [stageChatOpen, setStageChatOpen] = useState(false);
+  const [showLayoutMenu, setShowLayoutMenu] = useState(false);
+  const workspacePreferencesLoadedRef = useRef<string | null>(null);
+  const workspaceModeRef = useRef<'home' | 'stage'>('home');
+  const sideInnerRef = useRef<HTMLDivElement>(null);
+  const layoutMenuRef = useRef<HTMLDivElement>(null);
 
   // ==========================================
   // DRAGGABLE SIDEBAR STATE
@@ -120,6 +154,12 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging) return;
+      if (workspaceModeRef.current === 'home') {
+        // The home chat is centred, so its edge moves half as far as its width.
+        const area = sideInnerRef.current?.parentElement?.getBoundingClientRect();
+        if (area) setHomeChatWidth(clampHomeChatWidth(Math.abs(e.clientX - (area.left + area.width / 2)) * 2));
+        return;
+      }
       const newWidth = document.body.clientWidth - e.clientX;
       setSidebarWidth(clampSidebarWidth(newWidth));
     };
@@ -296,8 +336,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     window.location.reload();
   };
 
-  const [mainActivity, setMainActivity] = useState<'watch' | 'study' | 'whiteboard'>('watch');
-  const [activeTool, setActiveTool] = useState<'chat' | 'members' | 'files' | 'notes' | 'timer'>('chat');
+  const [mainActivity, setMainActivity] = useState<RoomActivity>('home');
+  const [activeTool, setActiveTool] = useState<RoomTool>('chat');
   const [timerNavigationRequest, setTimerNavigationRequest] = useState(0);
   const roomIsExpired = accessStatus === 'expired' || isExpired;
   const realtimeRoomId = accessStatus === 'approved' && !roomIsExpired ? (roomData?.id ?? '') : '';
@@ -322,6 +362,48 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     if (!sidebarPreferenceKey || sidebarPreferenceLoadedKeyRef.current !== sidebarPreferenceKey) return;
     window.localStorage.setItem(sidebarPreferenceKey, String(sidebarWidth));
   }, [sidebarPreferenceKey, sidebarWidth]);
+  const layoutPreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'layout');
+  const themePreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'theme');
+  const homeChatPreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'home-chat-width');
+  useEffect(() => {
+    workspacePreferencesLoadedRef.current = null;
+    const timer = window.setTimeout(() => {
+      const readValue = (key: string | null) => (key ? window.localStorage.getItem(key) : null);
+      const savedLayout = readValue(layoutPreferenceKey);
+      const savedTheme = readValue(themePreferenceKey);
+      const savedWidth = Number(readValue(homeChatPreferenceKey));
+      setPersonalLayout(isRoomLayout(savedLayout) ? savedLayout : null);
+      setPersonalTheme(isRoomTheme(savedTheme) ? savedTheme : null);
+      setHomeChatWidth(Number.isFinite(savedWidth) && savedWidth > 0 ? clampHomeChatWidth(savedWidth) : HOME_CHAT_WIDTH.initial);
+      workspacePreferencesLoadedRef.current = layoutPreferenceKey;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [homeChatPreferenceKey, layoutPreferenceKey, themePreferenceKey]);
+  useEffect(() => {
+    if (!layoutPreferenceKey || workspacePreferencesLoadedRef.current !== layoutPreferenceKey) return;
+    const write = (key: string | null, value: string | null) => {
+      if (!key) return;
+      if (value === null) window.localStorage.removeItem(key);
+      else window.localStorage.setItem(key, value);
+    };
+    write(layoutPreferenceKey, personalLayout);
+    write(themePreferenceKey, personalTheme);
+    write(homeChatPreferenceKey, String(homeChatWidth));
+  }, [homeChatPreferenceKey, homeChatWidth, layoutPreferenceKey, personalLayout, personalTheme, themePreferenceKey]);
+  useEffect(() => {
+    if (!showLayoutMenu) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && layoutMenuRef.current?.contains(event.target)) return;
+      setShowLayoutMenu(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setShowLayoutMenu(false); };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [showLayoutMenu]);
   useEffect(() => {
     const currentUserId = roomSync.currentUserId;
     const removed = roomSync.roomControlEvents.find((event) => event.subjectUserId === currentUserId && ((event.eventType === 'membership_changed' && event.payload.action === 'kick') || (event.eventType === 'restriction_changed' && (event.payload.action === 'ban' || event.payload.action === 'block'))));
@@ -340,8 +422,22 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   }, [roomData?.id, roomSync.currentUserId, roomSync.roomControlEvents, router]);
   const focusRoomPath = `/room/${encodeURIComponent(identifier)}`;
   const featureEnabled = (feature: RoomFeature) => featureFlags[feature] !== false;
-  const handleControlStateChange = useCallback(({ featureFlags: nextFlags, canManageMembers: nextCanManageMembers, canControlMedia: nextCanControlMedia }: { featureFlags: Partial<Record<RoomFeature, boolean>>; canManageMembers: boolean; canControlMedia: boolean; isGhostMode: boolean }) => {
+  // A disabled feature never leaves an empty stage or panel.
+  const activity = effectiveActivity(mainActivity, featureFlags);
+  const tool = effectiveTool(activeTool, featureFlags);
+  const layout = effectiveLayout(appearance, personalLayout);
+  const theme = effectiveTheme(appearance, personalTheme);
+  const sidePanel = sidePanelState(activity, layout, stageChatOpen);
+  useEffect(() => { workspaceModeRef.current = sidePanel.mode; }, [sidePanel.mode]);
+  const openTool = (next: RoomTool) => {
+    setActiveTool(next);
+    setStageChatOpen(true);
+  };
+  const isHomeMode = sidePanel.mode === 'home';
+  const resizeBounds = isHomeMode ? { min: HOME_CHAT_WIDTH.min, max: HOME_CHAT_WIDTH.max, value: homeChatWidth } : { min: MIN_SIDEBAR_WIDTH, max: MAX_SIDEBAR_WIDTH, value: sidebarWidth };
+  const handleControlStateChange = useCallback(({ featureFlags: nextFlags, canManageMembers: nextCanManageMembers, canControlMedia: nextCanControlMedia, appearance: nextAppearance }: { featureFlags: Partial<Record<RoomFeature, boolean>>; canManageMembers: boolean; canControlMedia: boolean; isGhostMode: boolean; appearance: RoomAppearance }) => {
     setFeatureFlags({ ...DEFAULT_FEATURE_FLAGS, ...nextFlags });
+    setAppearance(nextAppearance);
     setCanManageMembers(nextCanManageMembers);
     setCanControlMedia(nextCanControlMedia);
     setPresenceRefreshVersion((version) => version + 1);
@@ -474,7 +570,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
   return (
     <RoomRealtimeProvider sync={roomSync} presence={roomPresence}>
-      <div className="room-shell flex h-screen flex-col overflow-hidden font-sans selection:bg-neutral-800">
+      <div className="room-shell flex h-screen flex-col overflow-hidden font-sans selection:bg-neutral-800" data-room-theme={theme}>
       <header className="room-header shrink-0">
         <div className="room-header-title flex items-center gap-4">
           <span className="font-semibold text-white tracking-wide text-sm uppercase">{roomData?.is_group ? 'GROUP' : 'ROOM'} / {roomData?.name || identifier}</span>
@@ -485,6 +581,34 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         <div className="room-actions flex items-center gap-4">
           {userRole === 'owner' && roomData?.expiration_type === 'recoverable' && !roomData.reopened_until && <button onClick={() => setShowConvertModal(true)} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition">Upgrade to Group</button>}
           {roomData.reopened_until && <button onClick={handlePermanentRequest} disabled={permanentSubmitting || permanentRequests.some((request) => request.status === 'pending')} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition disabled:cursor-wait disabled:opacity-50">{permanentSubmitting ? 'Requesting...' : 'Request Permanent Room'}</button>}
+          <div className="room-layout-menu" ref={layoutMenuRef}>
+            <button type="button" className="room-action" aria-haspopup="dialog" aria-expanded={showLayoutMenu} onClick={() => setShowLayoutMenu((open) => !open)} title="Layout and theme"><OmniIcon name="rooms" size={14} /><span>Layout</span></button>
+            {showLayoutMenu && (
+              <div role="dialog" aria-label="Layout and theme" className="room-layout-popover">
+                <fieldset disabled={appearance.layoutLocked}>
+                  <legend className="room-layout-legend">Layout</legend>
+                  {appearance.layoutLocked && <p className="room-layout-hint">Locked by the room: {ROOM_LAYOUT_DETAILS[appearance.defaultLayout].label}.</p>}
+                  <label className="room-layout-option">
+                    <input type="radio" name="room-personal-layout" checked={personalLayout === null || appearance.layoutLocked} onChange={() => setPersonalLayout(null)} />
+                    <span><strong>Room default</strong><small>{ROOM_LAYOUT_DETAILS[appearance.defaultLayout].label}</small></span>
+                  </label>
+                  {ROOM_LAYOUTS.map((option) => (
+                    <label key={option} className="room-layout-option">
+                      <input type="radio" name="room-personal-layout" checked={!appearance.layoutLocked && personalLayout === option} onChange={() => setPersonalLayout(option)} />
+                      <span><strong>{ROOM_LAYOUT_DETAILS[option].label}</strong><small>{ROOM_LAYOUT_DETAILS[option].description}</small></span>
+                    </label>
+                  ))}
+                </fieldset>
+                <label className="room-layout-legend mt-3 block" htmlFor="room-personal-theme">Theme</label>
+                <select id="room-personal-theme" className="omni-input mt-1" value={personalTheme ?? ''} onChange={(event) => setPersonalTheme(isRoomTheme(event.target.value) ? event.target.value : null)}>
+                  <option value="">Room theme ({ROOM_THEME_LABELS[appearance.theme]})</option>
+                  {ROOM_THEMES.map((option) => <option key={option} value={option}>{ROOM_THEME_LABELS[option]}</option>)}
+                </select>
+                <button type="button" className="omni-button omni-button-ghost mt-3 w-full" onClick={() => { setSidebarWidth(320); setHomeChatWidth(HOME_CHAT_WIDTH.initial); }}>Reset panel sizes</button>
+                <p className="room-layout-hint mt-2">Your layout, theme and panel sizes are saved on this device for you only.</p>
+              </div>
+            )}
+          </div>
           <NotificationBell roomId={roomData.id} />
           <button type="button" onClick={() => setShowControlCenter(true)} className="room-action room-action-controls"><OmniIcon name="settings" size={14} /><span>Controls</span></button>
           <button type="button" onClick={minimizeActiveRoom} className="room-action" title="Return to Rooms without leaving"><span aria-hidden="true">—</span><span>Minimize room</span></button>
@@ -515,18 +639,19 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
       {lifecycleActionError && <p className="border-b border-red-900/50 bg-red-950/30 px-6 py-2 text-xs text-red-300" role="alert">{lifecycleActionError}</p>}
       {roomData.expiration_type === 'permanent' && roomData.deletion_scheduled_at && <p className="border-b border-red-900/50 bg-red-950/30 px-6 py-2 text-xs text-red-200" role="status">This room is scheduled for permanent deletion on {new Date(roomData.deletion_scheduled_at).toLocaleString([], { dateStyle: 'full', timeStyle: 'short' })}. Chats and files will be deleted unless the owner cancels.</p>}
 
-      <div className="room-content flex-1 overflow-hidden">
+      <div className="room-content flex-1 overflow-hidden" data-workspace-mode={sidePanel.mode} data-layout={layout}>
         <nav className="workspace-rail z-10">
           <div className="workspace-rail-group w-full">
-            <button type="button" aria-label="Watch" title={featureEnabled('watch') ? 'Watch' : 'Watch is disabled by this room'} aria-disabled={!featureEnabled('watch')} onClick={() => setMainActivity('watch')} className={`workspace-tool ${mainActivity === 'watch' ? 'is-active' : ''} ${!featureEnabled('watch') ? 'opacity-40' : ''}`}><OmniIcon name="play" size={17} /></button>
-            <button type="button" aria-label="Study" title={featureEnabled('study') ? 'Study' : 'Study is disabled by this room'} aria-disabled={!featureEnabled('study')} onClick={() => setMainActivity('study')} className={`workspace-tool ${mainActivity === 'study' ? 'is-active' : ''} ${!featureEnabled('study') ? 'opacity-40' : ''}`}><OmniIcon name="study" size={18} /></button>
-            <button type="button" aria-label="Whiteboard" title={featureEnabled('study') ? 'Whiteboard' : 'The whiteboard is part of Study, which is disabled by this room'} aria-disabled={!featureEnabled('study')} onClick={() => setMainActivity('whiteboard')} className={`workspace-tool ${mainActivity === 'whiteboard' ? 'is-active' : ''} ${!featureEnabled('study') ? 'opacity-40' : ''}`}><OmniIcon name="pen" size={17} /></button>
+            <button type="button" aria-label="Room home" title="Room home" aria-pressed={activity === 'home'} onClick={() => setMainActivity('home')} className={`workspace-tool ${activity === 'home' ? 'is-active' : ''}`}><OmniIcon name="home" size={17} /></button>
+            <button type="button" aria-label="Watch" title={featureEnabled('watch') ? 'Watch' : 'Watch is turned off by this room'} aria-pressed={activity === 'watch'} disabled={!featureEnabled('watch')} onClick={() => setMainActivity('watch')} className={`workspace-tool ${activity === 'watch' ? 'is-active' : ''} ${!featureEnabled('watch') ? 'opacity-40' : ''}`}><OmniIcon name="play" size={17} /></button>
+            <button type="button" aria-label="Study" title={featureEnabled('study') ? 'Study' : 'Study is turned off by this room'} aria-pressed={activity === 'study'} disabled={!featureEnabled('study')} onClick={() => setMainActivity('study')} className={`workspace-tool ${activity === 'study' ? 'is-active' : ''} ${!featureEnabled('study') ? 'opacity-40' : ''}`}><OmniIcon name="study" size={18} /></button>
+            <button type="button" aria-label="Whiteboard" title={featureEnabled('study') ? 'Whiteboard' : 'The whiteboard is part of Study, which this room has turned off'} aria-pressed={activity === 'whiteboard'} disabled={!featureEnabled('study')} onClick={() => setMainActivity('whiteboard')} className={`workspace-tool ${activity === 'whiteboard' ? 'is-active' : ''} ${!featureEnabled('study') ? 'opacity-40' : ''}`}><OmniIcon name="pen" size={17} /></button>
           </div>
           <div className="my-2 h-px w-8 bg-neutral-800" />
           <div className="workspace-rail-group w-full">
-            <button type="button" aria-label="Chat" title={featureEnabled('chat') ? 'Chat' : 'Chat is disabled by this room'} aria-disabled={!featureEnabled('chat')} onClick={() => setActiveTool('chat')} className={`workspace-tool ${activeTool === 'chat' ? 'is-active' : ''} ${!featureEnabled('chat') ? 'opacity-40' : ''}`}><OmniIcon name="message" size={17} /></button>
-            <button type="button" aria-label="Members" title="Members" onClick={() => setActiveTool('members')} className={`workspace-tool ${activeTool === 'members' ? 'is-active' : ''}`}><OmniIcon name="users" size={17} /></button>
-            <button type="button" aria-label="Files" title={featureEnabled('files') ? 'Files' : 'Files are disabled by this room'} aria-disabled={!featureEnabled('files')} onClick={() => setActiveTool('files')} className={`workspace-tool ${activeTool === 'files' ? 'is-active' : ''} ${!featureEnabled('files') ? 'opacity-40' : ''}`}><OmniIcon name="file" size={17} /></button>
+            <button type="button" aria-label="Chat" title={featureEnabled('chat') ? 'Chat' : 'Chat is turned off by this room'} aria-pressed={tool === 'chat' && sidePanel.visible} disabled={!featureEnabled('chat')} onClick={() => openTool('chat')} className={`workspace-tool ${tool === 'chat' && sidePanel.visible ? 'is-active' : ''} ${!featureEnabled('chat') ? 'opacity-40' : ''}`}><OmniIcon name="message" size={17} /></button>
+            <button type="button" aria-label="Members" title="Members" aria-pressed={tool === 'members' && sidePanel.visible} onClick={() => openTool('members')} className={`workspace-tool ${tool === 'members' && sidePanel.visible ? 'is-active' : ''}`}><OmniIcon name="users" size={17} /></button>
+            <button type="button" aria-label="Files" title={featureEnabled('files') ? 'Files' : 'Files are turned off by this room'} aria-pressed={tool === 'files' && sidePanel.visible} disabled={!featureEnabled('files')} onClick={() => openTool('files')} className={`workspace-tool ${tool === 'files' && sidePanel.visible ? 'is-active' : ''} ${!featureEnabled('files') ? 'opacity-40' : ''}`}><OmniIcon name="file" size={17} /></button>
           </div>
         </nav>
 
@@ -535,8 +660,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
               Hiding this layer visually preserves playback and audio position. */}
           <div
             data-stage-layer
-            aria-hidden={mainActivity !== 'watch'}
-            className={`absolute inset-0 flex min-h-0 ${mainActivity === 'watch' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
+            aria-hidden={activity !== 'watch'}
+            className={`absolute inset-0 flex min-h-0 ${activity === 'watch' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
           >
             {featureEnabled('watch') ? <MediaStage roomId={roomData.id} canControlMedia={userRole === 'owner' || canControlMedia} /> : <RoomFeatureUnavailable label="Watch" />}
           </div>
@@ -545,8 +670,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
               navigation and can finish/log a session outside the Study view. */}
           <div
             data-stage-layer
-            aria-hidden={mainActivity !== 'study'}
-            className={`absolute inset-0 flex min-h-0 ${mainActivity === 'study' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
+            aria-hidden={activity !== 'study'}
+            className={`absolute inset-0 flex min-h-0 ${activity === 'study' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
           >
             {featureEnabled('study') ? <StudyStage
               roomId={roomData.id}
@@ -555,7 +680,20 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             /> : <RoomFeatureUnavailable label="Study" />}
           </div>
 
-          {mainActivity !== 'study' && roomSync.timerState.isRunning && (
+          {activity === 'home' && (
+            <div className="room-dashboard-layer relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto">
+              <RoomDashboard
+                roomId={roomData.id}
+                room={roomData}
+                timeLeft={timeLeft}
+                featureFlags={featureFlags}
+                onOpenActivity={setMainActivity}
+                onOpenTool={openTool}
+              />
+            </div>
+          )}
+
+          {activity !== 'study' && activity !== 'home' && roomSync.timerState.isRunning && (
             <StudyMiniTimer
               roomId={roomData.id}
               timerState={roomSync.timerState}
@@ -566,7 +704,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             />
           )}
 
-          {mainActivity === 'whiteboard' && (
+          {activity === 'whiteboard' && (
             <div className="relative z-10 flex min-h-0 flex-1 flex-col p-3">
               {featureEnabled('study')
                 ? <StudyWhiteboardPanel roomId={roomData.id} />
@@ -576,46 +714,66 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         </main>
 
         {/* DYNAMIC WIDTH SIDEBAR */}
-        <aside style={{ width: `${sidebarWidth}px` }} className="workspace-side z-10 shrink-0">
-          {/* The handle lives on the chat panel so it stays anchored to the
-              stage/chat boundary while the sidebar width changes. */}
-          <div
-            role="separator"
-            tabIndex={0}
-            aria-label="Resize chat panel"
-            aria-orientation="vertical"
-            aria-valuemin={MIN_SIDEBAR_WIDTH}
-            aria-valuemax={MAX_SIDEBAR_WIDTH}
-            aria-valuenow={sidebarWidth}
-            onMouseDown={() => setIsDragging(true)}
-            onDoubleClick={() => setSidebarWidth(320)}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowLeft') {
-                event.preventDefault();
-                setSidebarWidth((width) => clampSidebarWidth(width + 40));
-              } else if (event.key === 'ArrowRight') {
-                event.preventDefault();
-                setSidebarWidth((width) => clampSidebarWidth(width - 40));
-              } else if (event.key === 'Home') {
-                event.preventDefault();
-                setSidebarWidth(MIN_SIDEBAR_WIDTH);
-              } else if (event.key === 'End') {
-                event.preventDefault();
-                setSidebarWidth(MAX_SIDEBAR_WIDTH);
-              }
-            }}
-            className={`workspace-resizer z-20 ${isDragging ? 'is-resizing bg-indigo-500' : ''}`}
-            title="Drag to resize chat panel"
-          />
-          <div className="chat-topbar shrink-0">
-            <h3 className="font-medium text-sm text-white uppercase tracking-wider">{activeTool}</h3>
-          </div>
-          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            {activeTool === 'chat' && roomData && (featureEnabled('chat') ? <RoomChat roomId={roomData.id} /> : <RoomFeatureUnavailable label="Room chat" compact />)}
-            {activeTool === 'members' && roomData && <MembersTab roomId={roomData.id} currentUserRole={userRole} canManageMembers={canManageMembers} onChangeRole={(memberId) => { setControlCenterMemberId(memberId); setControlCenterTab('user-control'); setShowControlCenter(true); }} />}
-            {activeTool === 'files' && roomData && (featureEnabled('files') ? <FilesTab roomId={roomData.id} currentUserRole={userRole} canControlMedia={userRole === 'owner' || canControlMedia} /> : <RoomFeatureUnavailable label="Files" compact />)}
+        {/* One panel element in every mode: CSS places it in the centre at
+            room home and beside the stage when a feature is open, so chat,
+            members and files never remount when the layout changes. */}
+        <aside
+          style={{ ['--sidebar-width' as string]: `${sidebarWidth}px`, ['--home-chat-width' as string]: `${homeChatWidth}px` }}
+          className="workspace-side z-10 shrink-0"
+          data-placement={sidePanel.placement}
+          data-collapsed={sidePanel.visible ? undefined : 'true'}
+        >
+          <div ref={sideInnerRef} className="workspace-side-inner">
+            {/* The handle stays on the panel edge while its width changes. */}
+            <div
+              role="separator"
+              tabIndex={0}
+              aria-label={isHomeMode ? 'Resize the centred chat panel' : 'Resize chat panel'}
+              aria-orientation="vertical"
+              aria-valuemin={resizeBounds.min}
+              aria-valuemax={resizeBounds.max}
+              aria-valuenow={resizeBounds.value}
+              onMouseDown={() => setIsDragging(true)}
+              onDoubleClick={() => (isHomeMode ? setHomeChatWidth(HOME_CHAT_WIDTH.initial) : setSidebarWidth(320))}
+              onKeyDown={(event) => {
+                const grow = isHomeMode ? event.key === 'ArrowRight' : event.key === 'ArrowLeft';
+                const shrink = isHomeMode ? event.key === 'ArrowLeft' : event.key === 'ArrowRight';
+                const apply = (next: (width: number) => number) => (isHomeMode
+                  ? setHomeChatWidth((width) => clampHomeChatWidth(next(width)))
+                  : setSidebarWidth((width) => clampSidebarWidth(next(width))));
+                if (grow) {
+                  event.preventDefault();
+                  apply((width) => width + 40);
+                } else if (shrink) {
+                  event.preventDefault();
+                  apply((width) => width - 40);
+                } else if (event.key === 'Home') {
+                  event.preventDefault();
+                  apply(() => resizeBounds.min);
+                } else if (event.key === 'End') {
+                  event.preventDefault();
+                  apply(() => resizeBounds.max);
+                }
+              }}
+              className={`workspace-resizer z-20 ${isDragging ? 'is-resizing bg-indigo-500' : ''}`}
+              title="Drag to resize chat panel"
+            />
+            <div className="chat-topbar shrink-0">
+              <h3 className="font-medium text-sm text-white uppercase tracking-wider">{tool}</h3>
+              {layout === 'stage' && !isHomeMode && (
+                <button type="button" onClick={() => setStageChatOpen(false)} className="room-panel-close" aria-label="Hide panel" title="Hide panel"><OmniIcon name="close" size={13} /></button>
+              )}
+            </div>
+            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+              {tool === 'chat' && roomData && (featureEnabled('chat') ? <RoomChat roomId={roomData.id} /> : <RoomFeatureUnavailable label="Room chat" compact />)}
+              {tool === 'members' && roomData && <MembersTab roomId={roomData.id} currentUserRole={userRole} canManageMembers={canManageMembers} onChangeRole={(memberId) => { setControlCenterMemberId(memberId); setControlCenterTab('user-control'); setShowControlCenter(true); }} />}
+              {tool === 'files' && roomData && (featureEnabled('files') ? <FilesTab roomId={roomData.id} currentUserRole={userRole} canControlMedia={userRole === 'owner' || canControlMedia} /> : <RoomFeatureUnavailable label="Files" compact />)}
+            </div>
           </div>
         </aside>
+        {layout === 'stage' && !isHomeMode && !sidePanel.visible && (
+          <button type="button" className="room-panel-reopen" onClick={() => setStageChatOpen(true)} aria-label={`Show ${tool}`}><OmniIcon name={tool === 'files' ? 'file' : tool === 'members' ? 'users' : 'message'} size={16} /><span>Show {tool}</span></button>
+        )}
       </div>
       </div>
       <RoomControlCenter

@@ -301,6 +301,29 @@ export async function updateRoomControls(roomId: string, input: { rules?: string
   return actionResult(() => updateRoomControlsImpl(roomId, input));
 }
 
+// Action 09: the room's default layout preset, layout lock and theme
+// (manage_settings; re-checked by update_room_appearance).
+const ROOM_LAYOUT_VALUES = ['balanced', 'stage', 'chat'] as const;
+const ROOM_THEME_VALUES = ['violet', 'ocean', 'emerald', 'amber', 'rose', 'graphite'] as const;
+async function updateRoomAppearanceImpl(roomId: string, input: { defaultLayout: string; layoutLocked: boolean; theme: string }) {
+  assertUuid(roomId, 'room ID');
+  if (!isOneOf(ROOM_LAYOUT_VALUES, input.defaultLayout)) throw new Error('Choose a valid layout.');
+  if (!isOneOf(ROOM_THEME_VALUES, input.theme)) throw new Error('Choose a valid theme.');
+  if (typeof input.layoutLocked !== 'boolean') throw new Error('Invalid layout lock.');
+  const supabase = await authenticatedClient();
+  const { data, error } = await supabase.rpc('update_room_appearance', {
+    p_room_id: roomId,
+    p_default_layout: input.defaultLayout,
+    p_layout_locked: input.layoutLocked,
+    p_theme: input.theme,
+  });
+  if (error) throw new Error(error.code === '42501' ? 'Only members who manage room settings can change the layout and theme.' : error.message);
+  return data as { default_layout: string; layout_locked: boolean; theme: string };
+}
+export async function updateRoomAppearance(roomId: string, input: { defaultLayout: string; layoutLocked: boolean; theme: string }) {
+  return actionResult(() => updateRoomAppearanceImpl(roomId, input));
+}
+
 async function setRoomRolePermissionImpl(roomId: string, role: RoomRole, capability: Capability, allowed: boolean) {
   assertUuid(roomId, 'room ID');
   if (!isOneOf(ROLES, role) || !isOneOf(CAPABILITIES, capability) || typeof allowed !== 'boolean') throw new Error('Invalid room permission.');
@@ -384,7 +407,7 @@ async function getRoomControlStateImpl(roomId: string) {
   assertUuid(roomId, 'room ID');
   const supabase = await authenticatedClient();
   const [settings, permissions, announcements, membership, profile, presence] = await Promise.all([
-    supabase.from('room_control_settings').select('rules, welcome_message, is_locked, feature_flags, updated_at').eq('room_id', roomId).maybeSingle(),
+    supabase.from('room_control_settings').select('rules, welcome_message, is_locked, feature_flags, default_layout, layout_locked, theme, updated_at').eq('room_id', roomId).maybeSingle(),
     supabase.from('room_role_permissions').select('role, capability, allowed').eq('room_id', roomId),
     supabase.from('room_announcements').select('id, author_id, body, is_pinned, created_at, updated_at').eq('room_id', roomId).order('is_pinned', { ascending: false }).order('created_at', { ascending: false }),
     supabase.rpc('get_room_member_control_states', { p_room_id: roomId }),

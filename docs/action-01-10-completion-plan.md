@@ -84,16 +84,16 @@ Commit after each section; typecheck + lint + tests before moving on.
       screenshot.
 
 ## 4. Action 08 — room messaging
-- [ ] Edit own messages (edited marker) / delete own (exists, re-verify).
-- [ ] Replies (reply_to, quoted preview, reply notification).
-- [ ] Reactions on `messages` (new linked table, toggle, live).
-- [ ] Mentions (@username of room members only; private notification).
-- [ ] Pinned messages (manage_announcements; pinned bar; live).
-- [ ] Announcements (authorized roles only) + member notifications.
+- [x] (bfb9d2e) Edit own messages (edited marker) / delete own (exists, re-verify).
+- [x] (bfb9d2e) Replies (reply_to, quoted preview, reply notification).
+- [x] (bfb9d2e) Reactions on `messages` (new linked table, toggle, live).
+- [x] (bfb9d2e) Mentions (@username of room members only; private notification).
+- [x] (bfb9d2e) Pinned messages (manage_announcements; pinned bar; live).
+- [x] (bfb9d2e) Announcements (authorized roles only) + member notifications.
 - [ ] Member 3-dot actions (server-gated; re-verify).
-- [ ] DND controls UI (global + per room).
-- [ ] Unread/read state (per member last read; badge + divider).
-- [ ] Shared-PDF notification; timer notifications (room owner on start,
+- [x] (bfb9d2e) DND controls UI (global + per room).
+- [x] (bfb9d2e) Unread/read state (per member last read; badge + divider).
+- [x] (bfb9d2e) Shared-PDF notification; timer notifications (room owner on start,
       starter on completion).
 - [ ] GIFs re-verified with GIPHY_API_KEY.
 
