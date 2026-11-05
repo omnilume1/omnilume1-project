@@ -18,39 +18,39 @@ Dry run every migration as `authenticated` before `npx supabase db push`.
 Never push, never merge.
 
 ## Part A — re-verify 01–10 on main
-- [ ] Migration lists match; tsc; lint; tests; build; route smoke.
-- [ ] Probe suite (authorization, lifecycle, site-owner, notification,
-      messaging, workspace, media).
-- [ ] `/admin/recovery` denies a signed-in non-owner (404).
-- [ ] Cleanup cron: overlap safety (unit tests) + read-only due list; the
-      route itself is not invoked (a run deletes rooms).
-- [ ] GIPHY key present and a real request succeeds.
+- [x] Migration lists match; tsc; lint; tests; build; route smoke. (`0f503bc`)
+- [x] Probe suite (authorization, lifecycle, site-owner, notification,
+      messaging, workspace, media). (`0f503bc`)
+- [x] `/admin/recovery` denies a signed-in non-owner (404). (`0f503bc`)
+- [x] Cleanup cron: overlap safety (unit tests) + read-only due list; the
+      route itself is not invoked (a run deletes rooms). (`0f503bc`)
+- [x] GIPHY key present and a real request succeeds. (`0f503bc`)
 
 ## Action 11 — Watch and shared media reliability
 Exists: MediaStage (React Player v3, `src`/`currentTime`), useRoomSync
 revisioned events + persisted snapshots + request_sync/force_sync late join,
 per-viewer media resolution, subtitles/audio tracks, URL + upload casting,
 watch/watch_control capabilities, A10 metadata.
-- [ ] 11.1 `src`/`currentTime` only; no `url`, `getInternalPlayer`,
-      `config.file`, `as any` (static contract test).
-- [ ] 11.2 Idempotent remote apply, no recursive rebroadcast: native events
+- [x] 11.1 `src`/`currentTime` only; no `url`, `getInternalPlayer`,
+      `config.file`, `as any` (static contract test). (`0f503bc`)
+- [x] 11.2 Idempotent remote apply, no recursive rebroadcast: native events
       are broadcast only when they differ from room state (replaces the
-      500 ms timer gap).
-- [ ] 11.3 Throttled seeking: rapid seeks coalesce into one broadcast.
-- [ ] 11.4 Drift correction: position extrapolated from receive time and
-      speed; controller heartbeat while playing; viewers re-seek on drift.
-- [ ] 11.5 Speed applied to every element (incl. native FLAC audio).
-- [ ] 11.6 Subtitles/audio tracks verified two-user.
-- [ ] 11.7 External/uploaded media + unsupported media error/retry verified.
-- [ ] 11.8 Controls gated by watch_control in UI, RPC and Realtime.
-- [ ] 11.9 Late join at the extrapolated position.
-- [ ] 11.10 Reconnect re-requests room state.
-- [ ] 11.11 Shared queue (table + RPCs + live + UI; add/remove/reorder/play
-      next; who added each item).
-- [ ] 11.12 Now Playing / shared state bar outside Watch.
-- [ ] 11.13 Clips/highlights (save moment + label; list; jump).
-- [ ] 11.14 Metadata in queue/now playing (A10 reuse).
-- [ ] Probes, dry run, push, two-account browser (desktop + mobile), ledger.
+      500 ms timer gap). (`0f503bc`)
+- [x] 11.3 Throttled seeking: rapid seeks coalesce into one broadcast. (`0f503bc`)
+- [x] 11.4 Drift correction: position extrapolated from receive time and
+      speed; controller heartbeat while playing; viewers re-seek on drift. (`0f503bc`)
+- [x] 11.5 Speed applied to every element (incl. native FLAC audio). (`0f503bc`)
+- [x] 11.6 Subtitles/audio tracks verified two-user. (`0f503bc`)
+- [x] 11.7 External/uploaded media + unsupported media error/retry verified. (`0f503bc`)
+- [x] 11.8 Controls gated by watch_control in UI, RPC and Realtime. (`0f503bc`)
+- [x] 11.9 Late join at the extrapolated position. (`0f503bc`)
+- [x] 11.10 Reconnect re-requests room state. (`0f503bc`)
+- [x] 11.11 Shared queue (table + RPCs + live + UI; add/remove/reorder/play
+      next; who added each item). (`0f503bc`)
+- [x] 11.12 Now Playing / shared state bar outside Watch. (`0f503bc`)
+- [x] 11.13 Clips/highlights (save moment + label; list; jump). (`0f503bc`)
+- [x] 11.14 Metadata in queue/now playing (A10 reuse). (`0f503bc`)
+- [x] Probes, dry run, push, two-account browser (desktop + mobile), ledger. (`0f503bc`)
 
 ## Action 12 — Study and non-AI collaboration
 Exists: StudyStage (shared timer, Focus Lock, study_sessions history),
