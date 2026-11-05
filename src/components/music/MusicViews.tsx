@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useMusicLibrary } from '@/hooks/useMusicLibrary';
 import { formatExpiry, LIBRARY_SECTIONS, type LibrarySectionKey } from '@/lib/music-model';
 import { NewPlaylistForm, UploadPanel } from './MusicLibraryParts';
+import { FriendsListening } from './MusicTogether';
 import { AlbumLockup, ArtistLockup, DetailHeader, EmptyState, PageTitle, PlaylistLockup, Shelf, TrackList, TrackLockups } from './MusicParts';
 
 
@@ -46,6 +47,7 @@ export function HomeView() {
   return (
     <>
       <PageTitle>Home</PageTitle>
+      <FriendsListening />
       <Ready>
         {empty ? (
           <EmptyState title="Your library is empty" detail="Upload your own music to play it here and anywhere in OmniLume.">

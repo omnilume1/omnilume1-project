@@ -390,6 +390,7 @@
 .music-app .mu-modal-header h2 { margin: 0; overflow: hidden; font-size: 17px; font-weight: 700; line-height: 22px; text-overflow: ellipsis; white-space: nowrap; }
 .music-app .mu-check { display: flex; align-items: center; gap: 10px; margin: 14px 0 6px; font-weight: 600; cursor: pointer; }
 .music-app .mu-check input { width: 18px; height: 18px; accent-color: var(--mu-key-bg); }
+.music-app .mu-fieldset { min-width: 0; margin: 0 0 18px; padding: 0; border: 0; }
 .music-app .mu-targets { display: grid; margin: 10px 0 0; padding: 0; list-style: none; }
 .music-app .mu-targets li { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; border-bottom: 0.5px solid var(--mu-divider); }
 .music-app .mu-targets .mu-text-button:disabled { opacity: .4; cursor: default; }

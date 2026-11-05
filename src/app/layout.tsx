@@ -5,6 +5,7 @@ import "./globals.css";
 import "./management.css";
 import GlobalFocusTrap from "@/components/GlobalFocusTrap";
 import GlobalMiniPlayer from "@/components/music/GlobalMiniPlayer";
+import { ListenTogetherProvider } from "@/hooks/useListenTogether";
 import { MusicPlayerProvider } from "@/hooks/useMusicPlayer";
 import { Agentation } from "agentation";
 
@@ -37,8 +38,10 @@ export default function RootLayout({
         <GlobalFocusTrap />
 
         <MusicPlayerProvider>
-          {children}
-          <GlobalMiniPlayer />
+          <ListenTogetherProvider>
+            {children}
+            <GlobalMiniPlayer />
+          </ListenTogetherProvider>
         </MusicPlayerProvider>
 
         {/* Agentation - development only */}

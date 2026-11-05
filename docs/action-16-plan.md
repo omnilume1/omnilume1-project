@@ -1,6 +1,6 @@
 # Action 16 plan (branch `feat/action-16`)
 
-**Status: approved with the owner decisions below; Stage 1 (16.1 + 16.2) done in `0b63be7`; Stage 2 awaits the owner's go.**
+**Status: approved with the owner decisions below; Stage 1 (16.1 + 16.2) done in `0b63be7`; Stage 2 (16.4 + 16.5) done in `4787d07`; Stage 3 (presence + Listen Together, decisions 5/6; uploads part of 16.11) built and live-probed, not yet committed (ledger "Action 16 Stage 3"); Stage 4 (custom sources) awaits the owner's go.**
 Resume point. Tick an item only with its commit hash; evidence goes in
 `docs/action-01-10-evidence-ledger.md` (new section "Action 16", same layout as
 Actions 13-15: Database / database-security / static / local runtime / Limits).
@@ -49,6 +49,9 @@ dry run as `authenticated` before `npx supabase db push`, never push or merge.
 8. **Global mini player:** provider in the root layout, plays across pages; Study room music (Action 12) untouched.
 9. **Custom sources:** user-added HTTPS JSON manifest (search → tracks with direct audio URL), browser-only calls, per-user RLS rows, health check, owner-only playback, never shared; we ship none. Stages: 1 = 16.1+16.2 · 2 = 16.4+16.5+sharing/playlists/history · 3 = presence + Listen Together · 4 = custom sources.
 
+10. **YouTube (official embed) is the first music source for OmniLume** (2026-11-05). Implementation stays deferred (decision 1) until the owner says; it lands in 16.3 (playback + search) and 16.6 (Google sign-in for the user's playlists/likes). Source id `youtube`, plays only through the official IFrame Player + Data API v3; no extension, no private API, no stream extraction. **Minimised player rule:** the embed may NOT be removed, hidden or moved off-screen while a YouTube track plays (policy: no background player; ≥ 200×200 visible). So "minimise" = the video tile docks as a small floating window (≥ 200×200, corner, draggable, always visible on every page) while the pill collapses; if the user closes the tile, YouTube playback pauses. Owner asked for "remove the tile when minimised": not allowed for YouTube; uploads (own audio) have no tile and minimise freely.
+11. **Song info + lyrics sources:** see "Later stage: song info and lyrics sources" (task 16.13). Until then: embedded tags + user `.lrc` only (decision 3).
+
 ## Phased tasks (each independently shippable)
 
 Task format: **what**, **files**, **DB**, **tests/evidence**, **model**. Evidence style
@@ -73,20 +76,20 @@ Limits).
   Model: Sonnet 5.5, medium.
 
 - [ ] **16.3 YouTube playback + search (compliant).**
-  **Spike first (½ day):** react-player's YouTube element vs a thin wrapper on the official IFrame Player API; pick whichever surfaces player errors 2/5/100/101/150 (not found / embed blocked). Visible tile ≥ 200×200 (planned 300×200) inside the Now Playing panel and full-screen player; custom controls **outside** the iframe; nothing overlays it; `referrerPolicy` never `noreferrer`; start only when > 50 % visible and after a user gesture; one player at a time. Search: `search.list` (`type=video`, `videoCategoryId=10`, `videoEmbeddable=true`, `videoSyndicated=true`, `maxResults≤20`) then `videos.list` (`contentDetails,status,snippet`) to drop non-embeddable/duration; results cached ≤ 24 h (API-data cap is 30 days); per-user limit; quota ledger with a hard stop and a friendly "search is busy" state; Enter/button search only (no keystroke suggestions); thumbnails via plain `<img>` from `i.ytimg.com`.
+  **Spike first (½ day):** react-player's YouTube element vs a thin wrapper on the official IFrame Player API; pick whichever surfaces player errors 2/5/100/101/150 (not found / embed blocked). Visible tile ≥ 200×200 (planned 300×200) inside the Now Playing panel and full-screen player, and as a floating docked tile (≥ 200×200, always visible app-wide) when the player is minimised; closing it pauses playback (decision 10); custom controls **outside** the iframe; nothing overlays it; `referrerPolicy` never `noreferrer`; start only when > 50 % visible and after a user gesture; one player at a time. Search: `search.list` (`type=video`, `videoCategoryId=10`, `videoEmbeddable=true`, `videoSyndicated=true`, `maxResults≤20`) then `videos.list` (`contentDetails,status,snippet`) to drop non-embeddable/duration; results cached ≤ 24 h (API-data cap is 30 days); per-user limit; quota ledger with a hard stop and a friendly "search is busy" state; Enter/button search only (no keystroke suggestions); thumbnails via plain `<img>` from `i.ytimg.com`.
   Files: `src/lib/music-engines/youtube.ts`, `src/components/music/VideoTile.tsx`, `src/app/api/music/youtube/search/route.ts`, `src/lib/music-youtube.ts` (query building, response mapping, validation; server-only), unavailable-track UI states, YouTube ToS + Google Privacy Policy links on Settings/footer.
   DB (additive, `…action16_music_search_cache.sql`): `music_search_cache(provider, query_hash, result jsonb, fetched_at, expires_at)` and `music_api_usage(provider, day, units)` + `consume_music_api_quota(provider, units, daily_limit)` (service role only; atomic upsert). RLS enabled, no grants to `anon`/`authenticated`.
   Tests/evidence: `tests/music-youtube.test.ts` (query building, mapping, non-embeddable filter, error-code mapping, input validation), `scripts/security/music-probe.mjs` (anon/other-user refused; quota ledger stops at limit; cache never returned past expiry), static check that `YOUTUBE_API_KEY` is read only server-side and never in a client bundle; browser: tile visible ≥ 200×200 while playing, no element overlaps it, 390 px layout, embed-blocked track shows the unavailable state.
   Model: Sonnet 5.5, high.
 
-- [ ] **16.4 Upload player, in the tab (no storage yet).**
+- [x] **16.4 Upload player, in the tab (no storage yet).** `4787d07` (ledger "Action 16.4 + 16.5"; uploads go straight to storage, decision 3)
   File picker/drop (mp3, flac, ogg, wav, m4a/aac, webm; same MIME contract as Action 09), `<audio>` via object URL, tag parsing in the browser (title, artist, album, album artist, track, year, genre, ISRC, duration, embedded artwork, embedded lyrics), `.lrc` sidecar parser + synced lyrics view (current line at 15 %/30 %), artwork → mesh backdrop colour (canvas; own files are same-origin), Library views grouped by album/artist from tags, safe "no key/unsupported file" states. Dependency decision: one lazily imported tag parser (`music-metadata`, browser build) because ID3/FLAC/MP4 parsing is not a few lines.
   Files: `src/lib/music-engines/local.ts`, `src/lib/music-tags.ts`, `src/lib/music-lrc.ts`, `src/components/music/UploadDropzone.tsx`.
   DB: none.
   Tests/evidence: `tests/music-lrc.test.ts` (timestamps, offsets, multi-stamp lines, malformed input), `tests/music-tags.test.ts` (normalisation/length caps, text-only output), browser with throw-away sample files (mp3 + flac + corrupt file).
   Model: Sonnet 5.5, medium.
 
-- [ ] **16.5 Storage + 48 h expiry.**
+- [x] **16.5 Storage + 48 h expiry.** `4787d07` — 7 days, 40 files, sharing, playlists and history per decisions 3/4/7
   Private bucket `music_uploads`; objects `<uid>/<upload_id>/audio.<ext>` and `cover.jpg` (client-resized ≤ 1200 px, EXIF stripped, ≤ 2 MB). Client uploads with its own session into its own prefix; `register_music_upload` (SECURITY DEFINER) verifies the object exists, MIME/extension, size, per-user caps, sets `expires_at = now() + interval '48 hours'`; a server step sniffs the first bytes (ID3/fLaC/OggS/RIFF/ftyp) before registering and deletes the object if it fails. Playback path via RPC only while `state='active'` and `expires_at > now()`; server signs a URL with TTL = `min(3600 s, remaining life)`. Expiry does **not** depend on the cron: reads are refused by RLS/storage policy at `expires_at`; the daily cron only reclaims space (Vercel schedule is daily, so deletion can lag up to ~24 h). Cleanup = extend the existing `cleanup-expired-rooms` route (same `CRON_SECRET`, no new cron entry) with `cleanupExpiredMusicUploads` + orphan sweep (objects never registered after 1 h) + retry state like `temporary_media_cleanup_jobs`. `prepare_account_deletion` also removes music uploads (storage first, then rows). Countdown ("expires in 31 h") in Library.
   Files: `supabase/migrations/…action16_music_uploads.sql`, `src/actions/music-uploads.ts`, `src/lib/music-cleanup.ts`, edit `src/app/api/internal/cleanup-expired-rooms/route.ts`, `src/lib/music-upload-validation.ts`, UI wiring.
   DB: table `music_uploads` (owner, bucket, object/cover path, name, mime, size, tags columns, lyrics text ≤ 20 k, `expires_at` with CHECK = `created_at + 48 h`, `state` active/delete_pending/deleted, cleanup attempts/error); storage policies (own-prefix INSERT with mime/size; SELECT only if a registered, active, unexpired row exists; no client UPDATE/DELETE); path helper `music_storage_path_owner(text)` with `search_path=''` and EXECUTE granted to `authenticated`; RPCs `register_music_upload`, `list_my_music_uploads`, `get_music_upload_playback_path`, `begin_music_upload_delete` / `complete_music_upload_delete`, `list_music_uploads_due_for_cleanup` (service role only).
@@ -105,7 +108,7 @@ Limits).
 - [ ] **16.9 TIDAL (gated on access approval).** Official TIDAL SDK for Web (auth + Player components); 16.6 storage for tokens if server-side calls are needed. Model: Sonnet 5.5, high.
 - [ ] **16.10 Qobuz — BLOCKED.** No compliant path (partner-only API; unofficial credentials revoked in the past). Do **not** use unofficial credentials or scraping. Ship a "not available" provider card; revisit only if Qobuz grants partner access.
 
-- [ ] **16.11 Room / group sync.**
+- [ ] **16.11 Room / group sync.** Uploads part done in Stage 3 (uncommitted): Listen Together for shared uploads in rooms and groups, server-owned state in `music_listen_sessions` pushed with `realtime.send` to private `music_listen_<room|group>_<id>` (no client publishing), plus friends-only "Listening to …". YouTube `cast` path and the `StudyMusicCard` entry still wait for 16.3.
   Rooms: a YouTube track is shared by broadcasting the existing `cast` event with its watch URL (no DB or realtime change; each member's own embed plays it, subject to the same visibility/gesture rules; "Join & play" button). `StudyMusicCard` gets "from My Music" (YouTube tracks only). Uploads are **not** shared (decision 4) unless you approve copying into the room's 24 h temporary-media pipeline with explicit consent. Groups (Action 14/15): private broadcast topic `music_group_<group_id>` with a `realtime.messages` SELECT policy; topic validated and uuid-cast **inside** a SECURITY DEFINER helper (never cast topic text inside a policy); `{trackRef, positionMs, anchorMs, isPlaying, seq}` state, ignore any `seq` not greater than the last applied; reuse `expectedPosition` maths.
   Files: `src/hooks/useMusicGroupSync.ts`, `src/lib/music-sync.ts`, `…action16_music_sync_channels.sql`, `StudyExtras.tsx` entry.
   DB: helper `can_use_music_group_topic(text)` (definer, `search_path=''`, EXECUTE → `authenticated`), `realtime.messages` policy for `music_group_` topics.
@@ -113,6 +116,29 @@ Limits).
   Model: **Opus 5.5, high** (realtime authorization).
 
 - [ ] **16.12 Verification and ledger.** Per task above plus a final regression: re-run all existing probes (authorization, lifecycle, site-owner, notification, messaging, workspace, media, watch, collab, management, conversion, conversations) as `authenticated`/anon — 0 fail; `npm run test:unit`, `npm run lint` (no new errors), `next build`; browser at 1440/390; write the ledger "Action 16" section and tick this file with hashes. Model: Sonnet 5.5, medium.
+
+## Later stage: song info and lyrics sources (added 2026-11-05; deferred, owner starts it)
+
+Source terms below are from general knowledge, NOT re-verified on 2026-11-05: check each provider's current terms before building.
+
+| Need | Source | Rules / notes |
+| --- | --- | --- |
+| Uploads: title, artist, album, year, artwork, embedded lyrics | Embedded tags via `music-metadata` (browser) | Free, no legal issue. Already in 16.4. |
+| Missing metadata (album, track no., ISRC, year) | MusicBrainz | Free/open; about 1 req/s; meaningful `User-Agent` required; server route + cache; fixed host only (no SSRF). |
+| Artwork | Cover Art Archive (by MusicBrainz id) | Free; images keep their own licences: display as cover art only, never redistribute; client-resize and strip EXIF if stored. |
+| YouTube tracks | YouTube Data API v3 fields only (title, channel, thumbnail, duration) | Official only; ≤ 30-day cache; no lyrics (caption download works only for videos you own). |
+| Spotify / Apple / TIDAL tracks | Each provider's official API | Added with their provider task (16.7-16.9); Apple Music API can return lyrics for subscribed users. |
+| Lyrics, safe default | Embedded USLT/SYLT tags + user-uploaded `.lrc` | Current scope (decision 3). |
+| Lyrics, open | LRCLIB | Free, no key, synced; community data, copyright not cleared by them: grey area, owner decides before enabling. |
+| Lyrics, licensed | Musixmatch (commercial plan; display requirements) | Best for a public product; costs money. Needs API key (server-only). |
+| Lyrics, licensed (enterprise) | LyricFind | Only if OmniLume grows. |
+| NEVER | Genius (API has no lyrics; scraping forbidden), scraping any lyrics site, BitChord-style spoofed-origin fetches | Out of scope permanently. |
+
+- [ ] **16.13 Metadata + lyrics enrichment (deferred).**
+  Server route `GET /api/music/metadata` (MusicBrainz lookup by ISRC, else title+artist+duration; Cover Art Archive artwork), cache table `music_metadata_cache` (service role only; RLS on, no client grants; TTL ≤ 30 days; rate ledger 1 req/s), "Fix tags" UI on an upload (user confirms before overwrite), lyrics provider interface `{name, enabled, fetch(track)}` with a per-user/owner setting; providers enabled one at a time (LRCLIB only after the owner accepts the risk; Musixmatch after a key and plan exist); synced-lyrics view reuses 16.4's `.lrc` renderer; provider attribution shown where required.
+  Files: `src/app/api/music/metadata/route.ts`, `src/lib/music-metadata.ts` (server-only), `src/lib/music-lyrics-providers.ts`, `…action16_music_metadata_cache.sql`, UI in the upload detail view.
+  Tests/evidence: `tests/music-metadata.test.ts` (ISRC/title match, malformed responses, host allow-list, rate limiter, text-only/length caps), dry run as `authenticated`/`anon` (cache not readable by clients), probe, browser at 1440/390.
+  Model: Sonnet 5.5, medium (Musixmatch key handling: high).
 
 ## Security checklist (gate for every task)
 

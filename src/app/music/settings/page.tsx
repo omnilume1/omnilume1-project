@@ -1,4 +1,5 @@
 import { PageTitle } from '@/components/music/MusicParts';
+import { PresenceSetting } from '@/components/music/MusicTogether';
 
 const SHORTCUTS: [string, string][] = [
   ['Space', 'Play / pause'],
@@ -21,6 +22,7 @@ export default function MusicSettingsPage() {
             <div key={keys}><dt><kbd>{keys}</kbd></dt><dd>{action}</dd></div>
           ))}
         </dl>
+        <PresenceSetting />
         <h2 className="mu-section-title">Your music</h2>
         <p className="mu-muted">
           Uploads are private to you and are deleted 7 days after you add them (up to 40 files, 50 MB each, 300 MB in total).

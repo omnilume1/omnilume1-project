@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { createAudioEngine } from '@/lib/music-audio-engine';
 import { MUSIC_PREFS_KEY, type MusicEngine, type MusicTrack, type RepeatMode } from '@/lib/music-model';
 import * as Q from '@/lib/music-queue';
+import { LISTEN_DRIFT_MS } from '@/lib/music-together';
 import { createClient } from '@/utils/supabase/client';
 
 type MusicActions = {
@@ -25,6 +26,21 @@ type MusicActions = {
   move: (tier: Q.UpNextTier, from: number, to: number) => void;
   clearUpcoming: () => void;
   stop: () => void;
+  /** Listen Together: while set, playback controls are sent here instead of played locally. */
+  setRemote: (remote: MusicRemote | null) => void;
+  /** Listen Together: make local audio follow the shared state (never echoed back). */
+  applyRemote: (state: { track: MusicTrack | null; positionMs: number; playing: boolean }) => void;
+};
+
+export type MusicRemote = {
+  play: (positionMs: number) => void;
+  pause: (positionMs: number) => void;
+  seek: (positionMs: number) => void;
+  /** Advance past `fromUploadId` (the server ignores a stale advance). */
+  next: (fromUploadId: string | null) => void;
+  load: (track: MusicTrack) => void;
+  enqueue: (track: MusicTrack) => void;
+  leave: () => void;
 };
 
 export type MusicPlayer = MusicActions & {
@@ -61,6 +77,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const playingRef = useRef(false);
   const volumeRef = useRef({ volume: 1, muted: false });
   const prefsReady = useRef(false);
+  const remoteRef = useRef<MusicRemote | null>(null);
   const [queue, setQueue] = useState(Q.emptyQueue);
   const [isPlaying, setIsPlaying] = useState(false);
   const [positionMs, setPositionMs] = useState(0);
@@ -91,22 +108,51 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     };
     const update = (change: (queue: Q.MusicQueue) => Q.MusicQueue) => commit(change(queueRef.current));
     const startIfIdle = (next: Q.MusicQueue) => (queueRef.current.current ? commit(next) : loadAndPlay(next));
+    const remote = () => remoteRef.current;
+    const position = () => Math.round(engine().currentTime());
 
     return {
-      playList: (tracks, index, source) => loadAndPlay(Q.startList(queueRef.current, tracks, index, source)),
-      toggle: () => (playingRef.current ? engine().pause() : queueRef.current.current && engine().play()),
-      play: () => queueRef.current.current && engine().play(),
-      pause: () => engine().pause(),
+      playList: (tracks, index, source) => {
+        const shared = remote();
+        if (!shared) loadAndPlay(Q.startList(queueRef.current, tracks, index, source));
+        else if (tracks[index]) shared.load(tracks[index]);
+      },
+      toggle: () => {
+        const shared = remote();
+        if (shared) {
+          if (playingRef.current) shared.pause(position());
+          else shared.play(position());
+        } else if (playingRef.current) engine().pause();
+        else if (queueRef.current.current) engine().play();
+      },
+      play: () => {
+        const shared = remote();
+        if (shared) shared.play(position());
+        else if (queueRef.current.current) engine().play();
+      },
+      pause: () => {
+        const shared = remote();
+        if (shared) shared.pause(position());
+        else engine().pause();
+      },
       next: () => {
+        const shared = remote();
+        if (shared) return shared.next(queueRef.current.current?.uploadId ?? null);
         const next = Q.next(queueRef.current);
         if (next !== queueRef.current) loadAndPlay(next);
       },
       previous: () => {
+        const shared = remote();
+        if (shared) return shared.seek(0);
         const prev = Q.previous(queueRef.current, engine().currentTime());
         if (prev === 'restart') engine().seek(0);
         else loadAndPlay(prev);
       },
-      seek: (ms) => engine().seek(ms),
+      seek: (ms) => {
+        const shared = remote();
+        if (shared) shared.seek(Math.max(0, Math.round(ms)));
+        else engine().seek(ms);
+      },
       setVolume,
       toggleMute: () => {
         const nextMuted = !volumeRef.current.muted;
@@ -116,17 +162,45 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       },
       toggleShuffle: () => update((queue) => Q.setShuffle(queue, !queue.shuffle)),
       cycleRepeat: () => update((queue) => ({ ...queue, repeat: Q.cycleRepeat(queue.repeat) })),
-      playNext: (track) => startIfIdle(Q.playNext(queueRef.current, track)),
-      addToQueue: (track) => startIfIdle(Q.addToQueue(queueRef.current, track)),
+      playNext: (track) => {
+        const shared = remote();
+        if (shared) shared.enqueue(track);
+        else startIfIdle(Q.playNext(queueRef.current, track));
+      },
+      addToQueue: (track) => {
+        const shared = remote();
+        if (shared) shared.enqueue(track);
+        else startIfIdle(Q.addToQueue(queueRef.current, track));
+      },
       jumpTo: (tier, i) => loadAndPlay(Q.jumpTo(queueRef.current, tier, i)),
       remove: (tier, i) => update((queue) => Q.removeUpcoming(queue, tier, i)),
       move: (tier, from, to) => update((queue) => Q.moveUpcoming(queue, tier, from, to)),
       clearUpcoming: () => update(Q.clearUpcoming),
       stop: () => {
+        remote()?.leave();
         engine().pause();
         engine().seek(0);
         const { shuffle, repeat } = queueRef.current;
         commit({ ...Q.emptyQueue, shuffle, repeat });
+      },
+      setRemote: (next) => {
+        remoteRef.current = next;
+      },
+      applyRemote: ({ track, positionMs, playing }) => {
+        if (!track) {
+          engine().pause();
+          return;
+        }
+        if (queueRef.current.current?.uploadId !== track.uploadId) {
+          commit(Q.startList(queueRef.current, [track], 0, 'Listen Together'));
+          setError(null);
+          engine().load(track);
+          engine().seek(positionMs);
+        } else if (Math.abs(engine().currentTime() - positionMs) > LISTEN_DRIFT_MS) {
+          engine().seek(positionMs);
+        }
+        if (playing && !playingRef.current) engine().play();
+        else if (!playing && playingRef.current) engine().pause();
       },
     };
   }, []);
@@ -163,6 +237,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       }),
       engine.on('ended', () => {
         const queue = queueRef.current;
+        if (remoteRef.current) {
+          remoteRef.current.next(queue.current?.uploadId ?? null);
+          return;
+        }
         if (queue.repeat === 'one') {
           engine.seek(0);
           engine.play();
@@ -208,6 +286,25 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       if (recordError) console.warn('Listening history was not updated.', recordError.code);
     });
   }, [uploadId]);
+
+  // "Listening to …" for friends. The server copies title/artist and applies privacy and audience;
+  // friends treat a row older than 5 min as gone, so a 2 min heartbeat covers closed tabs.
+  const publishedRef = useRef(false);
+  useEffect(() => {
+    const live = Boolean(uploadId && isPlaying);
+    if (!live && !publishedRef.current) return;
+    const send = (id: string | null) => {
+      publishedRef.current = id !== null;
+      createClient().rpc('set_music_now_playing', { p_upload_id: id }).then(({ error: presenceError }: { error: { code?: string } | null }) => {
+        if (presenceError) console.warn('Listening status was not updated.', presenceError.code);
+      });
+    };
+    if (!live) return send(null);
+    send(uploadId!);
+    const timer = window.setInterval(() => send(uploadId!), 120_000);
+    return () => window.clearInterval(timer);
+  }, [uploadId, isPlaying]);
+
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
     navigator.mediaSession.metadata = current

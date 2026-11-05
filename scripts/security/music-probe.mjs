@@ -9,7 +9,12 @@
 // and revocation, history and playlists RLS, signed-URL lifetime capped by the
 // upload's remaining life, forced expiry (unreadable while the object still
 // exists), cleanup (storage first, then the tombstone row) and the flat
-// per-user prefix that account deletion sweeps. Output: codes and pass/fail only.
+// per-user prefix that account deletion sweeps. Stage 3 (migration
+// 20261111100000): "Listening to …" for friends only (privacy, blocks), and
+// Listen Together on the private topic music_listen_room_<id> — real Realtime
+// delivery to a member, refusal for the stranger/anon/public channel, no client
+// publishing, host-only control, queue deltas and the idempotent advance.
+// Output: codes and pass/fail only.
 
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
@@ -35,6 +40,26 @@ const rows = (res) => (Array.isArray(res?.data) ? res.data.length : res?.data ? 
 const mp3 = () => new Blob([new Uint8Array([0x49, 0x44, 0x33, 0x04, 0, 0, 0, 0, 0, 0, 0xff, 0xfb, 0x90, 0x64, ...new Array(2000).fill(0)])], { type: 'audio/mpeg' });
 const jwtExp = (signedUrl) => JSON.parse(Buffer.from(new URL(signedUrl).searchParams.get('token').split('.')[1], 'base64url').toString()).exp;
 
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+function joinChannel(client, topic, isPrivate = true) {
+  const channel = client.channel(topic, { config: { private: isPrivate, broadcast: { self: false } } });
+  const got = [];
+  channel.on('broadcast', { event: 'state' }, (message) => got.push(message.payload));
+  return new Promise((done) => {
+    let settled = false;
+    const finish = (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      done({ channel, status, got });
+    };
+    const timer = setTimeout(() => finish('NO_RESPONSE'), 10_000);
+    channel.subscribe((status) => {
+      if (['SUBSCRIBED', 'CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) finish(status);
+    });
+  });
+}
+
 const throwaway = [];
 async function makeUser(tag) {
   const email = `qa16-${tag}-${randomUUID().slice(0, 8)}@example.invalid`;
@@ -47,6 +72,7 @@ async function makeUser(tag) {
   const client = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, options);
   const signed = await client.auth.signInWithPassword({ email, password });
   if (signed.error) throw new Error(`signIn ${tag}: ${signed.error.message}`);
+  client.realtime.setAuth(signed.data.session.access_token);
   return { client, id };
 }
 
@@ -173,6 +199,85 @@ async function main() {
     record('revoking the share stops member playback', unshare.data === true && codeOf(mAfter) === '42501', codeOf(mAfter));
     await A.client.rpc('share_music_upload', { p_upload_id: U, p_target_kind: 'room', p_target_id: R, p_attest: true });
 
+    // ---- Stage 3: "Listening to …" (friends only).
+    const pair = [A.id, M.id].sort();
+    const friends = await service.from('friendships').insert({ user_one: pair[0], user_two: pair[1] });
+    const mNow = await M.client.rpc('set_music_now_playing', { p_upload_id: U });
+    const aSees = await A.client.rpc('list_friends_listening');
+    record('friend sees "Listening to" with the upload title', !friends.error && !mNow.error && (aSees.data ?? []).some((row) => row.user_id === M.id && row.title === 'Probe Song'), codeOf(mNow));
+    const bSees = await B.client.rpc('list_friends_listening');
+    record('non-friend sees nothing', !bSees.error && !(bSees.data ?? []).some((row) => row.user_id === M.id), `${rows(bSees)} row(s)`);
+    const bNow = await B.client.rpc('set_music_now_playing', { p_upload_id: U });
+    record('cannot publish a song you may not play', codeOf(bNow) === '42501', codeOf(bNow));
+    const npDirect = await A.client.from('music_now_playing').select('user_id');
+    record('now-playing table not readable directly', Boolean(npDirect.error), codeOf(npDirect));
+    const anonFriends = await anon.rpc('list_friends_listening');
+    record('anon cannot list listeners', Boolean(anonFriends.error), codeOf(anonFriends));
+    await M.client.rpc('set_music_presence', { p_presence: 'nobody' });
+    const hidden = await A.client.rpc('list_friends_listening');
+    const mSetting = await M.client.from('music_settings').select('presence').single();
+    record('privacy "nobody" hides it from friends', !(hidden.data ?? []).some((row) => row.user_id === M.id) && mSetting.data?.presence === 'nobody', mSetting.data?.presence);
+    const aReadsM = await A.client.from('music_settings').select('user_id').eq('user_id', M.id);
+    record('music settings are owner-only', rows(aReadsM) === 0, `${rows(aReadsM)} row(s)`);
+    await M.client.rpc('set_music_presence', { p_presence: 'friends' });
+
+    // ---- Stage 3: Listen Together on room R.
+    const topic = `music_listen_room_${R}`;
+    const mChannel = await joinChannel(M.client, topic);
+    record('member joins the private Listen Together topic', mChannel.status === 'SUBSCRIBED', mChannel.status);
+    const bChannel = await joinChannel(B.client, topic);
+    record('stranger is refused the topic', bChannel.status !== 'SUBSCRIBED', bChannel.status);
+    const anonChannel = await joinChannel(anon, topic);
+    record('anon is refused the topic', anonChannel.status !== 'SUBSCRIBED', anonChannel.status);
+    const publicChannel = await joinChannel(B.client, topic, false);
+    record('public (non-private) channel on the topic is refused', publicChannel.status !== 'SUBSCRIBED', publicChannel.status);
+
+    const control = (who, action, args = {}) => who.client.rpc('music_listen_control', {
+      p_kind: 'room', p_target: R, p_action: action, p_upload_id: args.upload ?? null,
+      p_position_ms: args.position ?? null, p_index: args.index ?? null, p_flag: args.flag ?? null,
+    });
+    const start = await control(A, 'start', { flag: false });
+    record('host starts a session', !start.error && start.data?.host_id === A.id, codeOf(start));
+    const load = await control(M, 'load', { upload: U });
+    await sleep(2_500);
+    record('member loads a shared song; members get it over Realtime', !load.error && mChannel.got.some((state) => state.upload_id === U && state.seq === load.data?.seq), `got=${mChannel.got.length}`);
+    record('stranger channel received nothing', bChannel.got.length === 0 && anonChannel.got.length === 0 && publicChannel.got.length === 0);
+    const aChannel = await joinChannel(A.client, topic);
+    const forged = await mChannel.channel.send({ type: 'broadcast', event: 'state', payload: { seq: 999, upload_id: null } });
+    await sleep(2_500);
+    record('clients cannot publish on the topic (no INSERT policy)', aChannel.status === 'SUBSCRIBED' && !aChannel.got.some((state) => state.seq === 999), `send=${forged} got=${aChannel.got.length}`);
+    const unshared = randomUUID();
+    const loadOther = await control(M, 'load', { upload: unshared });
+    record('songs not shared here are refused', codeOf(loadOther) === '22023', codeOf(loadOther));
+    const bControl = await control(B, 'pause', { position: 0 });
+    record('stranger cannot control', codeOf(bControl) === '42501', codeOf(bControl));
+    const bGet = await B.client.rpc('get_music_listen_session', { p_kind: 'room', p_target: R });
+    record('stranger cannot read the session', codeOf(bGet) === '42501', codeOf(bGet));
+    const sessDirect = await M.client.from('music_listen_sessions').select('id');
+    record('session table not readable directly', Boolean(sessDirect.error), codeOf(sessDirect));
+    const tracksM = await M.client.rpc('list_music_listen_tracks', { p_kind: 'room', p_target: R });
+    record('member lists the songs shared here', rows(tracksM) === 1 && tracksM.data[0].upload_id === U, `${rows(tracksM)} row(s)`);
+    await control(A, 'host_only', { flag: true });
+    const mPause = await control(M, 'pause', { position: 1000 });
+    record('host-only: member cannot control', codeOf(mPause) === '42501', codeOf(mPause));
+    const mFlag = await control(M, 'host_only', { flag: false });
+    record('only the host toggles host-only', codeOf(mFlag) === '42501', codeOf(mFlag));
+    const aPause = await control(A, 'pause', { position: 4000 });
+    record('host pauses at a position', aPause.data?.is_playing === false && aPause.data?.position_ms === 4000, codeOf(aPause));
+    await control(A, 'enqueue', { upload: U });
+    const stale = await control(A, 'remove', { upload: unshared, index: 0 });
+    record('queue delta with a stale index is refused (not retried by PostgREST)', codeOf(stale) === '55000', codeOf(stale));
+    // Only one song is shared here, so the queue holds the current song again; a "next"
+    // from any other song is a stale advance (another listener already moved on) and is ignored.
+    const before = await control(A, 'seek', { position: 0 });
+    const staleNext = await control(A, 'next', { upload: unshared });
+    const advanced = await control(A, 'next', { upload: U });
+    record('stale advance is ignored; a real one moves the queue', staleNext.data?.seq === before.data?.seq && advanced.data?.seq === before.data?.seq + 1 && (advanced.data?.queue ?? []).length === 0, `${before.data?.seq}/${staleNext.data?.seq}/${advanced.data?.seq}`);
+    const ended = await control(A, 'end');
+    const afterEnd = await control(M, 'play', { position: 0 });
+    record('ended session refuses control until someone starts again', ended.data?.ended === true && codeOf(afterEnd) === 'P0002', codeOf(afterEnd));
+    for (const joined of [mChannel, bChannel, anonChannel, publicChannel, aChannel]) await joined.channel.unsubscribe();
+
     // Forced expiry: refused everywhere although the object still exists.
     const base = Date.now(); // one clock read: the TTL CHECK needs expires_at - created_at = exactly 7 days
     const expire = await service.from('music_uploads').update({ created_at: new Date(base - 8 * 86_400_000).toISOString(), expires_at: new Date(base - 86_400_000).toISOString() }).eq('id', U);
@@ -214,7 +319,10 @@ async function main() {
       const paths = (listed.data ?? []).filter((entry) => entry.id).map((entry) => `${user.id}/${entry.name}`);
       if (paths.length) await service.storage.from(BUCKET).remove(paths);
     }
-    for (const id of rooms) await service.from('rooms').delete().eq('id', id);
+    for (const id of rooms) {
+      await service.from('music_listen_sessions').delete().eq('target_id', id);
+      await service.from('rooms').delete().eq('id', id);
+    }
     for (const id of throwaway) await service.auth.admin.deleteUser(id);
     const leftover = await service.from('music_uploads').select('id').in('owner_id', throwaway);
     record('fixtures removed (rows cascade with the users)', rows(leftover) === 0, `${rows(leftover)} row(s)`);

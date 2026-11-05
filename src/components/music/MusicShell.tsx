@@ -116,6 +116,7 @@ function Shell({ fontClass, children }: { fontClass: string; children: ReactNode
         <nav aria-label="Music" onClick={(event) => { if ((event.target as HTMLElement).closest('a')) setDrawerOpen(false); }}>
           <NavItem href="/music" icon="home" active={pathname === '/music'}>Home</NavItem>
           <NavItem href="/music/search" icon="search" active={pathname === '/music/search'}>Search</NavItem>
+          <NavItem href="/music/together" icon="artist" active={pathname === '/music/together'}>Listen Together</NavItem>
           <h2 className="mu-nav-heading">Library</h2>
           {LIBRARY.map(([section, label, icon]) => (
             <NavItem key={section} href={`/music/library/${section}`} icon={icon} active={pathname === `/music/library/${section}`}>{label}</NavItem>

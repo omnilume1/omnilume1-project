@@ -2083,3 +2083,79 @@ media keys and an embedded-art FLAC/M4A were not tried (no encoder on this
 machine; MP3 + WAV only). Existing probes were not re-run (QA credential files
 are not configured in this session); the migration adds bucket-scoped storage
 policies only.
+
+## Action 16 Stage 3 (presence + Listen Together, owner decisions 5 and 6)
+
+Migration `20261111100000_action16_music_presence_together.sql` (additive):
+tables `music_settings` (presence `friends`/`nobody`, default friends; owner
+SELECT only), `music_now_playing` and `music_listen_sessions` (RLS on, no
+client grants, no policies); definer helpers `music_listen_can_join` and
+`can_receive_music_listen_topic` (regex before the uuid cast; EXECUTE →
+`authenticated`), internal `music_listen_json`; RPCs `set_music_presence`,
+`set_music_now_playing` (title/artist copied from an upload the caller may
+play), `list_friends_listening` (friends only, not blocked either way,
+privacy, < 5 min old), `get_music_listen_session`, `list_music_listen_tracks`,
+`music_listen_control` (start/play/pause/seek/load/enqueue/remove/next/
+host_only/end; server-side seq, anchor and queue deltas; songs must be shared
+to that exact room/group; `next` carries the song it advances from, so several
+listeners finishing together advance once; host-only enforced in the RPC).
+Every change is pushed with `realtime.send` to the private topic
+`music_listen_<room|group>_<id>`; `realtime.messages` gets a SELECT policy for
+it and no INSERT policy, so clients cannot publish or forge state. Repair
+`20261111110000_action16_listen_queue_conflict_code.sql`: the stale-queue
+error used SQLSTATE 40001, which PostgREST retries, so the call looped (found
+by the live probe, not by the SQL dry run) → 55000.
+
+- database-security, dry run (migration + checks in one transaction ended by
+  `RAISE`, fixtures room → group, owner, member, stranger, as `authenticated`
+  and `anon`): **50/50** — member helpers/topic true, malformed and converted-
+  room topics false; sessions and now-playing tables 42501 for clients; play
+  before start P0002; start/join, load of a shared song, unshared 22023,
+  negative seek 22023; member sees the broadcast rows through the topic policy
+  and cannot INSERT into `realtime.messages`; stranger/anon refused on every
+  RPC and the topic; host-only blocks member control and toggling; queue
+  enqueue/stale remove/remove; stale `next` ignored; member cannot end while
+  the host is present; end → P0002 → takeover; host removed from the group →
+  takeover; presence visible to the friend only, hidden by `nobody`, blocks
+  and staleness; all definers pin `search_path`; anon executes nothing new.
+  Repair re-run on top of the live schema: **50/50**. Both pushed with
+  `supabase db push` (one migration each). Advisors: only the expected
+  "authenticated can call a definer RPC" notices and "RLS on, no policies" for
+  the two server-only tables (intended); no anon finding.
+- database-security, live `scripts/security/music-probe.mjs`: **72 pass,
+  0 fail** (46 Stage 2 + 26 Stage 3; throw-away owner, room member, stranger,
+  anon; real Realtime): friend sees "Listening to" with the upload title,
+  non-friend and anon do not, cannot publish a song you may not play,
+  `nobody` hides it, settings owner-only; member SUBSCRIBED to the private
+  topic, stranger/anon CHANNEL_ERROR, public channel refused; member load
+  delivered over Realtime (matching seq) while the refused channels got
+  nothing; a member's client broadcast on the topic never reached the host;
+  unshared song 22023; stranger control/read 42501; tables unreadable;
+  host-only; host pause at a position; stale queue delta 55000; stale advance
+  ignored, real advance moves the queue; ended session P0002. The probe now
+  deletes its session rows; three orphaned rows from interrupted runs (rooms
+  already deleted) were removed by hand.
+- static: `tests/music-together.test.ts` (payload validation, clock offset,
+  anchor maths, seq ordering, host-only, topic name, migration contract: SELECT-
+  only topic policy, server `realtime.send`, RLS on all three tables, no table
+  grants, definers pin `search_path`, topic regex, json builder internal,
+  repair never raises 40001; client channel `private: true`, no client send,
+  presence via RPC). `npm run test:unit` **164/164**; lint 0 errors / 13
+  warnings (baseline); `next build` ok (`/music/together` listed).
+- client: player controls route to the session while joined (play/pause/seek/
+  next/previous = restart, Play Next/Add to Queue = enqueue, closing the player
+  leaves); local audio follows the shared playhead on every state and every
+  3 s while playing (re-seek beyond 1.5 s); the provider sits in the root
+  layout so sync continues outside `/music`; "Listening to …" heartbeat every
+  2 min while playing, cleared on pause/stop; friends shown on Music Home and
+  next to members in the room/group Members tab; privacy setting in Music
+  Settings; `/music/together` page.
+
+Limits: no browser run of Listen Together or presence (two signed-in tabs were
+not driven in this session), so the follow/drift/autoplay behaviour in a real
+browser is unverified; leaving or reloading the page drops out of a session
+(join again). Friends' listening is polled every 60 s (not pushed). Session rows
+are not removed when their room is deleted (no FK on the polymorphic target;
+unreadable since membership fails). Now-playing rows stay (one per user,
+filtered by age). Presence audience is friends only: room/group members who are
+not friends see nothing. Existing probes were not re-run.

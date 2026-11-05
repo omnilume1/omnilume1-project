@@ -41,7 +41,7 @@ export function albumKey(artist: string, album: string) {
 
 const mediaUrl = (id: string, asset: 'audio' | 'cover') => `/api/music/uploads/${id}/${asset}`;
 
-function trackFrom(row: { id: string; title: string; artist: string; album: string; album_artist?: string; duration_ms: number | null; hue: number; lyrics?: string | null; expires_at?: string }, options: { available: boolean; hasCover: boolean; sharedFrom?: string }): MusicTrack {
+export function trackFrom(row: { id: string; title: string; artist: string; album: string; album_artist?: string; duration_ms: number | null; hue: number; lyrics?: string | null; expires_at?: string }, options: { available: boolean; hasCover: boolean; sharedFrom?: string }): MusicTrack {
   const parsed = parseLyrics(row.lyrics);
   const artist = row.artist || 'Unknown Artist';
   const album = row.album || 'Unknown Album';
