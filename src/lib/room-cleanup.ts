@@ -93,16 +93,20 @@ export function getRoomStoragePath(fileUrl: string, roomId: string) {
     : null;
 }
 
+// Action 12: consented recordings live in their own private bucket.
+export const RECORDINGS_BUCKET = 'room_recordings';
+
 async function listStorageFiles(
   supabase: SupabaseClient,
   prefix: string,
+  bucket: string = STORAGE_BUCKET,
 ): Promise<string[]> {
   const paths: string[] = [];
   let offset = 0;
 
   while (true) {
     const { data, error } = await supabase.storage
-      .from(STORAGE_BUCKET)
+      .from(bucket)
       .list(prefix, {
         limit: STORAGE_PAGE_SIZE,
         offset,
@@ -119,7 +123,7 @@ async function listStorageFiles(
       if (entry.id) {
         paths.push(path);
       } else {
-        paths.push(...(await listStorageFiles(supabase, path)));
+        paths.push(...(await listStorageFiles(supabase, path, bucket)));
       }
     }
 
@@ -136,6 +140,7 @@ async function listStorageFiles(
 async function removeStorageFiles(
   supabase: SupabaseClient,
   paths: string[],
+  bucket: string = STORAGE_BUCKET,
 ) {
   for (
     let index = 0;
@@ -144,7 +149,7 @@ async function removeStorageFiles(
   ) {
     const batch = paths.slice(index, index + STORAGE_REMOVE_BATCH_SIZE);
     const { error } = await supabase.storage
-      .from(STORAGE_BUCKET)
+      .from(bucket)
       .remove(batch);
 
     if (error) {
@@ -262,6 +267,24 @@ export async function cleanupPendingRoomFiles(supabase: SupabaseClient) {
   return { removed, failures };
 }
 
+// Recordings past their 7-day retention: the database marks them deleted in
+// one statement (so overlapping runs never double-process a row) and returns
+// the object paths to remove.
+export async function cleanupExpiredRecordings(supabase: SupabaseClient) {
+  const { data, error } = await supabase.rpc('expire_room_recordings');
+  if (error) throw new Error(error.message);
+  const paths = ((data ?? []) as Array<{ storage_path: string | null } | string | null>)
+    .map((row) => (typeof row === 'string' ? row : row?.storage_path ?? null))
+    .filter((path): path is string => typeof path === 'string' && path.length > 0);
+  const failures: string[] = [];
+  try {
+    await removeStorageFiles(supabase, paths, RECORDINGS_BUCKET);
+  } catch (removeError) {
+    failures.push(`recordings:${removeError instanceof Error ? removeError.message : 'remove failed'}`);
+  }
+  return { removed: failures.length ? 0 : paths.length, failures };
+}
+
 // Rooms whose lifecycle has ended: irreversible rooms at expiry, and
 // recoverable rooms once their 7-day recovery window closes without a pending
 // recovery request (public.room_lifecycle_state). The database chooses the
@@ -318,6 +341,8 @@ export async function cleanupDestroyedRooms(
       // first. Every room-owned table cascades from the room delete.
       const storagePaths = await listStorageFiles(supabase, roomId);
       await removeStorageFiles(supabase, storagePaths);
+      const recordingPaths = await listStorageFiles(supabase, roomId, RECORDINGS_BUCKET);
+      await removeStorageFiles(supabase, recordingPaths, RECORDINGS_BUCKET);
 
       const { data: destroyed, error: destroyError } = await supabase.rpc('destroy_expired_room', {
         p_room_id: roomId,

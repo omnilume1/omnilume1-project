@@ -4,6 +4,9 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Ch
 import dynamic from 'next/dynamic';
 import { attachRoomMediaSubtitle, cleanupUnregisteredTemporaryMedia, getActiveTemporaryMedia, getRoomMediaDetails, logCastHistory, logTemporaryMedia, resolveRoomMedia, type RoomMediaDetails } from '@/actions/media';
 import { fallbackArtwork } from '@/lib/media-metadata';
+import { HEARTBEAT_INTERVAL_MS, SEEK_COALESCE_MS, createCoalescer, expectedPosition, needsDriftSeek, shouldBroadcastNative } from '@/lib/watch-sync';
+import { addToQueue, listQueue, removeFromQueue } from '@/lib/watch-queue-data';
+import WatchQueuePanel from '@/components/room/WatchQueuePanel';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import { createRoomObjectPath, assertRoomFileInput, ROOM_ATTACHMENT_BUCKET } from '@/lib/room-file-contract';
@@ -114,6 +117,10 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     connectionState,
     recordMediaTime,
     currentUserId,
+    mediaHeartbeat,
+    queueVersion,
+    clipsVersion,
+    connectionGeneration,
   } = useRoomRealtime();
 
   const playerRef = useRef<HTMLMediaElementWithAudioTracks>(null);
@@ -138,6 +145,9 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'subtitles' | 'audio'>('subtitles');
   const [showSubtitles, setShowSubtitles] = useState(true);
+  // Audio elements never draw subtitle cues, so audio casts show the active
+  // cue as text (keyed by cast so a previous cast's line never lingers).
+  const [audioCaption, setAudioCaption] = useState<{ castId: string; text: string } | null>(null);
   const [subSize, setSubSize] = useState('100%');
   const [subColor, setSubColor] = useState('#ffffff');
   const [subBg, setSubBg] = useState('rgba(0, 0, 0, 0.75)');
@@ -146,6 +156,8 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
 
   const [mediaDetails, setMediaDetails] = useState<RoomMediaDetails | null>(null);
   const [history, setHistory] = useState<TemporaryMedia[]>([]);
+  const [showQueue, setShowQueue] = useState(false);
+  const [queueNotice, setQueueNotice] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -227,6 +239,41 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     setActiveAudioIndex(0);
   }, [activeCastId]);
 
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!isAudioCast || !isReady || !player || !playbackSubtitleUrl || !activeCastId) return;
+    const tracks = player.textTracks;
+    const castId = activeCastId;
+    const update = () => {
+      const lines: string[] = [];
+      for (let index = 0; index < tracks.length; index += 1) {
+        const track = tracks[index];
+        if (track.mode === 'disabled' || !track.activeCues) continue;
+        for (let cue = 0; cue < track.activeCues.length; cue += 1) {
+          const text = (track.activeCues[cue] as VTTCue).text ?? '';
+          lines.push(text.replace(/<[^>]+>/g, ''));
+        }
+      }
+      const text = lines.join('\n').trim();
+      setAudioCaption((current) => (current?.castId === castId && current.text === text ? current : { castId, text }));
+    };
+    const listen = () => {
+      for (let index = 0; index < tracks.length; index += 1) tracks[index].addEventListener('cuechange', update);
+    };
+    listen();
+    tracks.addEventListener('addtrack', listen);
+    // A cue can become active while the track file is still loading, before
+    // any cuechange listener exists; timeupdate catches that (no-op when equal).
+    player.addEventListener('timeupdate', update);
+    const initial = window.setTimeout(update, 0);
+    return () => {
+      window.clearTimeout(initial);
+      player.removeEventListener('timeupdate', update);
+      tracks.removeEventListener('addtrack', listen);
+      for (let index = 0; index < tracks.length; index += 1) tracks[index].removeEventListener('cuechange', update);
+    };
+  }, [activeCastId, isAudioCast, isReady, playbackSubtitleUrl]);
+
   const safeGetTime = () => {
     return playerRef.current?.currentTime ?? 0;
   };
@@ -236,22 +283,37 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
   };
 
   useEffect(() => {
-    if (!mediaState || !isReady) return;
+    const player = playerRef.current;
+    if (!mediaState || !isReady || !player) return;
+    if (player.playbackRate !== mediaState.speed) player.playbackRate = mediaState.speed;
+    // The room keeps playing while an event travels and resolves: seek to
+    // where it is now, not where it was when the event was sent.
+    const targetTime = expectedPosition(mediaState, Date.now());
+    const willSeek = Math.abs(safeGetTime() - targetTime) > 0.25;
+    const willPlay = mediaState.playing && player.paused;
+    const willPause = !mediaState.playing && !player.paused;
+    const willChangeVolume = player.volume !== displayedVolume || player.muted !== displayedMuted;
+    // Only arm the echo guard when this effect really changes the element.
+    // Arming it on every state change (including this client's own
+    // broadcasts) swallowed a real play/pause pressed right after a seek.
+    // (The previous run's cleanup cleared its release timer, so release here;
+    // shouldBroadcastNative still filters any late echo of that run.)
+    if (!willSeek && !willPlay && !willPause && !willChangeVolume) {
+      isSyncing.current = false;
+      return;
+    }
     isSyncing.current = true;
-    const targetTime = mediaState.time || 0;
-    if (Math.abs(safeGetTime() - targetTime) > 0.25) safeSeekTo(targetTime);
+    if (willSeek) safeSeekTo(targetTime);
 
     // Seeking a native media element can briefly pause it. Re-apply the
     // authoritative room playback state after the seek without rebroadcasting
     // the resulting native events.
-    if (playerRef.current) {
-      playerRef.current.volume = displayedVolume;
-      playerRef.current.muted = displayedMuted;
-      if (mediaState.playing && playerRef.current.paused) {
-        void playerRef.current.play().catch(() => undefined);
-      } else if (!mediaState.playing && !playerRef.current.paused) {
-        playerRef.current.pause();
-      }
+    player.volume = displayedVolume;
+    player.muted = displayedMuted;
+    if (mediaState.playing && player.paused) {
+      void player.play().catch(() => undefined);
+    } else if (!mediaState.playing && !player.paused) {
+      player.pause();
     }
 
     const timeout = window.setTimeout(() => { isSyncing.current = false; }, 500);
@@ -263,6 +325,12 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     // assume their restored browser state is authoritative when rejoining.
     broadcastEvent('request_sync');
   }, [broadcastEvent, roomId]);
+
+  // After a reconnect (the room feed is confirmed again), ask for the live
+  // state: events sent while this client was offline are not replayed.
+  useEffect(() => {
+    if (connectionGeneration > 1) broadcastEvent('request_sync');
+  }, [broadcastEvent, connectionGeneration]);
 
   const forceSyncToRoom = useCallback(() => {
     if (!canCast || !activeMediaUrl) return;
@@ -285,8 +353,12 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     });
   }, [activeCastId, activeMediaId, activeMediaUrl, activeSourceType, activeSubtitleUrl, broadcastEvent, canCast, currentUserId, mediaState?.controllerId, mediaState?.source, mediaTitle, muted, playbackSpeed, playing, volume]);
 
+  // Every caller is an explicit user action (native events are filtered by
+  // isSyncing/shouldBroadcastNative), so a member with watch control may act
+  // on a restored snapshot too: after a reload nobody else can answer
+  // request_sync, and refusing here left the room with no controller.
   const broadcastPlayback = (eventType: 'play' | 'pause' | 'seek' | 'mute', time = safeGetTime(), nextPlaying = playing, nextSpeed = playbackSpeed, nextMuted = muted, nextVolume = volume) => {
-    if (!canCast || mediaState?.source === 'restored') return;
+    if (!canCast || !mediaState) return;
     broadcastEvent(eventType, {
       url: activeMediaUrl,
       title: mediaTitle,
@@ -301,16 +373,34 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     });
   };
 
+  // Native events become room broadcasts only when they change room state,
+  // so applying a remote event can never echo back (no recursive rebroadcast).
   const handlePlay = () => {
-    if (!isSyncing.current) broadcastPlayback('play', safeGetTime(), true);
+    if (!isSyncing.current && shouldBroadcastNative('play', mediaState, safeGetTime(), Date.now())) broadcastPlayback('play', safeGetTime(), true);
   };
 
   const handlePause = () => {
-    if (!isSyncing.current) broadcastPlayback('pause', safeGetTime(), false);
+    if (!isSyncing.current && shouldBroadcastNative('pause', mediaState, safeGetTime(), Date.now())) broadcastPlayback('pause', safeGetTime(), false);
   };
 
+  // Dragging the scrubber fires many seeks; only the final position is sent.
+  const mediaStateRef = useRef(mediaState);
+  const broadcastPlaybackRef = useRef<((eventType: 'seek', time: number) => void) | null>(null);
+  const seekCoalescer = useRef<{ push: (time: number) => void; cancel: () => void } | null>(null);
+  useEffect(() => {
+    mediaStateRef.current = mediaState;
+    broadcastPlaybackRef.current = (eventType, time) => broadcastPlayback(eventType, time, mediaState?.playing ?? false);
+  });
+  useEffect(() => {
+    const coalescer = createCoalescer<number>((time) => {
+      if (shouldBroadcastNative('seek', mediaStateRef.current, time, Date.now())) broadcastPlaybackRef.current?.('seek', time);
+    }, SEEK_COALESCE_MS);
+    seekCoalescer.current = coalescer;
+    return () => coalescer.cancel();
+  }, []);
+
   const handleSeeked = () => {
-    if (!isSyncing.current) broadcastPlayback('seek', safeGetTime(), playing);
+    if (!isSyncing.current) seekCoalescer.current?.push(safeGetTime());
   };
 
   const handleVolumeChange = () => {
@@ -337,7 +427,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     readyCastIdRef.current = activeCastId;
     setReadyCastId(activeCastId);
     isSyncing.current = true;
-    if (mediaState?.time !== undefined) safeSeekTo(mediaState.time);
+    if (mediaState) safeSeekTo(expectedPosition(mediaState, Date.now()));
     window.setTimeout(() => { isSyncing.current = false; }, 500);
 
     const tracks = playerRef.current?.audioTracks;
@@ -411,8 +501,8 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     }
   };
 
-  const castHistoryItem = async (item: TemporaryMedia) => {
-    if (!canCast) return;
+  const castHistoryItem = async (item: Pick<TemporaryMedia, 'id'>): Promise<boolean> => {
+    if (!canCast) return false;
     setPlayerError(null);
     setErrorUrl(null);
     readyCastIdRef.current = null;
@@ -421,7 +511,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     const resolved = await resolveRoomMedia(roomId, item.id);
     if (!resolved.success || !resolved.media) {
       setPlayerError(resolved.error ?? 'Unable to load this media.');
-      return;
+      return false;
     }
 
     broadcastEvent('cast', {
@@ -434,6 +524,53 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
       playing: true,
     });
     setShowHistory(false);
+    return true;
+  };
+
+  const isController = Boolean(canCast && mediaState && mediaState.source !== 'restored' && (!mediaState.controllerId || mediaState.controllerId === currentUserId));
+
+  // The active controller announces its position while playing; viewers use
+  // it to correct drift locally (never re-broadcast).
+  useEffect(() => {
+    if (!isController || !isReady || !playing || !activeMediaId) return;
+    const interval = window.setInterval(() => {
+      broadcastEvent('media_heartbeat', { mediaId: activeMediaId, castId: activeCastId, time: safeGetTime(), speed: playbackSpeed, playing: true });
+    }, HEARTBEAT_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [activeCastId, activeMediaId, broadcastEvent, isController, isReady, playbackSpeed, playing]);
+
+  useEffect(() => {
+    if (!mediaHeartbeat || isController || !isReady || !playerRef.current) return;
+    if (mediaHeartbeat.mediaId !== activeMediaId || (mediaHeartbeat.castId && mediaHeartbeat.castId !== activeCastId)) return;
+    const expected = expectedPosition({ time: mediaHeartbeat.time, playing: mediaHeartbeat.playing, speed: mediaHeartbeat.speed, updatedAt: mediaHeartbeat.receivedAt, eventTimestamp: mediaHeartbeat.receivedAt, source: 'remote' }, Date.now());
+    if (!needsDriftSeek(safeGetTime(), expected)) return;
+    isSyncing.current = true;
+    safeSeekTo(expected);
+    const timeout = window.setTimeout(() => { isSyncing.current = false; }, 500);
+    return () => window.clearTimeout(timeout);
+  }, [activeCastId, activeMediaId, isController, isReady, mediaHeartbeat]);
+
+  // Auto-advance: when the media ends, the controller plays the next item.
+  const handleEnded = async () => {
+    if (!isController) return;
+    const queued = await listQueue(roomId);
+    const next = queued.ok ? queued.data.find((entry) => entry.media) : undefined;
+    if (!next?.media) return;
+    if (await castHistoryItem({ id: next.media.id })) {
+      const removed = await removeFromQueue(next.id);
+      if (removed.ok) broadcastEvent('queue_changed', { version: Date.now() });
+    }
+  };
+
+  const queueMedia = async (mediaId: string) => {
+    setQueueNotice(null);
+    const result = await addToQueue(roomId, mediaId);
+    if (!result.ok) {
+      setQueueNotice(result.error);
+      return;
+    }
+    broadcastEvent('queue_changed', { version: Date.now() });
+    setQueueNotice('Added to the queue.');
   };
 
   const startSubtitleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -549,17 +686,20 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
       <div
         ref={panelRef}
         data-stage-card
+        data-watch-ready={isReady ? "yes" : "no"}
+        data-watch-role={isController ? "controller" : "viewer"}
+        data-watch-heartbeat={mediaHeartbeat ? String(mediaHeartbeat.receivedAt) : ""}
         style={panelHeight === null ? undefined : { height: `${panelHeight}px`, flex: '0 1 auto' }}
         className={`room-cast-resizable relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b] shadow-2xl ${isResizing ? 'is-resizing' : ''}`}
       >
-        <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/90 to-transparent p-4 pointer-events-auto">
-          <div className="flex min-w-0 flex-col">
+        <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 bg-gradient-to-b from-black/90 to-transparent p-4 pointer-events-auto">
+          <div className="flex min-w-[6rem] flex-1 flex-col">
             <span className="truncate text-sm font-bold text-white drop-shadow-md">{playbackUrl ? (details?.title ?? mediaTitle) : 'Watch Party Stage'}</span>
             {playbackUrl && details && (details.artist || details.album) && <span className="truncate text-[11px] text-neutral-300">{[details.artist, details.album, details.year].filter(Boolean).join(' · ')}</span>}
             {playbackUrl && <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400">{playbackSpeed}x speed</span>}
           </div>
 
-          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
             {playbackUrl && canCast && (
               <div className="hidden overflow-hidden rounded border border-neutral-700 bg-neutral-900/80 backdrop-blur-md md:flex">
                 {[0.5, 1, 1.5, 2].map((speed) => (
@@ -570,7 +710,11 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
               </div>
             )}
 
-            <button type="button" onClick={() => { setShowHistory((visible) => !visible); if (!showHistory) void loadHistory(); }} className="rounded-md border border-neutral-700 bg-neutral-800/80 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-neutral-200 transition hover:bg-neutral-700" aria-label="Open cast history">
+            <button type="button" onClick={() => { setShowQueue((visible) => !visible); setShowHistory(false); }} aria-expanded={showQueue} className="rounded-md border border-neutral-700 bg-neutral-800/80 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-neutral-200 transition hover:bg-neutral-700" aria-label="Open queue and clips">
+              Queue
+            </button>
+
+            <button type="button" onClick={() => { setShowHistory((visible) => !visible); setShowQueue(false); if (!showHistory) void loadHistory(); }} className="rounded-md border border-neutral-700 bg-neutral-800/80 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-neutral-200 transition hover:bg-neutral-700" aria-label="Open cast history">
               History
             </button>
 
@@ -607,17 +751,37 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
           </div>
         </div>
 
+        {showQueue && (
+          <div data-media-history className="absolute right-4 top-16 z-40 flex max-h-[70%] w-[min(24rem,calc(100%-2rem))] flex-col overflow-hidden">
+            <WatchQueuePanel
+              roomId={roomId}
+              currentUserId={currentUserId}
+              canControl={canCast}
+              currentMediaId={activeMediaId ?? null}
+              queueVersion={queueVersion}
+              clipsVersion={clipsVersion}
+              connectionGeneration={connectionGeneration}
+              getCurrentTime={safeGetTime}
+              onPlayMedia={(mediaId) => castHistoryItem({ id: mediaId })}
+              onSeek={(seconds) => { safeSeekTo(seconds); broadcastPlayback('seek', seconds, playing); }}
+              onChanged={(kind) => broadcastEvent(kind === 'queue' ? 'queue_changed' : 'clips_changed', { version: Date.now() })}
+              onClose={() => setShowQueue(false)}
+            />
+          </div>
+        )}
+
         {showHistory && (
           <div data-media-history className="absolute right-4 top-16 z-40 flex max-h-[70%] w-[min(22rem,calc(100%-2rem))] flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-[#111]/95 shadow-2xl backdrop-blur-md">
             <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3"><div><h3 className="text-sm font-bold text-white">Cast history</h3><p className="text-[10px] text-neutral-500">Uploaded files and URLs from the last 24 hours</p></div><button type="button" onClick={() => setShowHistory(false)} className="cursor-pointer text-neutral-500 hover:text-white" aria-label="Close cast history">x</button></div>
             <div className="overflow-y-auto p-3">
               {historyLoading && <p className="px-2 py-3 text-xs text-neutral-500">Loading history...</p>}
               {historyError && <p className="mb-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[10px] text-amber-300">{historyError}</p>}
+              {queueNotice && <p role="status" className="mb-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[10px] text-neutral-300">{queueNotice}</p>}
               {!historyLoading && history.length === 0 && <p className="px-2 py-6 text-center text-xs text-neutral-500">No recent casts yet.</p>}
               {urlHistory.length > 0 && <p className="px-2 pb-2 pt-1 text-[10px] font-bold uppercase tracking-widest text-neutral-500">Web URLs</p>}
-              <div className="flex flex-col gap-2">{urlHistory.map((item) => <HistoryRow key={item.id} item={item} canCast={canCast} onCast={castHistoryItem} />)}</div>
+              <div className="flex flex-col gap-2">{urlHistory.map((item) => <HistoryRow key={item.id} item={item} canCast={canCast} onCast={castHistoryItem} onQueue={queueMedia} />)}</div>
               {uploadedHistory.length > 0 && <p className="px-2 pb-2 pt-4 text-[10px] font-bold uppercase tracking-widest text-neutral-500">Uploaded media</p>}
-              <div className="flex flex-col gap-2">{uploadedHistory.map((item) => <HistoryRow key={item.id} item={item} canCast={canCast} onCast={castHistoryItem} />)}</div>
+              <div className="flex flex-col gap-2">{uploadedHistory.map((item) => <HistoryRow key={item.id} item={item} canCast={canCast} onCast={castHistoryItem} onQueue={queueMedia} />)}</div>
             </div>
           </div>
         )}
@@ -626,6 +790,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
           {playbackUrl ? (
             <div className={`relative h-full w-full overflow-hidden rounded-xl border border-neutral-800 ${isAudioCast ? 'flex flex-col' : ''}`}>
               {isAudioCast && details && <NowPlaying details={details} />}
+              {isAudioCast && showSubtitles && playbackSubtitleUrl && audioCaption && audioCaption.castId === activeCastId && audioCaption.text && <p className="media-audio-caption" aria-live="polite">{audioCaption.text}</p>}
               {isFlacPlayback ? (
                 flacPlaybackSupported ? <audio
                   key={playerKey}
@@ -642,6 +807,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
                   onPause={handlePause}
                   onSeeked={handleSeeked}
                   onVolumeChange={handleVolumeChange}
+                  onEnded={() => void handleEnded()}
                   onError={() => {
                     setErrorUrl(playbackUrl);
                     setPlayerError('This browser could not play this FLAC file. Try another supported browser or download the private file.');
@@ -665,6 +831,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
                 onPause={handlePause}
                 onSeeked={handleSeeked}
                 onVolumeChange={handleVolumeChange}
+                onEnded={() => void handleEnded()}
                 onError={() => {
                   setErrorUrl(playbackUrl);
                   setPlayerError('This stream could not be loaded. Try again or choose another history item.');
@@ -725,11 +892,11 @@ function NowPlaying({ details }: { details: RoomMediaDetails }) {
   );
 }
 
-function HistoryRow({ item, canCast, onCast }: { item: TemporaryMedia; canCast: boolean; onCast: (item: TemporaryMedia) => void }) {
+function HistoryRow({ item, canCast, onCast, onQueue }: { item: TemporaryMedia; canCast: boolean; onCast: (item: TemporaryMedia) => void; onQueue: (mediaId: string) => void }) {
   return (
     <div className="rounded-xl border border-neutral-800 bg-[#171717] p-3">
       <div className="flex items-start gap-2"><span className={`mt-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${item.media_type === 'url' ? 'bg-sky-500/10 text-sky-300' : 'bg-purple-500/10 text-purple-300'}`}>{item.media_type === 'url' ? 'URL' : item.media_type}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-bold text-white" title={item.file_name}>{item.title || item.file_name}</span>{item.artist && <span className="block truncate text-[10px] text-neutral-400">{item.artist}</span>}</span></div>
-      <div className="mt-2 flex items-center justify-between gap-2"><span className="text-[10px] text-neutral-500">{formatHoursUntil(item.expires_at)}</span>{canCast && <button type="button" onClick={() => onCast(item)} className="cursor-pointer rounded bg-indigo-600/20 px-3 py-1.5 text-[10px] font-bold text-indigo-300 transition hover:bg-indigo-600/30">Cast again</button>}</div>
+      <div className="mt-2 flex items-center justify-between gap-2"><span className="text-[10px] text-neutral-500">{formatHoursUntil(item.expires_at)}</span><span className="flex gap-1.5"><button type="button" onClick={() => onQueue(item.id)} className="cursor-pointer rounded bg-white/5 px-3 py-1.5 text-[10px] font-bold text-neutral-200 transition hover:bg-white/10" aria-label={`Add ${item.title || item.file_name} to the queue`}>Queue</button>{canCast && <button type="button" onClick={() => onCast(item)} className="cursor-pointer rounded bg-indigo-600/20 px-3 py-1.5 text-[10px] font-bold text-indigo-300 transition hover:bg-indigo-600/30">Cast again</button>}</span></div>
     </div>
   );
 }

@@ -22,6 +22,9 @@ import {
   type RecoveryRequestStatus,
 } from '@/actions/recovery';
 import RoomRealtimeProvider from '@/components/room/RoomRealtimeProvider';
+import { VoiceRoomProvider } from '@/components/room/VoiceRoom';
+import VoicePanel, { VoiceDock } from '@/components/room/VoicePanel';
+import CollabPanel from '@/components/room/CollabPanel';
 import RoomNotifications from '@/components/room/RoomNotifications';
 import RoomControlCenter from '@/components/room/RoomControlCenter';
 import RoomEntryPrompts from '@/components/room/RoomEntryPrompts';
@@ -39,6 +42,7 @@ import { isRoomExpired } from '@/lib/room-lifecycle';
 import { roomWorkspacePreferenceKey } from '@/lib/room-workspace-preferences';
 import { minimizeRoom } from '@/lib/minimized-rooms';
 import RoomDashboard from '@/components/room/RoomDashboard';
+import NowPlayingBar from '@/components/room/NowPlayingBar';
 import {
   DEFAULT_ROOM_APPEARANCE,
   HOME_CHAT_WIDTH,
@@ -572,6 +576,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
   return (
     <RoomRealtimeProvider sync={roomSync} presence={roomPresence}>
+    <VoiceRoomProvider roomId={roomData.id}>
       <div className="room-shell flex h-screen flex-col overflow-hidden font-sans selection:bg-neutral-800" data-room-theme={theme}>
       <header className="room-header shrink-0">
         <div className="room-header-title flex items-center gap-4">
@@ -653,6 +658,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           <div className="workspace-rail-group w-full">
             <button type="button" aria-label="Chat" title={featureEnabled('chat') ? 'Chat' : 'Chat is turned off by this room'} aria-pressed={tool === 'chat' && sidePanel.visible} disabled={!featureEnabled('chat')} onClick={() => openTool('chat')} className={`workspace-tool ${tool === 'chat' && sidePanel.visible ? 'is-active' : ''} ${!featureEnabled('chat') ? 'opacity-40' : ''}`}><OmniIcon name="message" size={17} /></button>
             <button type="button" aria-label="Members" title="Members" aria-pressed={tool === 'members' && sidePanel.visible} onClick={() => openTool('members')} className={`workspace-tool ${tool === 'members' && sidePanel.visible ? 'is-active' : ''}`}><OmniIcon name="users" size={17} /></button>
+            <button type="button" aria-label="Voice" title={featureEnabled('chat') ? 'Voice, screen share and raise hand' : 'Voice needs room chat, which this room has turned off'} aria-pressed={tool === 'voice' && sidePanel.visible} disabled={!featureEnabled('chat')} onClick={() => openTool('voice')} className={`workspace-tool ${tool === 'voice' && sidePanel.visible ? 'is-active' : ''} ${!featureEnabled('chat') ? 'opacity-40' : ''}`}><OmniIcon name="mic" size={17} /></button>
+            <button type="button" aria-label="Collaborate" title={featureEnabled('chat') ? 'Polls, countdowns, events and search' : 'Collaborate needs room chat, which this room has turned off'} aria-pressed={tool === 'collab' && sidePanel.visible} disabled={!featureEnabled('chat')} onClick={() => openTool('collab')} className={`workspace-tool ${tool === 'collab' && sidePanel.visible ? 'is-active' : ''} ${!featureEnabled('chat') ? 'opacity-40' : ''}`}><OmniIcon name="poll" size={17} /></button>
             <button type="button" aria-label="Files" title={featureEnabled('files') ? 'Files' : 'Files are turned off by this room'} aria-pressed={tool === 'files' && sidePanel.visible} disabled={!featureEnabled('files')} onClick={() => openTool('files')} className={`workspace-tool ${tool === 'files' && sidePanel.visible ? 'is-active' : ''} ${!featureEnabled('files') ? 'opacity-40' : ''}`}><OmniIcon name="file" size={17} /></button>
           </div>
         </nav>
@@ -673,17 +680,19 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           <div
             data-stage-layer
             aria-hidden={activity !== 'study'}
+            data-now-playing-pad
             className={`absolute inset-0 flex min-h-0 ${activity === 'study' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
           >
             {featureEnabled('study') ? <StudyStage
               roomId={roomData.id}
               focusRoomPath={focusRoomPath}
               timerNavigationRequest={timerNavigationRequest}
+              onOpenWatch={featureEnabled('watch') ? () => setMainActivity('watch') : undefined}
             /> : <RoomFeatureUnavailable label="Study" />}
           </div>
 
           {activity === 'home' && (
-            <div className="room-dashboard-layer relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto">
+            <div data-now-playing-pad className="room-dashboard-layer relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto">
               <RoomDashboard
                 roomId={roomData.id}
                 room={roomData}
@@ -692,6 +701,12 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
                 onOpenActivity={setMainActivity}
                 onOpenTool={openTool}
               />
+            </div>
+          )}
+
+          {activity !== 'watch' && featureEnabled('watch') && roomSync.mediaState && (
+            <div className="now-playing-slot">
+              <NowPlayingBar roomId={roomData.id} onOpen={() => setMainActivity('watch')} />
             </div>
           )}
 
@@ -707,7 +722,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           )}
 
           {activity === 'whiteboard' && (
-            <div className="relative z-10 flex min-h-0 flex-1 flex-col p-3">
+            <div data-now-playing-pad className="relative z-10 flex min-h-0 flex-1 flex-col p-3">
               {featureEnabled('study')
                 ? <StudyWhiteboardPanel roomId={roomData.id} />
                 : <div className="flex flex-1 items-center justify-center rounded-xl border border-neutral-800 bg-[#0a0a0a] p-6 text-center text-sm text-neutral-500">The whiteboard is part of Study, which this room has disabled.</div>}
@@ -761,7 +776,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
               title="Drag to resize chat panel"
             />
             <div className="chat-topbar shrink-0">
-              <h3 className="font-medium text-sm text-white uppercase tracking-wider">{tool}</h3>
+              <h3 className="font-medium text-sm text-white uppercase tracking-wider">{tool === 'collab' ? 'collaborate' : tool}</h3>
               {layout === 'stage' && !isHomeMode && (
                 <button type="button" onClick={() => setStageChatOpenLayout(null)} className="room-panel-close" aria-label="Hide panel" title="Hide panel"><OmniIcon name="close" size={13} /></button>
               )}
@@ -769,12 +784,14 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             <div className="flex-1 flex flex-col overflow-hidden min-w-0">
               {tool === 'chat' && roomData && (featureEnabled('chat') ? <RoomChat roomId={roomData.id} /> : <RoomFeatureUnavailable label="Room chat" compact />)}
               {tool === 'members' && roomData && <MembersTab roomId={roomData.id} currentUserRole={userRole} canManageMembers={canManageMembers} onChangeRole={(memberId) => { setControlCenterMemberId(memberId); setControlCenterTab('user-control'); setShowControlCenter(true); }} />}
+              {tool === 'voice' && roomData && <VoicePanel />}
+              {tool === 'collab' && roomData && <CollabPanel roomId={roomData.id} />}
               {tool === 'files' && roomData && (featureEnabled('files') ? <FilesTab roomId={roomData.id} currentUserRole={userRole} canControlMedia={userRole === 'owner' || canControlMedia} /> : <RoomFeatureUnavailable label="Files" compact />)}
             </div>
           </div>
         </aside>
         {layout === 'stage' && !isHomeMode && !sidePanel.visible && (
-          <button type="button" className="room-panel-reopen" onClick={() => setStageChatOpenLayout(layout)} aria-label={`Show ${tool}`}><OmniIcon name={tool === 'files' ? 'file' : tool === 'members' ? 'users' : 'message'} size={16} /><span>Show {tool}</span></button>
+          <button type="button" className="room-panel-reopen" onClick={() => setStageChatOpenLayout(layout)} aria-label={`Show ${tool}`}><OmniIcon name={tool === 'files' ? 'file' : tool === 'members' ? 'users' : tool === 'voice' ? 'mic' : tool === 'collab' ? 'poll' : 'message'} size={16} /><span>Show {tool === 'collab' ? 'collaborate' : tool}</span></button>
         )}
       </div>
       </div>
@@ -790,7 +807,9 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         onRoomLifecycleChange={(deletionScheduledAt) => setRoomData((current) => current ? { ...current, deletion_scheduled_at: deletionScheduledAt } : current)}
       />
       {showLeaveConfirmation && <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="leave-room-title"><section className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111217] p-6 shadow-2xl"><p className="text-[10px] font-bold uppercase tracking-[.16em] text-amber-200">Membership</p>{userRole === 'owner' && ownerLeaveStep === 'choice' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Do you want to transfer ownership before leaving?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Choose No to leave the active workspace while retaining your room membership and ownership for later.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => { setShowLeaveConfirmation(false); minimizeActiveRoom(); }} className="omni-button omni-button-ghost">No</button><button type="button" disabled={leaving} onClick={() => void openOwnerTransfer()} className="omni-button omni-button-primary">Yes</button></div></> : userRole === 'owner' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Choose a new owner</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Only an approved permanent member can receive ownership.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<select value={ownerTransferTarget} onChange={(event) => setOwnerTransferTarget(event.target.value)} className="omni-input mt-4">{ownerTransferCandidates.map((member) => <option key={member.user_id} value={member.user_id}>User {member.user_id.slice(0, 8)}</option>)}</select><div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setOwnerLeaveStep('choice')} className="omni-button omni-button-ghost">Back</button><button type="button" disabled={leaving || !ownerTransferTarget} onClick={() => void completeOwnerTransferAndLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Transfer and leave'}</button></div></> : <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Leave this room?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">You can rejoin later when the room is open and you are not restricted.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => void handleLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Leave room'}</button></div></>}</section></div>}
+      {featureEnabled('chat') && <VoiceDock panelOpen={tool === 'voice' && sidePanel.visible} onOpen={() => openTool('voice')} />}
       <FloatingDock />
+    </VoiceRoomProvider>
     </RoomRealtimeProvider>
   );
 }

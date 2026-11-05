@@ -5,7 +5,8 @@ import { createClient } from '@/utils/supabase/server';
 import { assertActiveRoom } from '@/lib/room-lifecycle';
 import { listRoomFiles, type RoomFileRow } from '@/actions/room-files';
 
-export type StudyNote = { id: string; room_id: string; owner_id: string; scope: 'room' | 'personal'; title: string; content: string; version: number; created_at: string; updated_at: string };
+// last_edited_by / locked / locked_by: Action 12 (editor attribution, read-only room notes).
+export type StudyNote = { id: string; room_id: string; owner_id: string; scope: 'room' | 'personal'; title: string; content: string; version: number; created_at: string; updated_at: string; last_edited_by?: string | null; locked?: boolean; locked_by?: string | null };
 export type PdfAnnotation = { id: string; room_id: string; file_id: string; owner_id: string; page_number: number; position: Record<string, unknown>; content: string; created_at: string; updated_at: string };
 // state is parsed and sanitized client-side by src/lib/whiteboard-model.ts.
 export type RoomWhiteboard = { room_id: string; state: Record<string, unknown>; version: number; updated_by: string; updated_at: string };

@@ -24,7 +24,9 @@ export const ROOM_THEME_LABELS: Record<RoomTheme, string> = {
 
 export type RoomActivity = 'home' | 'watch' | 'study' | 'whiteboard';
 export type RoomFeatureFlags = Partial<Record<'chat' | 'watch' | 'files' | 'study' | 'announcements', boolean>>;
-export type RoomTool = 'chat' | 'members' | 'files';
+// Action 12 adds Voice (voice, screen share, raise hand, consented recording)
+// and Collaborate (polls, countdowns, events, search) side tools.
+export type RoomTool = 'chat' | 'members' | 'files' | 'voice' | 'collab';
 
 export type RoomAppearance = { defaultLayout: RoomLayout; layoutLocked: boolean; theme: RoomTheme };
 export const DEFAULT_ROOM_APPEARANCE: RoomAppearance = { defaultLayout: 'balanced', layoutLocked: false, theme: 'violet' };
@@ -79,6 +81,8 @@ export function effectiveActivity(requested: RoomActivity, flags: RoomFeatureFla
 export function effectiveTool(requested: RoomTool, flags: RoomFeatureFlags): RoomTool {
   if (requested === 'chat' && !isFeatureEnabled(flags, 'chat')) return 'members';
   if (requested === 'files' && !isFeatureEnabled(flags, 'files')) return isFeatureEnabled(flags, 'chat') ? 'chat' : 'members';
+  // Voice and Collaborate ride on the chat feature (chat capability server-side).
+  if ((requested === 'voice' || requested === 'collab') && !isFeatureEnabled(flags, 'chat')) return 'members';
   return requested;
 }
 

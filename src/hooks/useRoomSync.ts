@@ -81,8 +81,35 @@ export type RoomSyncValue = {
   // Highest whiteboard version announced by another member. The board itself
   // is re-read through getRoomWhiteboard (see room-broadcast-contract.ts).
   whiteboardVersion: number;
+  // Action 11: the active controller's last announced position (drift
+  // correction) and revision counters for the shared queue and clips.
+  mediaHeartbeat: MediaHeartbeat | null;
+  queueVersion: number;
+  clipsVersion: number;
   recordMediaTime: (time: number) => void;
   broadcastEvent: (eventType: SyncEventType, payload?: Record<string, unknown>) => void;
+  // Action 12: ephemeral room events (hints, cursors, editing presence, PDF
+  // follow, WebRTC signaling) go to subscribers instead of room state, so a
+  // cursor stream never re-renders the room. Returns false when not sent.
+  sendRoomEvent: (eventType: RoomEventType, payload?: Record<string, unknown>) => boolean;
+  subscribeRoomEvents: (listener: RoomEventListener) => () => void;
+};
+
+export const ROOM_EVENT_TYPES = ['study_changed', 'collab_changed', 'cursor', 'note_editing', 'pdf_follow', 'rtc_signal'] as const;
+export type RoomEventType = (typeof ROOM_EVENT_TYPES)[number];
+export type RoomEvent = { type: RoomEventType; payload: Record<string, unknown>; senderId: string; local: boolean };
+export type RoomEventListener = (event: RoomEvent) => void;
+const ROOM_EVENT_TYPE_SET = new Set<string>(ROOM_EVENT_TYPES);
+const isRoomEventType = (value: string): value is RoomEventType => ROOM_EVENT_TYPE_SET.has(value);
+
+export type MediaHeartbeat = {
+  mediaId: string;
+  castId: string | null;
+  time: number;
+  speed: number;
+  playing: boolean;
+  senderId: string;
+  receivedAt: number;
 };
 
 export type RoomMessageEvent = {
@@ -239,6 +266,13 @@ function isMediaEvent(eventType: SyncEventType) {
 
 function channelKindForEvent(eventType: SyncEventType): RoomChannelKind {
   if (eventType === 'typing') return 'chat';
+  // Voice/screen signaling and room-wide collaboration hints need chat;
+  // Study surfaces (notes, cursors, PDFs, tasks, resources) need study.
+  if (eventType === 'collab_changed' || eventType === 'rtc_signal') return 'chat';
+  if (eventType === 'study_changed' || eventType === 'cursor' || eventType === 'note_editing' || eventType === 'pdf_follow') return 'study';
+  // Only Watch controllers may publish on sync-control (realtime policy).
+  if (eventType === 'media_heartbeat') return 'control';
+  if (eventType === 'queue_changed' || eventType === 'clips_changed') return 'watch';
   if (eventType === 'timer_start' || eventType === 'timer_pause' || eventType === 'timer_reset' || eventType === 'whiteboard_changed') return 'study';
   if (eventType === 'request_sync') return 'watch';
   return isMediaEvent(eventType) ? 'control' : 'general';
@@ -348,6 +382,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     normalizeMediaState(readSessionValue<Partial<RoomMediaState> | null>(mediaStorageKey(roomId), null)),
   );
   const mediaStateRef = useRef<RoomMediaState | null>(mediaState);
+  const roomEventListenersRef = useRef(new Set<RoomEventListener>());
   // A restored browser snapshot is only a bootstrap value. It must not be
   // allowed to reject the first authoritative event from the active room.
   const lastMediaRevisionRef = useRef<MediaRevision | null>(null);
@@ -361,6 +396,9 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   const [roomControlVersion, setRoomControlVersion] = useState(0);
   const [connectionGeneration, setConnectionGeneration] = useState(0);
   const [whiteboardVersion, setWhiteboardVersion] = useState(0);
+  const [mediaHeartbeat, setMediaHeartbeat] = useState<MediaHeartbeat | null>(null);
+  const [queueVersion, setQueueVersion] = useState(0);
+  const [clipsVersion, setClipsVersion] = useState(0);
   // Server-allocated versions of the persisted media/timer snapshots. Older
   // Broadcasts and snapshots are ignored.
   const stateVersionsRef = useRef<Record<'media' | 'timer', number>>({ media: 0, timer: 0 });
@@ -566,6 +604,12 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       stateVersionsRef.current[snapshotType] = event.state_version;
     }
 
+    if (isRoomEventType(event.event_type)) {
+      const roomEvent: RoomEvent = { type: event.event_type, payload, senderId: event.sender_id, local: false };
+      roomEventListenersRef.current.forEach((listener) => listener(roomEvent));
+      return;
+    }
+
     if (event.event_type === 'typing') {
       setTypingUsers((current) => {
         const next = new Map(current);
@@ -583,6 +627,34 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     if (event.event_type === 'whiteboard_changed') {
       const version = payload.version as number;
       setWhiteboardVersion((current) => Math.max(current, version));
+      return;
+    }
+
+    if (event.event_type === 'queue_changed') {
+      setQueueVersion((current) => current + 1);
+      return;
+    }
+
+    if (event.event_type === 'clips_changed') {
+      setClipsVersion((current) => current + 1);
+      return;
+    }
+
+    // Only the current controller's heartbeat counts; it never changes room
+    // state, it only lets viewers correct drift locally.
+    if (event.event_type === 'media_heartbeat') {
+      const current = mediaStateRef.current;
+      if (!current || (current.controllerId && current.controllerId !== event.sender_id)) return;
+      if (payload.mediaId !== current.mediaId) return;
+      setMediaHeartbeat({
+        mediaId: payload.mediaId as string,
+        castId: typeof payload.castId === 'string' ? payload.castId : null,
+        time: payload.time as number,
+        speed: typeof payload.speed === 'number' ? payload.speed : 1,
+        playing: payload.playing === true,
+        senderId: event.sender_id,
+        receivedAt: Date.now(),
+      });
       return;
     }
 
@@ -664,6 +736,23 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     return true;
   }, [roomId]);
 
+  const subscribeRoomEvents = useCallback((listener: RoomEventListener) => {
+    roomEventListenersRef.current.add(listener);
+    return () => { roomEventListenersRef.current.delete(listener); };
+  }, []);
+
+  // Only the wire contract is sent. Revision hints are also delivered to this
+  // client's own listeners, so every local surface showing that data refreshes.
+  const sendRoomEvent = useCallback((eventType: RoomEventType, payload: Record<string, unknown> = {}) => {
+    const wirePayload = toRoomBroadcastPayload(eventType, payload);
+    if (!wirePayload) return false;
+    if ((eventType === 'study_changed' || eventType === 'collab_changed') && currentUserIdRef.current) {
+      const localEvent: RoomEvent = { type: eventType, payload: wirePayload, senderId: currentUserIdRef.current, local: true };
+      roomEventListenersRef.current.forEach((listener) => listener(localEvent));
+    }
+    return sendEvent(eventType, wirePayload);
+  }, [sendEvent]);
+
   const flushPendingEvents = useCallback(() => {
     if (!currentUserIdRef.current || connectionStateRef.current !== 'connected') return;
     const queuedEvents = pendingEventsRef.current.splice(0);
@@ -675,6 +764,9 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       ? { ...payload, castId: asString(payload.castId, createEventId()) }
       : payload;
     if (isMediaEvent(eventType) && !canControlMedia) return;
+    if (eventType === 'media_heartbeat' && !canControlMedia) return;
+    if (eventType === 'queue_changed') setQueueVersion((current) => current + 1);
+    if (eventType === 'clips_changed') setClipsVersion((current) => current + 1);
     const meta: MediaEventMeta = {
       eventId: createEventId(),
       timestamp: Date.now(),
@@ -786,6 +878,9 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       setRoomControlVersion(0);
       setConnectionGeneration(0);
       setWhiteboardVersion(0);
+      setMediaHeartbeat(null);
+      setQueueVersion(0);
+      setClipsVersion(0);
     }, 0);
 
     // Refresh the restored URL under current authorization: signed URLs
@@ -974,6 +1069,8 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   }, []);
 
   return {
+    sendRoomEvent,
+    subscribeRoomEvents,
     currentUserId,
     canControlMedia,
     connectionState,
@@ -988,6 +1085,9 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     roomControlVersion,
     connectionGeneration,
     whiteboardVersion,
+    mediaHeartbeat,
+    queueVersion,
+    clipsVersion,
     recordMediaTime,
     broadcastEvent,
   };
