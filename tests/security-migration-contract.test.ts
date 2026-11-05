@@ -175,10 +175,14 @@ test('app code registers Watch media through the RPC on contract storage paths',
     });
 
   // The CRON_SECRET-gated cleanup route is the only service-role client and
-  // deletes expired rows by design. Every other module runs as the end user.
+  // deletes expired rows by design; its steps live in lib/room-cleanup.ts,
+  // which only that route may import. Every other module runs as the user.
   const serviceRoleRoute = join(sourceRoot, 'app', 'api', 'internal', 'cleanup-expired-rooms', 'route.ts');
+  const serviceRoleSteps = join(sourceRoot, 'lib', 'room-cleanup.ts');
+  const cleanupImporters = sourceFiles(sourceRoot).filter((file) => /from '@\/lib\/room-cleanup'|from '\.\.?\/.*room-cleanup'/.test(readFileSync(file, 'utf8')));
+  assert.deepEqual(cleanupImporters, [serviceRoleRoute]);
 
-  const offenders = sourceFiles(sourceRoot).filter((file) => file !== serviceRoleRoute).flatMap((file) => {
+  const offenders = sourceFiles(sourceRoot).filter((file) => file !== serviceRoleRoute && file !== serviceRoleSteps).flatMap((file) => {
     const source = readFileSync(file, 'utf8');
     const problems: string[] = [];
     // 20260923140000 revoked direct INSERT/UPDATE/DELETE on temporary_media.
