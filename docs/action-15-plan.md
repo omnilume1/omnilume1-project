@@ -13,21 +13,21 @@ Decision (owner default): Personal and General stay E2EE
 like rooms. No group key distribution.
 
 ## Action 15 — Personal, General and Group messaging
-- [ ] 15.1 Conversation model: exactly one type per conversation, derived
+- [x] (`0f16fcc`) 15.1 Conversation model: exactly one type per conversation, derived
       server-side (`private_chat_type`, `get_my_conversations`): personal =
       accepted friends, general = accepted message request, group = Action 14
       `groups`/`group_members`. Order-independent unique pair index.
-- [ ] 15.2 Messages page tabs Personal | General | Groups | Requests, reusing
+- [x] (`0f16fcc`) 15.2 Messages page tabs Personal | General | Groups | Requests, reusing
       `usePrivateChat`, `PrivateChat`, public-key helpers and allSettled UI;
       room messages/keys never mixed.
-- [ ] 15.3 General: request → accept / decline / block; unread counts and read
+- [x] (`0f16fcc`) 15.3 General: request → accept / decline / block; unread counts and read
       state (`conversation_reads`, `mark_conversation_read`).
-- [ ] 15.4 Reclassification General → Personal relabels metadata only; same
+- [x] (`0f16fcc`) 15.4 Reclassification General → Personal relabels metadata only; same
       chat, ciphertext byte-identical.
-- [ ] 15.5 Group messages (`group_messages`) gated by `group_members` + roles
+- [x] (`0f16fcc`) 15.5 Group messages (`group_messages`) gated by `group_members` + roles
       (leave, owner/admin removal), private `group_<id>` topic.
-- [ ] 15.6 Revocation: block, unfriend, leave, removal stop reads, writes and
+- [x] (`0f16fcc`) 15.6 Revocation: block, unfriend, leave, removal stop reads, writes and
       realtime (restrictive `messages` policies + topic helpers).
-- [ ] 15.7 Decryption failure shows a safe message (existing path kept).
-- [ ] 15.8 Async states: loading, disabled, error, empty, retry, a11y, 390 px.
-- [ ] 15.9 Verification: dry run, push, probe, unit tests, lint, build, browser.
+- [x] (`0f16fcc`) 15.7 Decryption failure shows a safe message (existing path kept).
+- [x] (`0f16fcc`) 15.8 Async states: loading, disabled, error, empty, retry, a11y, 390 px.
+- [x] (`0f16fcc`) 15.9 Verification: dry run, push, probe, unit tests, lint, build, browser.
