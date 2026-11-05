@@ -3,7 +3,7 @@
 import type { FormEvent } from 'react';
 import { useState } from 'react';
 import { updateMyProfile } from '@/actions/profiles';
-import { PROFILE_GENDERS, type ProfileGender, type ProfileInput } from '@/lib/profile-validation';
+import { MINIMUM_AGE_YEARS, PROFILE_GENDERS, latestAllowedDateOfBirth, type ProfileGender, type ProfileInput } from '@/lib/profile-validation';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 
 interface ProfileRecord {
@@ -141,7 +141,8 @@ export default function ProfileForm({
       </div>
       <div>
         <label htmlFor="profile-dob" className="form-label">Date of birth</label>
-        <input id="profile-dob" type="date" value={dateOfBirth} onChange={(event) => setDateOfBirth(event.target.value)} className="omni-input" required />
+        <input id="profile-dob" type="date" value={dateOfBirth} max={latestAllowedDateOfBirth()} onChange={(event) => setDateOfBirth(event.target.value)} className="omni-input" aria-describedby="profile-dob-help" required />
+        <p id="profile-dob-help" className="form-help">You must be at least {MINIMUM_AGE_YEARS} years old to use OmniLume.</p>
       </div>
       {!setup && <div>
         <label htmlFor="profile-gender" className="form-label">Gender</label>

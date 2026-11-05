@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getSafeRedirectPath, isAuthRequiredPath, PROFILE_SETUP_PATH } from '@/lib/auth';
+import { getSafeRedirectPath, isAuthRequiredPath, isProfileComplete, PROFILE_SETUP_PATH } from '@/lib/auth';
 
 function redirectWithSessionCookies(url: URL, sessionResponse: NextResponse) {
   const response = NextResponse.redirect(url);
@@ -55,7 +55,7 @@ export async function proxy(request: NextRequest) {
       .select('profile_completed, profile_details_completed')
       .eq('id', user.id)
       .maybeSingle();
-    const profileComplete = !profileError && profile?.profile_completed === true && profile?.profile_details_completed === true;
+    const profileComplete = !profileError && isProfileComplete(profile);
 
     if (pathname === PROFILE_SETUP_PATH) {
       if (profileComplete) {

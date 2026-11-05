@@ -6,6 +6,9 @@ import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { deleteMessageForEveryone } from '@/actions/chat';
 import { getRoomControlState } from '@/actions/room-controls';
 import { isIsoTimestamp, isUuid, isValidRoomMessageContent, ROOM_MESSAGE_MAX_CHARS } from '@/lib/message-limits';
+import { formatGifMessage, giphyImageUrl, parseGifMessage } from '@/lib/gif-message';
+import GifPicker from '@/components/room/GifPicker';
+import type { GifResult } from '@/actions/gifs';
 
 const ROOM_CHAT_PAGE_SIZE = 50;
 
@@ -70,7 +73,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
   const loadingOlderRef = useRef(false);
   const preserveScrollRef = useRef<{ height: number; top: number } | null>(null);
   const supabase = createClient();
-  const { currentUserId: roomCurrentUserId, typingUsers, broadcastEvent, roomMessageEvents, roomControlVersion } = useRoomRealtime();
+  const { currentUserId: roomCurrentUserId, typingUsers, broadcastEvent, roomMessageEvents, roomControlVersion, connectionGeneration } = useRoomRealtime();
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -120,6 +123,28 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
     return () => { isMounted = false; };
   }, [roomId, supabase]);
+
+  // Postgres Changes does not replay rows committed before the feed became
+  // ready: neither the gap after the initial fetch nor time spent
+  // disconnected. Each time the feed is (re)confirmed, re-read the newest page
+  // through RLS. mergeMessage de-duplicates by id, so nothing is shown twice.
+  useEffect(() => {
+    if (connectionGeneration < 1) return;
+    let active = true;
+    void (async () => {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('id, sender_id, content, is_deleted, created_at')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(ROOM_CHAT_PAGE_SIZE);
+      if (!active || error) return;
+      const page = ((data ?? []) as unknown[]).filter(isRoomChatMessage);
+      if (page.length > 0) setMessages((current) => [...page].reverse().reduce(mergeMessage, current));
+    })();
+    return () => { active = false; };
+  }, [connectionGeneration, roomId, supabase]);
 
   const loadOlderMessages = useCallback(async () => {
     const cursor = oldestCursorRef.current;
@@ -207,9 +232,22 @@ export default function RoomChat({ roomId }: RoomChatProps) {
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
 
+  const [showGifPicker, setShowGifPicker] = useState(false);
+  const closeGifPicker = useCallback(() => setShowGifPicker(false), []);
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    const messageText = newMessage.trim();
+    await sendRoomContent(newMessage.trim(), true);
+  };
+
+  const handleSendGif = async (gif: GifResult) => {
+    setShowGifPicker(false);
+    await sendRoomContent(formatGifMessage({ id: gif.id, title: gif.title }), false);
+  };
+
+  // A GIF is an ordinary room message, so it uses the same RLS-checked insert
+  // (chat capability) and reaches members through Postgres Changes.
+  const sendRoomContent = async (messageText: string, fromComposer: boolean) => {
     if (!isValidRoomMessageContent(messageText)) {
       setDeleteError(`Messages must be 1-${ROOM_MESSAGE_MAX_CHARS} characters.`);
       return;
@@ -223,7 +261,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
     if (!currentUserId) setCurrentUserId(senderId);
 
-    setNewMessage('');
+    if (fromComposer) setNewMessage('');
     const { data, error } = await supabase
       .from('messages')
       .insert({ room_id: roomId, sender_id: senderId, content: messageText })
@@ -231,14 +269,15 @@ export default function RoomChat({ roomId }: RoomChatProps) {
       .single();
 
     if (error || !data) {
-      setNewMessage(messageText);
+      if (fromComposer) setNewMessage(messageText);
       setDeleteError('Unable to send message.');
       return;
     }
 
+    // Other members receive the row through RLS-checked Postgres Changes, not
+    // Broadcast, so chat text never reaches a stale or removed connection.
     const createdMessage = data as RoomChatMessage;
     setMessages((current) => mergeMessage(current, createdMessage));
-    broadcastEvent('room_message', { message: createdMessage as unknown as Record<string, unknown> });
   };
 
   const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -268,10 +307,8 @@ export default function RoomChat({ roomId }: RoomChatProps) {
         return;
       }
 
+      // The soft-delete UPDATE reaches other members through Postgres Changes.
       setMessages(prev => prev.map(msg => msg.id === msgId ? { ...msg, is_deleted: true, content: '🚫 This message was deleted' } : msg));
-      broadcastEvent('room_message_update', {
-        message: { id: msgId, is_deleted: true, content: 'This message was deleted', file_url: null },
-      });
     } catch {
       setDeleteError('Unable to delete message.');
     } finally {
@@ -298,7 +335,17 @@ export default function RoomChat({ roomId }: RoomChatProps) {
             return (
               <div key={msg.id} className={`flex flex-col relative group ${isMe ? 'items-end' : 'items-start'}`}>
                 <div data-message-menu-area className={`message-bubble relative flex max-w-[85%] items-center gap-3 px-4 py-2.5 ${msg.is_deleted ? 'bg-transparent text-neutral-500 italic' : isMe ? 'is-own rounded-br-sm text-white' : 'rounded-bl-sm text-white'}`}>
-                  <span className="text-sm leading-relaxed break-words">{msg.content}</span>
+                  {(() => {
+                    const gif = msg.is_deleted ? null : parseGifMessage(msg.content);
+                    if (!gif) return <span className="text-sm leading-relaxed break-words">{msg.content}</span>;
+                    return (
+                      <figure className="m-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- animated third-party GIF; next/image would re-encode it */}
+                        <img src={giphyImageUrl(gif.id)} alt={gif.title || 'GIF'} loading="lazy" referrerPolicy="no-referrer" width={200} className="block max-w-[200px] rounded-lg bg-black/20" />
+                        <figcaption className="mt-1 text-[9px] font-bold uppercase tracking-wider text-white/50">GIF via GIPHY</figcaption>
+                      </figure>
+                    );
+                  })()}
                   {!msg.is_deleted && (
                     <button aria-label="Message actions" title="Message actions" onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === msg.id ? null : msg.id); }} className={`message-more rounded p-1 transition hover:bg-black/20 ${isMe ? '-ml-2' : ''}`}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
@@ -318,8 +365,10 @@ export default function RoomChat({ roomId }: RoomChatProps) {
         )}
       </div>
 
-      <div className="message-composer">
+      <div className="message-composer relative">
+        {showGifPicker && <GifPicker onSelect={(gif) => void handleSendGif(gif)} onClose={closeGifPicker} />}
         <form onSubmit={handleSendMessage} className="flex gap-2">
+          <button type="button" onClick={() => setShowGifPicker((value) => !value)} aria-expanded={showGifPicker} aria-label="Send a GIF" title="Send a GIF" className={`shrink-0 rounded-xl border px-2.5 text-[11px] font-black tracking-wide transition ${showGifPicker ? 'border-indigo-500 bg-indigo-500/20 text-indigo-200' : 'border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-white'}`}>GIF</button>
           <input type="text" value={newMessage} onChange={handleTyping} maxLength={ROOM_MESSAGE_MAX_CHARS} placeholder="Message the room..." className="omni-input" />
           <button type="submit" disabled={!newMessage.trim()} className="omni-button omni-button-primary !min-h-0 !rounded-xl !px-3">
             {/* The corrected SVG is below without the extra </path> */}

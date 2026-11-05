@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/server';
 import { assertActiveRoom, roomExpirySeconds } from '@/lib/room-lifecycle';
+import { isUuid } from '@/lib/message-limits';
 import {
   ROOM_ATTACHMENT_BUCKET,
   isLegacyRoomObjectPath,
@@ -60,8 +61,11 @@ export async function logTemporaryMedia(
     if (!['audio', 'video', 'url'].includes(mediaType)) throw new Error('Invalid media type.');
 
     const { supabase, user } = await getAuthenticatedUser();
+    await assertActiveRoom(supabase, roomId);
     await assertCanCast(supabase, roomId, user.id);
 
+    // The stored object's own metadata, not the client's claim, is what gets
+    // registered: path shape, MIME allow-list, FLAC extension pairing, size.
     let verifiedMimeType: string | null = null;
     let verifiedFileSize: number | null = null;
     if (mediaType !== 'url') {
@@ -79,6 +83,9 @@ export async function logTemporaryMedia(
       verifiedFileSize = metadata.size;
     }
 
+    // Direct temporary_media writes were revoked in 20260923140000. The RPC
+    // re-checks watch_control, validates the <room>/media/<uuid>.<ext> path,
+    // MIME type and size, and derives the expiry from the room lifecycle.
     const { data, error } = await supabase.rpc('register_temporary_media', {
       p_room_id: roomId,
       p_file_name: fileName.trim().slice(0, 512),
@@ -87,10 +94,114 @@ export async function logTemporaryMedia(
       p_mime_type: verifiedMimeType,
       p_file_size: verifiedFileSize,
     });
+
     if (error) throw new Error(error.message);
-    return { success: true, media: data };
+    const row = (Array.isArray(data) ? data[0] : data) as { id?: unknown } | null;
+    if (!row || typeof row.id !== 'string') throw new Error('Media was not registered.');
+    // Room members learn about a cast only through this id. They resolve the
+    // playable URL themselves through resolveRoomMedia, which never travels
+    // over Broadcast (see src/lib/room-broadcast-contract.ts).
+    return { success: true, mediaId: row.id };
   } catch (error: unknown) {
     return { success: false, error: error instanceof Error ? error.message : 'Unable to save media.' };
+  }
+}
+
+type SignableRoom = Awaited<ReturnType<typeof assertActiveRoom>>;
+
+async function signRoomObject(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  room: SignableRoom,
+  roomId: string,
+  objectPath: string,
+) {
+  if (!isRoomObjectPath(roomId, objectPath) && !isLegacyRoomObjectPath(roomId, objectPath)) {
+    throw new Error('Invalid file path.');
+  }
+  // Never let a signed URL outlive the room's server-side expiry.
+  const signedUrlLifetime = Math.min(60 * 60, roomExpirySeconds(room) ?? 60 * 60);
+  if (signedUrlLifetime <= 0) throw new Error('This room has expired and is no longer active.');
+  const { data, error } = await supabase.storage.from('room_attachments').createSignedUrl(objectPath, signedUrlLifetime);
+  if (error) throw new Error(error.message);
+  if (!data?.signedUrl) throw new Error('Failed to generate signed URL.');
+  return data.signedUrl;
+}
+
+export type ResolvedRoomMedia = {
+  id: string;
+  url: string;
+  title: string;
+  subtitleUrl: string | null;
+  sourceType: 'url' | 'upload';
+};
+
+// The protected fetch behind every Watch Broadcast: a member who receives a
+// mediaId gets the playable URL, title and subtitle only if they can still
+// watch this room right now. A removed member's call fails here, even if
+// their stale Realtime connection still delivers the id.
+export async function resolveRoomMedia(roomId: string, mediaId: string): Promise<{ success: boolean; media?: ResolvedRoomMedia; error?: string }> {
+  try {
+    if (!isUuid(roomId) || !isUuid(mediaId)) throw new Error('Invalid media reference.');
+
+    const { supabase, user } = await getAuthenticatedUser();
+    const room = await assertActiveRoom(supabase, roomId);
+    await assertCapability(supabase, roomId, user.id, 'watch');
+
+    const { data: media, error } = await supabase
+      .from('temporary_media')
+      .select('id, file_name, file_url, media_type, storage_path, subtitle_path')
+      .eq('id', mediaId)
+      .eq('room_id', roomId)
+      .gt('expires_at', new Date().toISOString())
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!media) throw new Error('This media is no longer available.');
+
+    let url: string;
+    if (media.media_type === 'url') {
+      if (typeof media.file_url !== 'string' || !/^https?:\/\//i.test(media.file_url)) throw new Error('Invalid cast URL.');
+      url = media.file_url;
+    } else {
+      url = await signRoomObject(supabase, room, roomId, media.storage_path ?? media.file_url);
+    }
+    const subtitleUrl = media.subtitle_path ? await signRoomObject(supabase, room, roomId, media.subtitle_path) : null;
+
+    return {
+      success: true,
+      media: {
+        id: media.id,
+        url,
+        title: media.file_name,
+        subtitleUrl,
+        sourceType: media.media_type === 'url' ? 'url' : 'upload',
+      },
+    };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to load media.' };
+  }
+}
+
+// Binds an uploaded <room>/subtitles/<uuid>.(vtt|srt) object to its media row
+// so other members resolve it through resolveRoomMedia rather than receiving
+// a signed URL over Broadcast.
+export async function attachRoomMediaSubtitle(roomId: string, mediaId: string, subtitlePath: string): Promise<{ success: boolean; subtitleUrl?: string; error?: string }> {
+  try {
+    if (!isUuid(roomId) || !isUuid(mediaId)) throw new Error('Invalid media reference.');
+    if (!isRoomObjectPath(roomId, subtitlePath, 'subtitle')) throw new Error('Invalid subtitle path.');
+
+    const { supabase, user } = await getAuthenticatedUser();
+    const room = await assertActiveRoom(supabase, roomId);
+    await assertCanCast(supabase, roomId, user.id);
+    const metadata = await getServerStorageProvider().getMetadata(ROOM_ATTACHMENT_BUCKET, subtitlePath);
+    if (!metadata || !isRoomSubtitleMimeType(metadata.mimeType ?? '')) {
+      throw new Error('Uploaded subtitle could not be verified.');
+    }
+
+    const { error } = await supabase.rpc('set_temporary_media_subtitle', { p_media_id: mediaId, p_subtitle_path: subtitlePath });
+    if (error) throw new Error(error.message);
+    return { success: true, subtitleUrl: await signRoomObject(supabase, room, roomId, subtitlePath) };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to attach subtitles.' };
   }
 }
 
@@ -124,28 +235,22 @@ export async function logCastHistory(roomId: string, title: string, url: string)
 // Generate a signed URL for private storage access
 // This is required for Action 2 (RLS lockdown) - storage bucket is private
 export async function getSignedStorageUrl(filePath: string, roomId: string): Promise<{ success: boolean; url?: string; error?: string }> {
-  return getSignedRoomAttachmentUrl(filePath, roomId, 'files');
-}
-
-export async function associateTemporaryMediaSubtitle(mediaId: string, roomId: string, subtitlePath: string) {
   try {
+    if (!filePath || !roomId) throw new Error('File path and room ID are required.');
+    if (!isRoomObjectPath(roomId, filePath) && !isLegacyRoomObjectPath(roomId, filePath)) {
+      throw new Error('Invalid file path.');
+    }
+
     const { supabase, user } = await getAuthenticatedUser();
-    await assertCanCast(supabase, roomId, user.id);
-    if (!isRoomObjectPath(roomId, subtitlePath, 'subtitle')) {
-      throw new Error('Invalid subtitle path.');
-    }
-    const metadata = await getServerStorageProvider().getMetadata(ROOM_ATTACHMENT_BUCKET, subtitlePath);
-    if (!metadata || !isRoomSubtitleMimeType(metadata.mimeType ?? '')) {
-      throw new Error('Uploaded subtitle could not be verified.');
-    }
-    const { data, error } = await supabase.rpc('set_temporary_media_subtitle', {
-      p_media_id: mediaId,
-      p_subtitle_path: subtitlePath,
-    });
-    if (error) throw new Error(error.message);
-    return { success: true, media: data };
+    const room = await assertActiveRoom(supabase, roomId);
+    // Mirror the storage SELECT policy: Watch media and subtitles need the
+    // watch capability, and shared files need files.
+    const pathKind = filePath.slice(roomId.length + 1).split('/')[0];
+    await assertCapability(supabase, roomId, user.id, pathKind === 'media' || pathKind === 'subtitles' ? 'watch' : 'files');
+
+    return { success: true, url: await signRoomObject(supabase, room, roomId, filePath) };
   } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unable to attach subtitle.' };
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to generate signed URL.' };
   }
 }
 
@@ -157,6 +262,17 @@ export async function cleanupUnregisteredTemporaryMedia(roomId: string, objectPa
     const { supabase, user } = await getAuthenticatedUser();
     await assertCanCast(supabase, roomId, user.id);
     if (!isRoomObjectPath(roomId, objectPath, kind)) throw new Error('Invalid temporary-media path.');
+    // The service-role delete below must never remove media that was
+    // registered (by this or another member). The path passed the strict
+    // UUID contract above, so it is safe inside the filter expression.
+    const { data: registered, error: lookupError } = await supabase
+      .from('temporary_media')
+      .select('id')
+      .eq('room_id', roomId)
+      .or(`storage_path.eq.${objectPath},subtitle_path.eq.${objectPath},file_url.eq.${objectPath}`)
+      .limit(1);
+    if (lookupError) throw new Error(lookupError.message);
+    if (registered && registered.length > 0) throw new Error('Registered media cannot be cleaned up here.');
     await getServerStorageProvider().cleanup(ROOM_ATTACHMENT_BUCKET, [objectPath]);
     return { success: true };
   } catch (error: unknown) {
@@ -164,55 +280,3 @@ export async function cleanupUnregisteredTemporaryMedia(roomId: string, objectPa
   }
 }
 
-// Watch playback is separate from the Files surface: a member may be allowed
-// to watch shared media even when file browsing/upload is disabled.
-export async function getSignedRoomMediaUrl(filePath: string, roomId: string): Promise<{ success: boolean; url?: string; error?: string }> {
-  return getSignedRoomAttachmentUrl(filePath, roomId, 'watch');
-}
-
-async function getSignedRoomAttachmentUrl(
-  filePath: string,
-  roomId: string,
-  capability: 'files' | 'watch',
-): Promise<{ success: boolean; url?: string; error?: string }> {
-  try {
-    if (!filePath || !roomId) throw new Error('File path and room ID are required.');
-
-    const { supabase, user } = await getAuthenticatedUser();
-    const room = await assertActiveRoom(supabase, roomId);
-    await assertCapability(supabase, roomId, user.id, capability);
-
-    // Storage paths are opaque identifiers; a URL, traversal, or other-room
-    // path is never treated as an attachment.
-    if (!isRoomObjectPath(roomId, filePath) && !isLegacyRoomObjectPath(roomId, filePath)) {
-      throw new Error('Invalid file path.');
-    }
-
-    // Never let a signed URL outlive the room's server-side expiry.
-    const roomLifetimeSeconds = roomExpirySeconds(room);
-    const signedUrlLifetime = Math.min(15 * 60, roomLifetimeSeconds ?? 15 * 60);
-    if (signedUrlLifetime <= 0) throw new Error('This room has expired and is no longer active.');
-
-    if (capability === 'watch') {
-      const { data: activeMedia, error: mediaError } = await supabase
-        .from('temporary_media')
-        .select('id')
-        .eq('room_id', roomId)
-        .gt('expires_at', new Date().toISOString())
-        .or(`storage_path.eq.${filePath},subtitle_path.eq.${filePath},file_url.eq.${filePath}`)
-        .maybeSingle();
-      if (mediaError) throw new Error(mediaError.message);
-      if (!activeMedia) throw new Error('This temporary media is no longer available.');
-    }
-
-    const signedUrl = await getServerStorageProvider().createSignedDownloadUrl(
-      ROOM_ATTACHMENT_BUCKET,
-      filePath,
-      signedUrlLifetime,
-    );
-
-    return { success: true, url: signedUrl };
-  } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unable to generate signed URL.' };
-  }
-}

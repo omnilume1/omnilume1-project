@@ -29,6 +29,23 @@ export interface NormalizedProfileInput {
   is_private: boolean;
 }
 
+// Owner decision (2026-11-05): OmniLume requires a minimum age of 13. The
+// database enforces the same rule (profiles_enforce_minimum_age trigger,
+// migration 20261105120000), so this check is for a clear form message.
+export const MINIMUM_AGE_YEARS = 13;
+
+// The latest date of birth (YYYY-MM-DD, UTC) that is at least
+// MINIMUM_AGE_YEARS old on `now`. A 29 February birthday turns 13 on 1 March
+// in non-leap years, matching Postgres date - interval arithmetic.
+export function latestAllowedDateOfBirth(now: Date = new Date()) {
+  const year = now.getUTCFullYear() - MINIMUM_AGE_YEARS;
+  const month = now.getUTCMonth();
+  const day = now.getUTCDate();
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const latest = new Date(Date.UTC(year, month, Math.min(day, daysInMonth)));
+  return latest.toISOString().slice(0, 10);
+}
+
 export function normalizeUsername(value: string) {
   return value.trim().toLowerCase();
 }
@@ -60,6 +77,9 @@ export function validateProfileInput(input: ProfileInput):
   }
   if (!isValidDateOnly(dateOfBirth) || dateOfBirth > new Date().toISOString().slice(0, 10)) {
     return { success: false, error: 'Enter a valid date of birth that is not in the future.' };
+  }
+  if (dateOfBirth > latestAllowedDateOfBirth()) {
+    return { success: false, error: `You must be at least ${MINIMUM_AGE_YEARS} years old to use OmniLume.` };
   }
   if (!PROFILE_GENDERS.includes(input.gender)) {
     return { success: false, error: 'Select a valid gender option.' };

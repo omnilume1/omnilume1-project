@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:unit": "tsc -p tsconfig.tests.json && node scripts/run-unit-tests.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

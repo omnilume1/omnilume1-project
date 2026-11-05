@@ -14,6 +14,7 @@ import StudyPdfPanel from '@/components/room/StudyPdfPanel';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import type { TimerState } from '@/hooks/useRoomSync';
+import { ROOM_TIMER_SUBJECT_MAX_CHARS } from '@/lib/room-broadcast-contract';
 import {
   FOCUS_LOCK_EVENT,
   activateFocusLock,
@@ -179,7 +180,7 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
     handlePointerMove,
     handlePointerUp,
     handleKeyDown,
-  } = useRoomPanelResize(roomId, 'study-height', { minHeight: 360, maxHeight: 760 });
+  } = useRoomPanelResize(roomId, currentUserId, 'study-height', { minHeight: 360, maxHeight: 760 });
   const [activeTab, setActiveTab] = useState<StudyTab>('TIMER');
   const [subject, setSubject] = useState('');
   const [inputHrs, setInputHrs] = useState(0);
@@ -518,6 +519,7 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
                 type="text"
                 value={displayedSubject}
                 onChange={(event) => setSubject(event.target.value)}
+                maxLength={ROOM_TIMER_SUBJECT_MAX_CHARS}
                 placeholder="What are you focusing on?"
                 disabled={timerState.isRunning || hasSession}
                 className="w-full border-b-2 border-neutral-800 bg-transparent pb-2 text-center text-sm text-white outline-none transition placeholder:text-neutral-600 focus:border-indigo-500 disabled:cursor-not-allowed disabled:text-neutral-400"

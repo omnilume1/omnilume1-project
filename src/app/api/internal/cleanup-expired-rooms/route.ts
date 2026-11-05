@@ -15,10 +15,6 @@ type ExpiredMedia = {
   subtitle_path: string | null;
 };
 
-type ExpiredRoom = {
-  id: string;
-};
-
 type PendingRoomFile = {
   id: string;
   object_path: string;
@@ -269,17 +265,18 @@ async function cleanupPendingRoomFiles(supabase: SupabaseClient) {
   return { removed, failures };
 }
 
-async function cleanupIrreversibleRooms(
+// Rooms whose lifecycle has ended: irreversible rooms at expiry, and
+// recoverable rooms once their 7-day recovery window closes without a pending
+// recovery request (public.room_lifecycle_state). The database chooses the
+// rooms and re-checks each one under a row lock before deleting it, so a
+// recovery approved in the meantime is never overridden.
+async function cleanupDestroyedRooms(
   supabase: SupabaseClient,
   now: string,
 ) {
-  const { data, error } = await supabase
-    .from('rooms')
-    .select('id')
-    .eq('expiration_type', 'irreversible')
-    .not('expires_at', 'is', null)
-    .lte('expires_at', now)
-    .limit(ROOM_BATCH_SIZE);
+  const { data, error } = await supabase.rpc('list_rooms_due_for_destruction', {
+    p_limit: ROOM_BATCH_SIZE,
+  });
 
   if (error) {
     throw new Error(error.message);
@@ -287,21 +284,24 @@ async function cleanupIrreversibleRooms(
 
   let removed = 0;
   const failures: string[] = [];
+  const roomIds = ((data ?? []) as Array<string | { list_rooms_due_for_destruction?: string }>)
+    .map((row) => (typeof row === 'string' ? row : row.list_rooms_due_for_destruction))
+    .filter((id): id is string => typeof id === 'string');
 
-  for (const room of (data ?? []) as ExpiredRoom[]) {
+  for (const roomId of roomIds) {
     // Persist intent before destructive storage work so a failed worker run is
     // visible and retried on the next authorized cleanup invocation.
     const { data: existingJob, error: existingJobError } = await supabase
       .from('room_cleanup_jobs')
       .select('attempts')
-      .eq('room_id', room.id)
+      .eq('room_id', roomId)
       .maybeSingle();
     if (existingJobError) throw new Error(existingJobError.message);
     const attempts = (existingJob?.attempts ?? 0) + 1;
     const { error: jobError } = await supabase
       .from('room_cleanup_jobs')
       .upsert({
-        room_id: room.id,
+        room_id: roomId,
         status: 'pending',
         attempts,
         last_error: null,
@@ -311,20 +311,20 @@ async function cleanupIrreversibleRooms(
     if (jobError) throw new Error(jobError.message);
 
     try {
-      const storagePaths = await listStorageFiles(supabase, room.id);
+      // Storage objects are not children of public.rooms, so they are removed
+      // first. Every room-owned table cascades from the room delete.
+      const storagePaths = await listStorageFiles(supabase, roomId);
       await removeStorageFiles(supabase, storagePaths);
 
-      // Room foreign keys cascade room-owned database records. Storage objects
-      // are removed first because they are not children of public.rooms.
-      const { error: deleteError } = await supabase
-        .from('rooms')
-        .delete()
-        .eq('id', room.id)
-        .eq('expiration_type', 'irreversible')
-        .lte('expires_at', now);
+      const { data: destroyed, error: destroyError } = await supabase.rpc('destroy_expired_room', {
+        p_room_id: roomId,
+      });
 
-      if (deleteError) {
-        throw new Error(deleteError.message);
+      if (destroyError) {
+        throw new Error(destroyError.message);
+      }
+      if (destroyed !== true) {
+        throw new Error('Room is no longer due for destruction.');
       }
 
       removed += 1;
@@ -339,9 +339,9 @@ async function cleanupIrreversibleRooms(
           updated_at: new Date().toISOString(),
           last_attempt_at: new Date().toISOString(),
         })
-        .eq('room_id', room.id);
+        .eq('room_id', roomId);
       failures.push(
-        `room:${room.id}:${message}`,
+        `room:${roomId}:${message}`,
       );
     }
   }
@@ -369,7 +369,7 @@ async function cleanupExpiredRooms(request: Request) {
     const now = new Date().toISOString();
     const media = await cleanupExpiredMedia(supabase, now);
     const files = await cleanupPendingRoomFiles(supabase);
-    const rooms = await cleanupIrreversibleRooms(supabase, now);
+    const rooms = await cleanupDestroyedRooms(supabase, now);
     const failures = [...media.failures, ...files.failures, ...rooms.failures];
 
     return NextResponse.json(
@@ -377,7 +377,7 @@ async function cleanupExpiredRooms(request: Request) {
         ok: failures.length === 0,
         expiredMediaRemoved: media.removed,
         pendingRoomFilesRemoved: files.removed,
-        irreversibleRoomsRemoved: rooms.removed,
+        destroyedRoomsRemoved: rooms.removed,
         failures,
       },
       { status: failures.length === 0 ? 200 : 207 },

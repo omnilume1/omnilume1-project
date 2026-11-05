@@ -27,15 +27,20 @@ export function startUploadFileWithProgress(
   path: string,
   file: Blob,
   onProgress?: (progress: StorageUploadProgress) => void,
+  contentType?: string,
 ): StorageUploadTask {
+  // The bucket's allowed_mime_types checks the uploaded part's type, so send
+  // the caller's contract type rather than whatever the browser reported.
+  const body = contentType && file.type !== contentType ? new Blob([file], { type: contentType }) : file;
   if (typeof XMLHttpRequest === 'undefined') {
     return {
       supportsCancellation: false,
       cancel: () => undefined,
       promise: (async () => {
-        const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
+        const { data, error } = await supabase.storage.from(bucket).upload(path, body, {
           cacheControl: '3600',
           upsert: false,
+          ...(contentType ? { contentType } : {}),
         });
         if (error) throw error;
         onProgress?.({ loaded: file.size, total: file.size, percent: 100 });
@@ -90,7 +95,7 @@ export function startUploadFileWithProgress(
       request.addEventListener('abort', () => reject(new Error('Upload cancelled.')));
       const formData = new FormData();
       formData.append('cacheControl', '3600');
-      formData.append('', file);
+      formData.append('', body);
       request.send(formData);
     });
   })();
@@ -104,6 +109,7 @@ export async function uploadFileWithProgress(
   path: string,
   file: Blob,
   onProgress?: (progress: StorageUploadProgress) => void,
+  contentType?: string,
 ) {
-  return startUploadFileWithProgress(supabase, bucket, path, file, onProgress).promise;
+  return startUploadFileWithProgress(supabase, bucket, path, file, onProgress, contentType).promise;
 }

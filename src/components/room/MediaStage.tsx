@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent, type FormEvent } from 'react';
 import dynamic from 'next/dynamic';
-import { associateTemporaryMediaSubtitle, cleanupUnregisteredTemporaryMedia, getActiveTemporaryMedia, logCastHistory, logTemporaryMedia, getSignedRoomMediaUrl } from '@/actions/media';
+import { attachRoomMediaSubtitle, cleanupUnregisteredTemporaryMedia, getActiveTemporaryMedia, logCastHistory, logTemporaryMedia, resolveRoomMedia } from '@/actions/media';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import { createRoomObjectPath, assertRoomFileInput, ROOM_ATTACHMENT_BUCKET } from '@/lib/room-file-contract';
+import { validateRoomMediaUpload, validateRoomSubtitleUpload, withRoomStorageMimeType } from '@/lib/room-file-validation';
 import { startUploadFileWithProgress } from '@/lib/storage';
 import { createClient } from '@/utils/supabase/client';
 
@@ -152,13 +153,10 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     handlePointerMove,
     handlePointerUp,
     handleKeyDown,
-  } = useRoomPanelResize(roomId, 'cast-height', { minHeight: 280, maxHeight: 760 });
+  } = useRoomPanelResize(roomId, currentUserId, 'cast-height', { minHeight: 280, maxHeight: 760 });
   const canCast = canControlMedia;
   const activeMediaUrl = mediaState?.url ?? null;
-  const activeMediaFilePath = mediaState?.filePath ?? null;
   const activeSubtitleUrl = mediaState?.subtitleUrl ?? null;
-  const [resolvedMedia, setResolvedMedia] = useState<{ path: string; url: string } | null>(null);
-  const [resolvedSubtitle, setResolvedSubtitle] = useState<{ path: string; url: string } | null>(null);
   const mediaTitle = mediaState?.title ?? 'External Stream';
   const activeMediaId = mediaState?.mediaId;
   const activeSourceType = mediaState?.sourceType;
@@ -169,14 +167,12 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
   const displayedVolume = canCast ? volume : (localVolume ?? volume);
   const displayedMuted = canCast ? muted : (localMuted ?? muted);
   const playbackSpeed = mediaState?.speed ?? 1;
-  const playbackUrl = activeMediaFilePath
-    ? (resolvedMedia?.path === activeMediaFilePath ? resolvedMedia.url : null)
-    : activeMediaUrl;
-  const playbackSubtitleUrl = activeSubtitleUrl?.startsWith(`${roomId}/`)
-    ? (resolvedSubtitle?.path === activeSubtitleUrl ? resolvedSubtitle.url : null)
-    : activeSubtitleUrl;
+  // Each viewer's URL comes from its own resolveRoomMedia call (see
+  // useRoomSync); Broadcast carries only the media id.
+  const playbackUrl = activeMediaUrl;
+  const playbackSubtitleUrl = activeSubtitleUrl;
   const isReady = playbackUrl !== null && readyCastId === activeCastId;
-  const isFlacPlayback = isFlacPath(activeMediaFilePath) || isFlacPath(playbackUrl);
+  const isFlacPlayback = isFlacPath(mediaTitle) || isFlacPath(playbackUrl);
   const flacPlaybackSupported = useSyncExternalStore(
     subscribeToNothing,
     () => !isFlacPlayback || document.createElement('audio').canPlayType('audio/flac') !== '',
@@ -184,30 +180,6 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
   );
   const playerKey = playbackUrl && activeCastId ? `${activeCastId}:${retryNonce}` : 'empty';
   const displayedPlayerError = errorUrl === playbackUrl ? playerError : null;
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!activeMediaFilePath) {
-      return () => { cancelled = true; };
-    }
-    void getSignedRoomMediaUrl(activeMediaFilePath, roomId).then((result) => {
-      if (cancelled) return;
-      if (result.success && result.url) setResolvedMedia({ path: activeMediaFilePath, url: result.url });
-      else setPlayerError(result.error ?? 'Unable to authorize playback.');
-    });
-    return () => { cancelled = true; };
-  }, [activeMediaFilePath, roomId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!activeSubtitleUrl?.startsWith(`${roomId}/`)) {
-      return () => { cancelled = true; };
-    }
-    void getSignedRoomMediaUrl(activeSubtitleUrl, roomId).then((result) => {
-      if (!cancelled && result.success && result.url) setResolvedSubtitle({ path: activeSubtitleUrl, url: result.url });
-    });
-    return () => { cancelled = true; };
-  }, [activeSubtitleUrl, roomId]);
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -277,13 +249,13 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
   }, [broadcastEvent, roomId]);
 
   const forceSyncToRoom = useCallback(() => {
-    if (!canCast || (!activeMediaUrl && !activeMediaFilePath)) return;
+    if (!canCast || !activeMediaUrl) return;
     if (mediaState?.source === 'restored' || (mediaState?.controllerId && mediaState.controllerId !== currentUserId)) {
       broadcastEvent('request_sync');
       return;
     }
     broadcastEvent('force_sync', {
-      ...(activeMediaFilePath ? { filePath: activeMediaFilePath } : { url: activeMediaUrl }),
+      url: activeMediaUrl,
       subtitleUrl: activeSubtitleUrl,
       title: mediaTitle,
       time: safeGetTime(),
@@ -295,12 +267,12 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
       muted,
       volume,
     });
-  }, [activeCastId, activeMediaFilePath, activeMediaId, activeMediaUrl, activeSourceType, activeSubtitleUrl, broadcastEvent, canCast, currentUserId, mediaState?.controllerId, mediaState?.source, mediaTitle, muted, playbackSpeed, playing, volume]);
+  }, [activeCastId, activeMediaId, activeMediaUrl, activeSourceType, activeSubtitleUrl, broadcastEvent, canCast, currentUserId, mediaState?.controllerId, mediaState?.source, mediaTitle, muted, playbackSpeed, playing, volume]);
 
   const broadcastPlayback = (eventType: 'play' | 'pause' | 'seek' | 'mute', time = safeGetTime(), nextPlaying = playing, nextSpeed = playbackSpeed, nextMuted = muted, nextVolume = volume) => {
     if (!canCast || mediaState?.source === 'restored') return;
     broadcastEvent(eventType, {
-      ...(activeMediaFilePath ? { filePath: activeMediaFilePath } : { url: activeMediaUrl }),
+      url: activeMediaUrl,
       title: mediaTitle,
       time,
       speed: nextSpeed,
@@ -400,20 +372,24 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
 
     setPlayerError(null);
     setErrorUrl(null);
-    readyCastIdRef.current = null;
-    setReadyCastId(null);
     setCastInput('');
-    broadcastEvent('cast', { url: cast.url, title: cast.title, speed: 1, playing: true, sourceType: 'url' });
 
-    // Casting remains immediate even if history persistence is slow or the
-    // history table is temporarily unavailable.
+    // Register first. Members receive only the resulting media id over
+    // Broadcast and resolve the URL themselves under their own authorization,
+    // so an unregistered cast cannot be shared with the room.
     setIsCastingUrl(true);
     try {
       const result = await logCastHistory(roomId, cast.title, cast.url);
-      if (!result.success) setHistoryError(result.error ?? 'The cast started, but history could not be saved.');
-      else await loadHistory();
+      if (!result.success || !result.mediaId) {
+        setHistoryError(result.error ?? 'The cast could not be shared with the room.');
+        return;
+      }
+      readyCastIdRef.current = null;
+      setReadyCastId(null);
+      broadcastEvent('cast', { url: cast.url, title: cast.title, mediaId: result.mediaId, speed: 1, playing: true, sourceType: 'url' });
+      await loadHistory();
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : 'The cast started, but history could not be saved.');
+      setHistoryError(error instanceof Error ? error.message : 'The cast could not be shared with the room.');
     } finally {
       setIsCastingUrl(false);
     }
@@ -426,10 +402,17 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     readyCastIdRef.current = null;
     setReadyCastId(null);
 
+    const resolved = await resolveRoomMedia(roomId, item.id);
+    if (!resolved.success || !resolved.media) {
+      setPlayerError(resolved.error ?? 'Unable to load this media.');
+      return;
+    }
+
     broadcastEvent('cast', {
-      ...(item.file_url.startsWith('http') ? { url: item.file_url } : { filePath: item.file_url }),
-      title: item.file_name,
-      sourceType: item.media_type === 'url' ? 'url' : 'upload',
+      url: resolved.media.url,
+      title: resolved.media.title,
+      subtitleUrl: resolved.media.subtitleUrl,
+      sourceType: resolved.media.sourceType,
       mediaId: item.id,
       speed: 1,
       playing: true,
@@ -444,15 +427,25 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
       return;
     }
 
+    const validationError = validateRoomSubtitleUpload(file);
+    if (validationError) {
+      setHistoryError(validationError);
+      if (subtitleFileRef.current) subtitleFileRef.current.value = '';
+      return;
+    }
+
     setIsUploadingSub(true);
     let filePath: string | null = null;
     try {
-      const checked = assertRoomFileInput(file, 'subtitle');
+      const mediaId = activeMediaId;
+      const checked = assertRoomFileInput(withRoomStorageMimeType(file, 'subtitle'), 'subtitle');
       filePath = createRoomObjectPath(roomId, 'subtitle', crypto.randomUUID(), checked.fileName);
-      await startUploadFileWithProgress(supabase, ROOM_ATTACHMENT_BUCKET, filePath, file).promise;
-      const result = await associateTemporaryMediaSubtitle(activeMediaId, roomId, filePath);
-      if (!result.success) throw new Error(result.error ?? 'Unable to attach subtitle.');
-      broadcastEvent('subtitle_upload', { subtitleUrl: filePath });
+      await startUploadFileWithProgress(supabase, ROOM_ATTACHMENT_BUCKET, filePath, file, undefined, checked.mimeType).promise;
+      // Bind the subtitle to its media row. Members re-resolve the media and
+      // receive their own signed subtitle URL; only the id is broadcast.
+      const result = await attachRoomMediaSubtitle(roomId, mediaId, filePath);
+      if (!result.success || !result.subtitleUrl) throw new Error(result.error ?? 'Unable to attach the subtitle.');
+      broadcastEvent('subtitle_upload', { mediaId, subtitleUrl: result.subtitleUrl });
     } catch (error) {
       if (filePath) await cleanupUnregisteredTemporaryMedia(roomId, filePath, 'subtitle').catch(() => undefined);
       alert(`Subtitle upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -466,30 +459,40 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
     const file = event.target.files?.[0];
     if (!file || !canCast || localUpload) return;
 
+    const validationError = validateRoomMediaUpload(file);
+    if (validationError) {
+      setHistoryError(validationError);
+      if (localFileRef.current) localFileRef.current.value = '';
+      return;
+    }
+
     setHistoryError(null);
     let filePath: string | null = null;
 
     try {
-      const checked = assertRoomFileInput(file, 'media');
+      const checked = assertRoomFileInput(withRoomStorageMimeType(file, 'media'), 'media');
       filePath = createRoomObjectPath(roomId, 'media', crypto.randomUUID(), checked.fileName);
       setLocalUpload({ fileName: checked.fileName, total: checked.size, loaded: 0, percent: 0, phase: 'uploading' });
       await startUploadFileWithProgress(supabase, ROOM_ATTACHMENT_BUCKET, filePath, file, (progress) => {
         setLocalUpload((current) => current ? { ...current, loaded: progress.loaded, percent: progress.percent } : current);
-      }).promise;
+      }, checked.mimeType).promise;
 
       setLocalUpload((current) => current ? { ...current, loaded: current.total, percent: 100, phase: 'saving' } : current);
       const mediaType = checked.mimeType.startsWith('audio/') ? 'audio' : 'video';
-      // Store file path (not public URL) for private storage compatibility
+      // The server verifies the stored object's type and size before
+      // registering it, and returns the id members resolve the media by.
       const result = await logTemporaryMedia(roomId, checked.fileName, filePath, mediaType, checked.mimeType, checked.size);
-      if (!result.success) throw new Error(result.error ?? 'Unable to save the uploaded media.');
-      const media = result.media as { id?: string } | null;
+      if (!result.success || !result.mediaId) throw new Error(result.error ?? 'Unable to save the uploaded media.');
+      const resolved = await resolveRoomMedia(roomId, result.mediaId);
+      if (!resolved.success || !resolved.media) throw new Error(resolved.error ?? 'Unable to generate playback URL.');
 
-      // Realtime carries only the storage path. Each member obtains a
-      // short-lived authorized URL locally, never from another client.
+      // The file is immediately available to the room and is also added to
+      // the room's temporary media history. Only the media id is broadcast;
+      // the signed URL stays on this client.
       broadcastEvent('cast', {
-        filePath,
-        title: checked.fileName,
-        mediaId: media?.id,
+        url: resolved.media.url,
+        title: resolved.media.title,
+        mediaId: result.mediaId,
         sourceType: 'upload',
         speed: 1,
         playing: true,

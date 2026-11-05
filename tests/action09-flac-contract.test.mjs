@@ -26,11 +26,17 @@ test('Action 09 keeps FLAC playback private and reports unsupported browser play
   const stage = await source('src/components/room/MediaStage.tsx');
   const sync = await source('src/hooks/useRoomSync.ts');
 
-  assert.match(stage, /getSignedRoomMediaUrl\(activeMediaFilePath, roomId\)/);
+  const contract = await source('src/lib/room-broadcast-contract.ts');
+
+  // Playback URLs are resolved per viewer from the media id under that
+  // viewer's own authorization (Action 07 D7); no URL or storage path is
+  // ever broadcast or persisted in the shared snapshot.
+  assert.match(stage, /resolveRoomMedia\(roomId, result\.mediaId\)/);
   assert.match(stage, /canPlayType\('audio\/flac'\)/);
   assert.match(stage, /This browser cannot play FLAC audio/);
-  assert.match(sync, /if \(isPrivateStorageUrl\(next\.url\)\) delete next\.url/);
-  assert.match(sync, /isSafeStoragePath\(next\.filePath\)/);
+  assert.match(sync, /resolveRoomMedia\(roomId, mediaId\)/);
+  assert.match(sync, /saveRoomRealtimeSnapshot\(roomId, snapshotType, 1, \{ eventType, payload: wirePayload \}\)/);
+  assert.doesNotMatch(contract, /\b(url|filePath|title|subtitleUrl):/);
 });
 
 test('Action 09 FLAC migrations update only configuration and validation, not storage objects', async () => {

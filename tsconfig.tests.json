@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": ".",
+    "outDir": "node_modules/.cache/omnilume-tests",
+    "types": ["node"],
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/lib/auth.ts",
+    "tests/**/*.test.ts"
+  ]
+}

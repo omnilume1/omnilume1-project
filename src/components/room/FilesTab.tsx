@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { cleanupUnregisteredTemporaryMedia, getActiveTemporaryMedia, logTemporaryMedia } from '@/actions/media';
+import { cleanupUnregisteredTemporaryMedia, getActiveTemporaryMedia, logTemporaryMedia, resolveRoomMedia } from '@/actions/media';
 import { cleanupUnregisteredRoomFile, deleteRoomFile, getRoomFileDownloadUrl, listRoomFiles, registerRoomFile, type RoomFileRow } from '@/actions/room-files';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
-import { ROOM_ATTACHMENT_BUCKET, ROOM_FILE_MIME_TYPES, assertRoomFileInput, createRoomObjectPath, isRoomMediaMimeType } from '@/lib/room-file-contract';
+import { ROOM_ATTACHMENT_BUCKET, ROOM_FILE_MIME_TYPES, assertRoomFileInput, createRoomObjectPath } from '@/lib/room-file-contract';
+import { validateRoomMediaUpload, withRoomStorageMimeType } from '@/lib/room-file-validation';
 import { startUploadFileWithProgress, type StorageUploadTask } from '@/lib/storage';
 import { createClient } from '@/utils/supabase/client';
 import OmniFileUpload from '@/components/ui/OmniFileUpload';
@@ -55,14 +56,22 @@ export default function FilesTab({ roomId, currentUserRole, canControlMedia = fa
 
   const uploadSelectedFile = async (file: File, kind: 'file' | 'media') => {
     if (!canManageFiles || upload) return;
-    const checked = assertRoomFileInput(file, kind);
+    let checked: ReturnType<typeof assertRoomFileInput>;
+    try {
+      // Media is re-typed to its storage contract type (browsers report
+      // inconsistent audio/video types); files keep the browser type.
+      checked = assertRoomFileInput(kind === 'media' ? withRoomStorageMimeType(file, 'media') : file, kind);
+    } catch (validationError) {
+      setError(validationError instanceof Error ? validationError.message : 'Unsupported file.');
+      return;
+    }
     const filePath = createRoomObjectPath(roomId, kind, crypto.randomUUID(), checked.fileName);
     setError(null); setFailedUpload(null);
     setUpload({ file, fileName: checked.fileName, path: filePath, kind, total: checked.size, loaded: 0, percent: 0, phase: 'uploading' });
     try {
       const task = startUploadFileWithProgress(supabase, ROOM_ATTACHMENT_BUCKET, filePath, file, (progress) => {
         setUpload((current) => current ? { ...current, loaded: progress.loaded, percent: progress.percent } : current);
-      });
+      }, checked.mimeType);
       activeTask.current = task;
       await task.promise;
       setUpload((current) => current ? { ...current, loaded: current.total, percent: 100, phase: 'registering' } : current);
@@ -86,13 +95,17 @@ export default function FilesTab({ roomId, currentUserRole, canControlMedia = fa
   const handlePermanentFiles = async (selected: File[]) => { for (const file of selected) await uploadSelectedFile(file, 'file'); };
   const handleMediaFiles = async (selected: File[]) => {
     for (const file of selected) {
-      if (!isRoomMediaMimeType(file.type.toLowerCase())) { setError('Temporary cast uploads must be an accepted audio or video file.'); continue; }
+      const validationError = validateRoomMediaUpload(file);
+      if (validationError) { setError(validationError); continue; }
       await uploadSelectedFile(file, 'media');
     }
   };
-  const handleCast = (media: TemporaryMedia) => {
+  const handleCast = async (media: TemporaryMedia) => {
     if (!canManageFiles) return;
-    broadcastEvent('cast', { filePath: media.file_url, title: media.file_name, sourceType: 'upload', mediaId: media.id, speed: 1, playing: true });
+    // The caster resolves its own URL; Broadcast carries only the media id.
+    const resolved = await resolveRoomMedia(roomId, media.id);
+    if (!resolved.success || !resolved.media) { setError(resolved.error ?? 'Unable to load this media.'); return; }
+    broadcastEvent('cast', { url: resolved.media.url, title: resolved.media.title, subtitleUrl: resolved.media.subtitleUrl, sourceType: resolved.media.sourceType, mediaId: media.id, speed: 1, playing: true });
   };
   const downloadFile = async (file: RoomFileRow) => {
     try { const { url } = await getRoomFileDownloadUrl(file.id); window.open(url, '_blank', 'noopener,noreferrer'); }
@@ -111,7 +124,7 @@ export default function FilesTab({ roomId, currentUserRole, canControlMedia = fa
         {loadingFiles ? <p className="py-4 text-center text-xs text-neutral-500">Loading files…</p> : files.length === 0 ? <p className="rounded-xl border border-dashed border-neutral-800 px-3 py-5 text-center text-xs text-neutral-500">No permanent files yet.</p> : <div className="space-y-2">{files.map((file) => <div key={file.id} className="rounded-xl border border-neutral-800 bg-[#121212] p-3"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate text-xs font-bold text-white" title={file.original_name}>{file.original_name}</p><p className="mt-1 text-[10px] text-neutral-500">{file.mime_type} · {formatBytes(file.size_bytes)}</p></div><div className="flex shrink-0 gap-2"><button type="button" onClick={() => void downloadFile(file)} className="rounded bg-indigo-600/20 px-2 py-1 text-[10px] font-bold text-indigo-300 hover:bg-indigo-600/30">Download</button>{canManageFiles && <button type="button" onClick={() => void removeFile(file)} className="rounded bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-300 hover:bg-red-500/20">Delete</button>}</div></div>{file.retention_state === 'delete_pending' && <p className="mt-2 text-[10px] text-amber-300">Deletion is awaiting a retry.</p>}</div>)}</div>}
       </section>
       <section aria-labelledby="temporary-media-heading"><div className="mb-3"><h4 id="temporary-media-heading" className="text-xs font-bold text-white">Temporary cast media</h4><p className="text-[10px] text-neutral-500">Expires from the server-authoritative room deadline.</p></div>
-        {mediaList.length === 0 ? <p className="rounded-xl border border-dashed border-neutral-800 px-3 py-5 text-center text-xs text-neutral-500">No temporary media uploaded yet.</p> : <div className="space-y-2">{mediaList.map((media) => <div key={media.id} className="rounded-xl border border-neutral-800 bg-[#121212] p-3"><div className="flex items-start justify-between gap-2"><span className="truncate pr-2 text-xs font-bold text-white" title={media.file_name}>{media.file_name}</span><span className="text-[9px] font-bold uppercase tracking-wider text-neutral-500">{media.media_type}</span></div><p className="mt-1 text-[10px] text-neutral-500">{media.mime_type ?? 'Legacy media'}{typeof media.file_size === 'number' ? ` · ${formatBytes(media.file_size)}` : ''}</p><div className="mt-2 flex items-center justify-between gap-2"><span className="text-[10px] text-neutral-500">{hoursUntil(media.expires_at)}h left</span>{canManageFiles && <button type="button" onClick={() => handleCast(media)} className="rounded bg-indigo-600/20 px-3 py-1.5 text-[10px] font-bold text-indigo-400 hover:bg-indigo-600/30">Cast to room</button>}</div></div>)}</div>}
+        {mediaList.length === 0 ? <p className="rounded-xl border border-dashed border-neutral-800 px-3 py-5 text-center text-xs text-neutral-500">No temporary media uploaded yet.</p> : <div className="space-y-2">{mediaList.map((media) => <div key={media.id} className="rounded-xl border border-neutral-800 bg-[#121212] p-3"><div className="flex items-start justify-between gap-2"><span className="truncate pr-2 text-xs font-bold text-white" title={media.file_name}>{media.file_name}</span><span className="text-[9px] font-bold uppercase tracking-wider text-neutral-500">{media.media_type}</span></div><p className="mt-1 text-[10px] text-neutral-500">{media.mime_type ?? 'Legacy media'}{typeof media.file_size === 'number' ? ` · ${formatBytes(media.file_size)}` : ''}</p><div className="mt-2 flex items-center justify-between gap-2"><span className="text-[10px] text-neutral-500">{hoursUntil(media.expires_at)}h left</span>{canManageFiles && <button type="button" onClick={() => void handleCast(media)} className="rounded bg-indigo-600/20 px-3 py-1.5 text-[10px] font-bold text-indigo-400 hover:bg-indigo-600/30">Cast to room</button>}</div></div>)}</div>}
       </section>
     </div>
     <div className="message-composer space-y-3">

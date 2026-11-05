@@ -9,6 +9,7 @@ import {
   type PointerEvent,
   type RefCallback,
 } from 'react';
+import { roomWorkspacePreferenceKey } from '@/lib/room-workspace-preferences';
 
 interface RoomPanelResizeOptions {
   minHeight: number;
@@ -31,6 +32,7 @@ function isMobileLayout() {
 
 export function useRoomPanelResize(
   roomId: string,
+  userId: string | null,
   storageKey: string,
   { minHeight, maxHeight }: RoomPanelResizeOptions,
 ): RoomPanelResizeResult {
@@ -39,6 +41,7 @@ export function useRoomPanelResize(
     panelNodeRef.current = node;
   }, []);
   const dragRef = useRef<{ pointerId: number; startY: number; startHeight: number } | null>(null);
+  const loadedPreferenceKeyRef = useRef<string | null>(null);
   const [panelHeight, setPanelHeight] = useState<number | null>(null);
   const [isResizing, setIsResizing] = useState(false);
 
@@ -54,19 +57,27 @@ export function useRoomPanelResize(
   }, [clampHeight]);
 
   useEffect(() => {
-    if (!roomId) return;
+    const preferenceKey = roomWorkspacePreferenceKey(roomId, userId, storageKey);
+    loadedPreferenceKeyRef.current = null;
     const timer = window.setTimeout(() => {
-      const saved = window.localStorage.getItem(`omnilume:room:${roomId}:${storageKey}`);
+      if (!preferenceKey) {
+        setPanelHeight(null);
+        return;
+      }
+      const saved = window.localStorage.getItem(preferenceKey);
       const parsed = saved ? Number(saved) : NaN;
       if (Number.isFinite(parsed)) setPanelHeight(clampHeight(parsed));
+      else setPanelHeight(null);
+      loadedPreferenceKeyRef.current = preferenceKey;
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [clampHeight, roomId, storageKey]);
+  }, [clampHeight, roomId, storageKey, userId]);
 
   useEffect(() => {
-    if (!roomId || panelHeight === null) return;
-    window.localStorage.setItem(`omnilume:room:${roomId}:${storageKey}`, String(panelHeight));
-  }, [panelHeight, roomId, storageKey]);
+    const preferenceKey = roomWorkspacePreferenceKey(roomId, userId, storageKey);
+    if (!preferenceKey || panelHeight === null || loadedPreferenceKeyRef.current !== preferenceKey) return;
+    window.localStorage.setItem(preferenceKey, String(panelHeight));
+  }, [panelHeight, roomId, storageKey, userId]);
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (isMobileLayout() || !panelNodeRef.current) return;
