@@ -40,32 +40,32 @@ Commit after each section; typecheck + lint + tests before moving on.
   the deletion policy (§9).
 
 ## 1. Action 06 — cleanup overlap bug
-- [ ] Overlapping cleanup runs: FK 23503 on `room_cleanup_jobs` upsert (room
+- [x] (b84f68f) Overlapping cleanup runs: FK 23503 on `room_cleanup_jobs` upsert (room
       already destroyed) is "already destroyed", skipped and not a failure;
       real failures still 207/500.
-- [ ] Unit tests: overlap case, real failure case.
-- [ ] Leave rooms `023cab03…` and `3ffa29d8…` (pending requests) untouched.
+- [x] (b84f68f) Unit tests: overlap case, real failure case (tests/room-cleanup.test.ts).
+- [x] Leave rooms `023cab03…` and `3ffa29d8…` (pending requests) untouched (no data change made).
 - [ ] Ledger: Action 06 cron evidence (owner) + fix.
 
 ## 2. Site-owner recovery (security-critical) + §9 lifecycle gaps
-- [ ] `site_owners` table (PK → auth.users), RLS (select own row only, no
+- [x] (38b1503) `site_owners` table (PK → auth.users), RLS (select own row only, no
       client writes), seeded with the two IDs that exist; fails if neither.
-- [ ] `is_site_owner(uid)` STABLE SECURITY DEFINER.
-- [ ] `review_recovery_request`: site owners only; pending; inside window;
+- [x] (38b1503) `is_site_owner(uid)` STABLE SECURITY DEFINER.
+- [x] (38b1503) `review_recovery_request`: site owners only; pending; inside window;
       approve → 7-day reopen + reviewed_by/at; reject → requester notified;
       irreversible rooms unrecoverable for everyone.
-- [ ] Requests: any approved member of the expired recoverable room, one
+- [x] (38b1503) Requests: any approved member of the expired recoverable room, one
       pending per user per room, inside the window only (DB + action).
-- [ ] Pending requests keep the room out of cleanup (unchanged, re-verified).
-- [ ] Notifications: site owners on a new request; requester on decision.
-- [ ] `/admin/recovery` (site owners only, server guard → 404): room name,
+- [x] (38b1503) Pending requests keep the room out of cleanup (unchanged, re-verified).
+- [x] (38b1503) Notifications: site owners on a new request; requester on decision.
+- [x] (38b1503) `/admin/recovery` (site owners only, server guard → 404): room name,
       expired at, requester, window left, Approve/Reject.
-- [ ] Room owners/admins see only their own request status.
-- [ ] §9 permanent rooms: owner schedules deletion (7-day grace), can cancel;
+- [x] (38b1503) Room owners/admins see only their own request status.
+- [x] (38b1503) §9 permanent rooms: owner schedules deletion (7-day grace), can cancel;
       members notified; cleanup deletes after the grace period.
-- [ ] §9 deletion policy shown before joining (explore cards, invite/code
+- [x] (38b1503) §9 deletion policy shown before joining (explore cards, invite/code
       preview, room info).
-- [ ] Tests: unit; RPC probe (member/admin/owner/anon denied; disposable site
+- [x] (38b1503) Tests: unit; RPC probe (member/admin/owner/anon denied; disposable site
       owner in a rolled-back transaction allowed; double review, after
       window, non-pending).
 

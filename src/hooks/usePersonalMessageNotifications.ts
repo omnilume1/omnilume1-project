@@ -59,7 +59,12 @@ interface NotificationState {
   storageListener: ((event: StorageEvent) => void) | null;
   stopTimer: ReturnType<typeof setTimeout> | null;
   snapshot: PersonalMessageNotificationSnapshot;
+  roomNotificationListeners: Set<(change: RoomNotificationChange) => void>;
 }
+
+// Room notifications (Action 08 bell) ride the same per-user channel; RLS
+// limits each change to its recipient.
+export type RoomNotificationChange = { eventType: 'INSERT' | 'UPDATE'; row: Record<string, unknown> };
 
 const states = new Map<string, NotificationState>();
 const EMPTY_SNAPSHOT: PersonalMessageNotificationSnapshot = { unreadCount: 0, toasts: [] };
@@ -84,6 +89,7 @@ function getState(userId: string) {
     storageListener: null,
     stopTimer: null,
     snapshot: EMPTY_SNAPSHOT,
+    roomNotificationListeners: new Set(),
   };
   loadUnread(state);
   updateSnapshot(state);
@@ -205,11 +211,23 @@ function startState(state: NotificationState) {
 
   const supabase = createClient();
   state.channel = supabase
-    .channel(`personal_message_notifications_${state.userId}`)
+    // This project allows only private channels; the topic is authorized for
+    // its own user only (migration 20261105170000).
+    .channel(`personal_message_notifications_${state.userId}`, { config: { private: true } })
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${state.userId}` },
       (payload: unknown) => handleIncomingMessage(state, payload),
+    )
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'room_notifications', filter: `recipient_id=eq.${state.userId}` },
+      (payload: { new?: Record<string, unknown> }) => dispatchRoomNotificationChange(state, 'INSERT', payload),
+    )
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'room_notifications', filter: `recipient_id=eq.${state.userId}` },
+      (payload: { new?: Record<string, unknown> }) => dispatchRoomNotificationChange(state, 'UPDATE', payload),
     )
     .subscribe();
 
@@ -223,6 +241,28 @@ function startState(state: NotificationState) {
     };
     window.addEventListener('storage', state.storageListener);
   }
+}
+
+function dispatchRoomNotificationChange(state: NotificationState, eventType: RoomNotificationChange['eventType'], payload: { new?: Record<string, unknown> }) {
+  const row = payload?.new;
+  if (!row || row.recipient_id !== state.userId) return;
+  state.roomNotificationListeners.forEach((listener) => listener({ eventType, row }));
+}
+
+// Live room-notification changes for the signed-in user over the shared
+// channel. Holding a subscription keeps that channel open.
+export function subscribeToRoomNotificationChanges(userId: string, listener: (change: RoomNotificationChange) => void) {
+  const state = getState(userId);
+  state.roomNotificationListeners.add(listener);
+  const release = subscribeToState(userId, () => undefined);
+  return () => {
+    state.roomNotificationListeners.delete(listener);
+    release();
+  };
+}
+
+export function getSignedInUserIdForNotifications() {
+  return resolveSignedInUserId();
 }
 
 function stopState(state: NotificationState) {

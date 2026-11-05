@@ -2,6 +2,7 @@ import Link from "next/link";
 import OmniLogo from "@/components/ui/OmniLogo";
 import { OmniIcon } from "@/components/ui/OmniIcon";
 import type { CurrentAccount } from '@/lib/current-account';
+import NotificationBell from "@/components/ui/NotificationBell";
 
 function initials(value: string) {
   const parts = value.trim().split(/\s+/).filter(Boolean);
@@ -24,10 +25,7 @@ export function Navbar({ account }: { account: CurrentAccount | null }) {
           <OmniIcon name="search" size={17} />
         </Link>
         {account ? <>
-          <Link href="/home#notifications" className="icon-button" aria-label="Notifications" title="Notifications">
-            <OmniIcon name="bell" size={17} />
-            <span className="notification-dot" />
-          </Link>
+          <NotificationBell />
           <Link href={profileHref} className="avatar avatar-small public-account-avatar" aria-label="Open your profile" title="Profile">
             {account.avatarUrl ? <img src={account.avatarUrl} alt="" /> : initials(account.displayName)}
           </Link>
