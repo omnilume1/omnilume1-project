@@ -173,3 +173,13 @@ test('room chat reuses the existing realtime feed and reads every new column', (
   assert.match(sync, /const ROOM_MESSAGE_FIELDS = \['id', 'sender_id', 'content', 'is_deleted', 'created_at', 'edited_at', 'reply_to_id', 'pinned_at', 'pinned_by', 'reaction_summary'\] as const;/);
   for (const column of ROOM_MESSAGE_COLUMNS.split(', ')) assert.ok(sync.includes(`'${column}'`), column);
 });
+
+test('walkthrough regressions: read markers are really sent and names load without the action queue', () => {
+  const chat = read('src/components/room/RoomChat.tsx');
+  // Supabase builders are lazy: an RPC whose promise is never consumed is never sent.
+  assert.doesNotMatch(chat, /void supabase\.rpc\('mark_room_read', \{ p_room_id: roomId \}\);/);
+  assert.equal((chat.match(/rpc\('mark_room_read', \{ p_room_id: roomId \}\)\.then\(/g) ?? []).length, 2, 'throttled marker and flush on leave');
+  assert.match(chat, /rpc\('get_room_member_identities', \{ p_room_id: roomId \}\)/);
+  assert.match(chat, /identitiesLoaded \? 'Former member' : 'Member'/);
+  assert.doesNotMatch(chat, /getRoomControlState|getRoomMemberIdentities/);
+});

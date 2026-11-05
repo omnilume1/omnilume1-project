@@ -203,7 +203,9 @@ export default function MessagesWorkspace() {
     if (!currentUserId) return;
     const supabase = createClient();
     const channel = supabase
-      .channel('messages_inbox')
+      // Private-only Realtime: a per-user topic only this user may join
+      // (migration 20261105210000).
+      .channel(`messages_inbox_${currentUserId}`, { config: { private: true } })
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'message_requests', filter: `recipient_id=eq.${currentUserId}` },

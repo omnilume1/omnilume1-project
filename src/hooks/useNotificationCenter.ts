@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getMyNotificationPreferences, getMyNotifications, markNotificationsRead, setNotificationPreference } from '@/actions/notification-center';
+import { getMyNotificationPreferences, getMyNotifications, markNotificationsRead, setNotificationPreference } from '@/lib/notification-center-data';
 import {
   activeDoNotDisturb,
   adjustUnread,

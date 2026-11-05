@@ -87,7 +87,21 @@ async function main() {
   const aChannel = listen(A.client, 'snoop', A.id, aSnoop);
   for (let waited = 0; waited < 20_000 && !(feeds.own && feeds.snoop); waited += 250) await sleep(250);
   record('A08', 'a user joins their own private notification channel', statuses.own === 'SUBSCRIBED' && feeds.own === 'ok', `${statuses.own} feed=${feeds.own ?? 'none'}`);
-  record('A08', 'another user cannot join that private channel', (history.hijack ?? []).length > 0 && !(history.hijack ?? []).includes('SUBSCRIBED') && String(history.hijack[0]).startsWith('CHANNEL_ERROR'), (history.hijack ?? ['no answer']).join(' > ').slice(0, 120));
+  // The inbox and private-chat channels are private too (20261105210000).
+  const joinOnce = (client, topic) => new Promise((done) => {
+    const channel = client.channel(topic, { config: { private: true } });
+    const timer = setTimeout(() => finish('NO_RESPONSE'), 10_000);
+    let settled = false;
+    function finish(status) { if (settled) return; settled = true; clearTimeout(timer); void client.removeChannel(channel); done(status); }
+    channel.subscribe((status) => { if (['SUBSCRIBED', 'CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) finish(status); });
+  });
+  const ownChat = (await A.client.from('private_chats').select('id').limit(1)).data?.[0]?.id;
+  const foreignChat = (await service.from('private_chats').select('id, user_one, user_two').limit(50)).data?.find((row) => row.user_one !== A.id && row.user_two !== A.id)?.id;
+  record('A08', 'a user joins their own private inbox channel', await joinOnce(A.client, `messages_inbox_${A.id}`) === 'SUBSCRIBED');
+  record('A08', 'another user\'s inbox channel is refused', await joinOnce(A.client, `messages_inbox_${B.id}`) === 'CHANNEL_ERROR');
+  if (ownChat) record('A08', 'a participant joins their private chat channel', await joinOnce(A.client, `chat_${ownChat}`) === 'SUBSCRIBED');
+  if (foreignChat) record('A08', 'a non-participant cannot join a private chat channel', await joinOnce(A.client, `chat_${foreignChat}`) === 'CHANNEL_ERROR');
+  record('A08', 'another user cannot join that private channel',(history.hijack ?? []).length > 0 && !(history.hijack ?? []).includes('SUBSCRIBED') && String(history.hijack[0]).startsWith('CHANNEL_ERROR'), (history.hijack ?? ['no answer']).join(' > ').slice(0, 120));
 
   try {
     await addMember(A, B, R1);

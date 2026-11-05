@@ -137,7 +137,9 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [personalLayout, setPersonalLayout] = useState<RoomLayout | null>(null);
   const [personalTheme, setPersonalTheme] = useState<RoomTheme | null>(null);
   const [homeChatWidth, setHomeChatWidth] = useState<number>(HOME_CHAT_WIDTH.initial);
-  const [stageChatOpen, setStageChatOpen] = useState(false);
+  // The panel a member opened on demand belongs to the layout it was opened
+  // in, so choosing Stage focus always starts with the stage filling the room.
+  const [stageChatOpenLayout, setStageChatOpenLayout] = useState<RoomLayout | null>(null);
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
   const workspacePreferencesLoadedRef = useRef<string | null>(null);
   const workspaceModeRef = useRef<'home' | 'stage'>('home');
@@ -427,11 +429,11 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const tool = effectiveTool(activeTool, featureFlags);
   const layout = effectiveLayout(appearance, personalLayout);
   const theme = effectiveTheme(appearance, personalTheme);
-  const sidePanel = sidePanelState(activity, layout, stageChatOpen);
+  const sidePanel = sidePanelState(activity, layout, stageChatOpenLayout === layout);
   useEffect(() => { workspaceModeRef.current = sidePanel.mode; }, [sidePanel.mode]);
   const openTool = (next: RoomTool) => {
     setActiveTool(next);
-    setStageChatOpen(true);
+    setStageChatOpenLayout(layout);
   };
   const isHomeMode = sidePanel.mode === 'home';
   const resizeBounds = isHomeMode ? { min: HOME_CHAT_WIDTH.min, max: HOME_CHAT_WIDTH.max, value: homeChatWidth } : { min: MIN_SIDEBAR_WIDTH, max: MAX_SIDEBAR_WIDTH, value: sidebarWidth };
@@ -761,7 +763,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             <div className="chat-topbar shrink-0">
               <h3 className="font-medium text-sm text-white uppercase tracking-wider">{tool}</h3>
               {layout === 'stage' && !isHomeMode && (
-                <button type="button" onClick={() => setStageChatOpen(false)} className="room-panel-close" aria-label="Hide panel" title="Hide panel"><OmniIcon name="close" size={13} /></button>
+                <button type="button" onClick={() => setStageChatOpenLayout(null)} className="room-panel-close" aria-label="Hide panel" title="Hide panel"><OmniIcon name="close" size={13} /></button>
               )}
             </div>
             <div className="flex-1 flex flex-col overflow-hidden min-w-0">
@@ -772,7 +774,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           </div>
         </aside>
         {layout === 'stage' && !isHomeMode && !sidePanel.visible && (
-          <button type="button" className="room-panel-reopen" onClick={() => setStageChatOpen(true)} aria-label={`Show ${tool}`}><OmniIcon name={tool === 'files' ? 'file' : tool === 'members' ? 'users' : 'message'} size={16} /><span>Show {tool}</span></button>
+          <button type="button" className="room-panel-reopen" onClick={() => setStageChatOpenLayout(layout)} aria-label={`Show ${tool}`}><OmniIcon name={tool === 'files' ? 'file' : tool === 'members' ? 'users' : 'message'} size={16} /><span>Show {tool}</span></button>
         )}
       </div>
       </div>

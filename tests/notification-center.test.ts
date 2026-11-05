@@ -119,3 +119,14 @@ test('the bell is an anchored, accessible popover on the shared realtime channel
   assert.equal(relativeTime('2026-11-05T09:59:50Z', Date.parse('2026-11-05T10:00:00Z')), 'just now');
   assert.equal(relativeTime('2026-11-05T09:00:00Z', Date.parse('2026-11-05T10:00:00Z')), '1h ago');
 });
+
+test('walkthrough regressions: the bell is not queued behind server actions and floats above the room', () => {
+  const hook = read('src/hooks/useNotificationCenter.ts');
+  assert.match(hook, /from '@\/lib\/notification-center-data';/);
+  const data = read('src/lib/notification-center-data.ts');
+  assert.doesNotMatch(data, /'use server'/);
+  assert.match(data, /rpc\('mark_room_notifications_read', \{ p_ids: ids \}\)/);
+  assert.match(data, /rpc\('set_notification_preference'/);
+  const css = read('src/app/globals.css');
+  assert.match(css, /\.room-header \{ position: relative; z-index: 60;/, 'header popovers paint above the workspace (modals use z-70+)');
+});

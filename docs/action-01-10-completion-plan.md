@@ -107,11 +107,11 @@ Commit after each section; typecheck + lint + tests before moving on.
       server/RLS/realtime (re-verify).
 
 ## 6. Action 10 — media metadata
-- [ ] Provider-neutral metadata from embedded tags (MP3 ID3, FLAC, MP4/M4A)
+- [x] (718c861) Provider-neutral metadata from embedded tags (MP3 ID3, FLAC, MP4/M4A)
       + filename fallback; artwork thumbnail; cached with the media row;
       attribution ("from file tags"/"from file name"); generated fallback art.
 - [ ] Subtitles/audio tracks re-verified.
-- [ ] PDF-share notification (section 3/4).
+- [x] (bfb9d2e) PDF-share notification (section 3/4).
 
 ## Verification
 - [ ] typecheck, lint, all tests, production build, route smoke.

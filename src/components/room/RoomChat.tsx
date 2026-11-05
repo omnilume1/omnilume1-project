@@ -1,12 +1,9 @@
 'use client';
 
-import { unwrapAction } from '@/lib/action-result';
 import { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo, useId, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { deleteMessageForEveryone } from '@/actions/chat';
-import { getRoomControlState } from '@/actions/room-controls';
-import { getRoomMemberIdentities } from '@/actions/members';
 import { isIsoTimestamp, isUuid, isValidRoomMessageContent, ROOM_MESSAGE_MAX_CHARS } from '@/lib/message-limits';
 import { formatGifMessage, giphyImageUrl, parseGifMessage } from '@/lib/gif-message';
 import {
@@ -98,6 +95,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
   const [newMessage, setNewMessage] = useState('');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [identities, setIdentities] = useState<MemberIdentity[]>([]);
+  const [identitiesLoaded, setIdentitiesLoaded] = useState(false);
   const [canPin, setCanPin] = useState(false);
   const [pinnedExtra, setPinnedExtra] = useState<Record<string, RoomChatMessage>>({});
   const [pinnedIndex, setPinnedIndex] = useState(0);
@@ -158,7 +156,8 @@ export default function RoomChat({ roomId }: RoomChatProps) {
     const run = () => {
       lastMarkReadRef.current = Date.now();
       markReadTimerRef.current = null;
-      void supabase.rpc('mark_room_read', { p_room_id: roomId });
+      // Builders are lazy: the request is sent only when the promise is consumed.
+      void supabase.rpc('mark_room_read', { p_room_id: roomId }).then(() => undefined, () => undefined);
     };
     const wait = MARK_READ_INTERVAL_MS - (Date.now() - lastMarkReadRef.current);
     if (wait <= 0) run();
@@ -170,10 +169,14 @@ export default function RoomChat({ roomId }: RoomChatProps) {
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
-      if (markReadTimerRef.current !== null) window.clearTimeout(markReadTimerRef.current);
-      markReadTimerRef.current = null;
+      // Leaving the chat flushes a pending (throttled) read marker.
+      if (markReadTimerRef.current !== null) {
+        window.clearTimeout(markReadTimerRef.current);
+        markReadTimerRef.current = null;
+        void supabase.rpc('mark_room_read', { p_room_id: roomId }).then(() => undefined, () => undefined);
+      }
     };
-  }, [markRead]);
+  }, [markRead, roomId, supabase]);
 
   useEffect(() => {
     let isMounted = true;
@@ -323,23 +326,36 @@ export default function RoomChat({ roomId }: RoomChatProps) {
     return () => window.clearTimeout(timer);
   }, [markRead, roomMessageEvents]);
 
+  // Announcements are readable by approved members while the room has them
+  // enabled (RLS); read directly so chat does not queue behind server actions.
   useEffect(() => {
     let active = true;
-    void getRoomControlState(roomId).then(unwrapAction).then((state) => {
-      if (active) setAnnouncements((state.announcements ?? []) as RoomAnnouncementMessage[]);
-    }).catch(() => undefined);
+    void (async () => {
+      const { data, error } = await supabase
+        .from('room_announcements')
+        .select('id, body, is_pinned, created_at')
+        .eq('room_id', roomId)
+        .order('is_pinned', { ascending: false })
+        .order('created_at', { ascending: false });
+      if (active && !error) setAnnouncements((data ?? []) as RoomAnnouncementMessage[]);
+    })();
     return () => { active = false; };
-  }, [roomId, roomControlVersion]);
+  }, [roomControlVersion, roomId, supabase]);
 
   // Names for senders, replies and @mention suggestions (membership changes
-  // arrive as room control events).
+  // arrive as room control events). Read straight from the
+  // membership-checked RPC rather than a server action, so the chat does not
+  // wait behind the room page's queued server actions.
   useEffect(() => {
     let active = true;
-    void getRoomMemberIdentities(roomId).then(unwrapAction).then((rows) => {
-      if (active) setIdentities((rows ?? []) as MemberIdentity[]);
-    }).catch(() => undefined);
+    void (async () => {
+      const { data, error } = await supabase.rpc('get_room_member_identities', { p_room_id: roomId });
+      if (!active || error) return;
+      setIdentities((Array.isArray(data) ? data : []) as MemberIdentity[]);
+      setIdentitiesLoaded(true);
+    })();
     return () => { active = false; };
-  }, [roomId, roomControlVersion]);
+  }, [roomControlVersion, roomId, supabase]);
 
   // Pin controls are shown to members who manage announcements; the server
   // re-checks on every pin (set_room_message_pin).
@@ -379,9 +395,10 @@ export default function RoomChat({ roomId }: RoomChatProps) {
     })();
   }, [messages, messagesById, replyTargets, roomId, supabase]);
 
+  // "Former member" only once names have loaded and the sender is not among them.
   const senderName = useCallback((userId: string) => (
-    userId === me ? 'You' : memberLabel(identityById.get(userId), 'Former member')
-  ), [identityById, me]);
+    userId === me ? 'You' : memberLabel(identityById.get(userId), identitiesLoaded ? 'Former member' : 'Member')
+  ), [identitiesLoaded, identityById, me]);
 
   const highlight = useCallback((messageId: string) => {
     const element = document.getElementById(`message-${messageId}`);

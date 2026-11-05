@@ -232,7 +232,9 @@ export function usePrivateChat(chatId: string | null, sharedKey: CryptoKey | nul
     void fetchHistoricalMessages();
 
     const channel = supabase
-      .channel(`chat_${chatId}`)
+      // Private-only Realtime: only the two participants may join
+      // (migration 20261105210000).
+      .channel(`chat_${chatId}`, { config: { private: true } })
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
