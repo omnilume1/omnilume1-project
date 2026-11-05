@@ -45,9 +45,11 @@ export async function getRecoveryRequestStatus(roomId: string) {
   }
 }
 
+export type RecoveryRequestWithRequester = RecoveryRequest & { requester_label: string };
+
 export async function getRoomRecoveryRequests(roomId: string) {
   try {
-    const { supabase } = await requireUser();
+    const { supabase, user } = await requireUser();
     const { data, error } = await supabase
       .from('recovery_requests')
       .select(recoveryRequestColumns)
@@ -55,7 +57,26 @@ export async function getRoomRecoveryRequests(roomId: string) {
       .order('created_at', { ascending: true });
 
     if (error) throw new Error(error.message);
-    return { success: true, requests: (data ?? []) as RecoveryRequest[] };
+    const requests = (data ?? []) as RecoveryRequest[];
+    // Reviewers see who asked by name (public profile fields only), never a raw id.
+    const otherIds = [...new Set(requests.map((request) => request.requester_id).filter((id) => id !== user.id))];
+    const names = new Map<string, string>();
+    if (otherIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('public_profiles')
+        .select('id, display_name, username')
+        .in('id', otherIds);
+      for (const profile of profiles ?? []) {
+        names.set(profile.id, profile.display_name || (profile.username ? `@${profile.username}` : 'a room admin'));
+      }
+    }
+    return {
+      success: true,
+      requests: requests.map((request): RecoveryRequestWithRequester => ({
+        ...request,
+        requester_label: request.requester_id === user.id ? 'you' : (names.get(request.requester_id) ?? 'a room admin'),
+      })),
+    };
   } catch (error: unknown) {
     return { success: false, error: error instanceof Error ? error.message : 'Unable to load recovery requests.' };
   }

@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useState, use, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -20,8 +21,8 @@ import {
   reviewPermanentRoomRequest,
   reviewRoomRecovery,
   type PermanentRoomRequest,
-  type RecoveryRequest,
   type RecoveryRequestStatus,
+  type RecoveryRequestWithRequester,
 } from '@/actions/recovery';
 import RoomRealtimeProvider from '@/components/room/RoomRealtimeProvider';
 import RoomNotifications from '@/components/room/RoomNotifications';
@@ -86,7 +87,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryRequestStatus | 'none'>('none');
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
-  const [recoveryRequests, setRecoveryRequests] = useState<RecoveryRequest[]>([]);
+  const [recoveryRequests, setRecoveryRequests] = useState<RecoveryRequestWithRequester[]>([]);
   const [permanentRequests, setPermanentRequests] = useState<PermanentRoomRequest[]>([]);
   const [permanentSubmitting, setPermanentSubmitting] = useState(false);
   const [lifecycleActionError, setLifecycleActionError] = useState<string | null>(null);
@@ -150,7 +151,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     if (!target) return alert("Please provide a group username.");
     setConverting(true);
     try {
-      await convertRoomToGroup(roomData.id, groupUsername);
+      await convertRoomToGroup(roomData.id, groupUsername).then(unwrapAction);
       setConverting(false);
       setShowConvertModal(false);
       setConversionTarget(target);
@@ -183,7 +184,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   useEffect(() => {
     async function checkAccess() {
       try {
-        const { status, role, room } = await getRoomAccess(identifier);
+        const { status, role, room } = await getRoomAccess(identifier).then(unwrapAction);
         setAccessStatus(status as AccessStatus);
         setUserRole(role);
         if (room) {
@@ -277,6 +278,12 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     const result = await requestRoomRecovery(roomData.id);
     if (result.success) {
       setRecoveryStatus(result.request?.status ?? 'pending');
+      // Owners and admins review requests on this same screen: show the new
+      // request (with its Approve/Reject actions) without a reload.
+      if (['owner', 'admin'].includes(userRole ?? '')) {
+        const refreshed = await getRoomRecoveryRequests(roomData.id);
+        if (refreshed.success) setRecoveryRequests(refreshed.requests ?? []);
+      }
     } else {
       setRecoveryError(result.error ?? 'Unable to submit recovery request.');
     }
@@ -372,7 +379,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     setLeaving(true);
     setLeaveError(null);
     try {
-      await leaveRoom(roomData.id);
+      await leaveRoom(roomData.id).then(unwrapAction);
       clearRoomRealtimeCache(roomData.id);
       router.push('/explore');
     } catch (error) {
@@ -386,7 +393,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     setLeaving(true);
     setLeaveError(null);
     try {
-      const members = await getRoomMembersList(roomData.id) as Array<{ user_id: string; role: string; join_status: string; guest_expires_at?: string | null }>;
+      const members = await getRoomMembersList(roomData.id).then(unwrapAction) as Array<{ user_id: string; role: string; join_status: string; guest_expires_at?: string | null }>;
       const eligible = members.filter((member) => member.user_id !== roomData.created_by && member.join_status === 'approved' && member.role !== 'guest' && !member.guest_expires_at);
       if (eligible.length === 0) throw new Error('No eligible permanent member is available to receive ownership.');
       setOwnerTransferCandidates(eligible);
@@ -404,8 +411,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     setLeaving(true);
     setLeaveError(null);
     try {
-      await transferRoomOwnership(roomData.id, ownerTransferTarget);
-      await leaveRoom(roomData.id);
+      await transferRoomOwnership(roomData.id, ownerTransferTarget).then(unwrapAction);
+      await leaveRoom(roomData.id).then(unwrapAction);
       clearRoomRealtimeCache(roomData.id);
       router.push('/explore');
     } catch (error) {
@@ -484,7 +491,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           {!isIrreversible && (recoveryCopy ? <div className="w-full py-3 bg-emerald-950/40 border border-emerald-800 text-emerald-400 text-xs rounded-lg mb-4">{recoveryCopy}</div> : (userRole === 'owner' || userRole === 'admin') ? <button onClick={handleRecoveryRequest} disabled={recoverySubmitting} className="w-full py-2.5 bg-neutral-100 text-black font-semibold text-sm rounded-lg hover:bg-white disabled:cursor-wait disabled:opacity-60 mb-4">{recoverySubmitting ? 'Submitting...' : 'Request Admin Recovery'}</button> : <p className="w-full rounded-lg border border-neutral-800 bg-neutral-900/50 px-3 py-3 text-xs text-neutral-400">Only the current owner or admin can request recovery during this 7-day window.</p>)}
           {!isIrreversible && recoveryRequests.filter((request) => request.status === 'pending').map((request) => (
             <div key={request.id} className="mb-4 w-full rounded-lg border border-indigo-900/50 bg-indigo-950/20 p-3 text-left text-xs text-indigo-200">
-              <p>Recovery requested by User {request.requester_id}.</p>
+              <p>Recovery requested by {request.requester_label}.</p>
               {(userRole === 'owner' || userRole === 'admin') && <div className="mt-2 flex gap-2"><button type="button" onClick={() => void handleRecoveryReview(request.id, 'approved')} className="rounded bg-emerald-700/70 px-3 py-1.5 font-bold">Approve and reopen for 7 days</button><button type="button" onClick={() => void handleRecoveryReview(request.id, 'rejected')} className="rounded bg-red-700/70 px-3 py-1.5 font-bold">Reject</button></div>}
             </div>
           ))}

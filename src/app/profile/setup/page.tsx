@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { completeIdentitySetup } from '@/actions/auth';
@@ -45,7 +46,7 @@ export default function ProfileSetupPage() {
 
       setEmail(user.email ?? null);
       try {
-        const currentProfile = await getMyProfile();
+        const currentProfile = await getMyProfile().then(unwrapAction);
         if (active) setProfile(currentProfile as ProfileRecord | null);
       } catch {
         // A profile row may not exist yet; ProfileForm can create it safely.

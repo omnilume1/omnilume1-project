@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getRoomControlState } from '@/actions/room-controls';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
@@ -13,7 +14,7 @@ export default function RoomAnnouncementBanner({ roomId }: { roomId: string }) {
   const loaded = useRef(false);
 
   const load = useCallback(async (announcementId?: string) => {
-    const state = await getRoomControlState(roomId);
+    const state = await getRoomControlState(roomId).then(unwrapAction);
     const rows = (state.announcements ?? []) as Announcement[];
     if (!loaded.current) {
       rows.forEach((row) => seenIds.current.add(row.id));

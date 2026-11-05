@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/utils/supabase/client';
@@ -53,7 +54,7 @@ function getCachedPeerPublicKey(userId: string, peerId: string) {
   const cached = peerPublicKeyPromises.get(cacheKey);
   if (cached) return cached;
 
-  const promise = getUserPublicKey(peerId).catch((error: unknown) => {
+  const promise = getUserPublicKey(peerId).then(unwrapAction).catch((error: unknown) => {
     peerPublicKeyPromises.delete(cacheKey);
     throw error;
   });
@@ -136,7 +137,7 @@ export default function MessagesWorkspace() {
         // as a substitute for the private key.
         const publicKeyMarker = `publicKeySynced_${user.id}`;
         if (localStorage.getItem(publicKeyMarker) !== identity.publicKeyBase64) {
-          await saveUserPublicKey(identity.publicKeyBase64);
+          await saveUserPublicKey(identity.publicKeyBase64).then(unwrapAction);
           localStorage.setItem(publicKeyMarker, identity.publicKeyBase64);
         }
         setMyPrivateKey(identity.privateKey);
@@ -161,7 +162,7 @@ export default function MessagesWorkspace() {
     const requestId = inboxLoadRequestRef.current + 1;
     inboxLoadRequestRef.current = requestId;
     try {
-      const data = await getMyMessageInbox();
+      const data = await getMyMessageInbox().then(unwrapAction);
       if (inboxLoadRequestRef.current !== requestId) return;
       setInbox(data);
       setInboxStatus('ready');
@@ -317,7 +318,7 @@ export default function MessagesWorkspace() {
       const sharedKey = await getCachedSharedKey(currentUserId, contact.user_id, myPrivateKey, publicKeyBase64);
       if (beginChatRequestRef.current !== requestId) return;
       const knownChatId = chatIdOverrides[contact.user_id] ?? contact.chat_id;
-      const chatId = knownChatId ?? await getOrCreatePrivateChat(contact.user_id);
+      const chatId = knownChatId ?? await getOrCreatePrivateChat(contact.user_id).then(unwrapAction);
       if (beginChatRequestRef.current !== requestId) return;
       if (!knownChatId) {
         setChatIdOverrides((current) => ({ ...current, [contact.user_id]: chatId }));
@@ -347,10 +348,10 @@ export default function MessagesWorkspace() {
     setMemberBusy(contact.user_id, 'accept');
     setNotice(null);
     try {
-      await acceptMessageRequest(request.id);
+      await acceptMessageRequest(request.id).then(unwrapAction);
       const chatId = chatIdOverrides[contact.user_id]
         ?? contact.chat_id
-        ?? await getOrCreatePrivateChat(contact.user_id);
+        ?? await getOrCreatePrivateChat(contact.user_id).then(unwrapAction);
       setChatIdOverrides((current) => ({ ...current, [contact.user_id]: chatId }));
       setInbox((current) => {
         if (!current) return current;
@@ -380,7 +381,7 @@ export default function MessagesWorkspace() {
     setMemberBusy(contact.user_id, 'reject');
     setNotice(null);
     try {
-      await rejectMessageRequest(request.id);
+      await rejectMessageRequest(request.id).then(unwrapAction);
       updateGeneralContact(contact.user_id, (c) => ({ ...c, request: c.request ? { ...c.request, status: 'rejected' } : null }));
       setComposerFor(null);
     } catch (error: unknown) {
@@ -396,7 +397,7 @@ export default function MessagesWorkspace() {
     setMemberBusy(contact.user_id, 'send');
     setNotice(null);
     try {
-      const row = await sendMessageRequest(contact.user_id, text) as {
+      const row = await sendMessageRequest(contact.user_id, text).then(unwrapAction) as {
         id: string;
         status: 'pending' | 'accepted' | 'rejected' | 'cancelled';
         message: string;
@@ -428,7 +429,7 @@ export default function MessagesWorkspace() {
     setMemberBusy(contact.user_id, 'cancel');
     setNotice(null);
     try {
-      await cancelMessageRequest(request.id);
+      await cancelMessageRequest(request.id).then(unwrapAction);
       updateGeneralContact(contact.user_id, (c) => ({ ...c, request: c.request ? { ...c.request, status: 'cancelled' } : null }));
       setComposerFor(null);
     } catch (error: unknown) {

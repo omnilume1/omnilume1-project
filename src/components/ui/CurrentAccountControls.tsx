@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -61,7 +62,7 @@ export default function CurrentAccountControls({ account: preloadedAccount }: { 
       }
 
       try {
-        const profile = await getMyProfile();
+        const profile = await getMyProfile().then(unwrapAction);
         if (!active) return;
         const metadata = (user.user_metadata ?? {}) as Record<string, unknown>;
         setAccount({

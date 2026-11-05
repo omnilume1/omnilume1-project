@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { deleteMyAccount } from '@/actions/account';
+import { unwrapAction } from '@/lib/action-result';
 import { ACCOUNT_DELETION_CONFIRMATION, ACCOUNT_DELETION_REAUTH_WINDOW_SECONDS } from '@/lib/account-deletion';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import { createClient } from '@/utils/supabase/client';
@@ -70,7 +71,7 @@ export default function AccountControlActions({ className = '' }: { className?: 
     setDeleting(true);
     setDeleteError(null);
     try {
-      const result = await deleteMyAccount(confirmation);
+      const result = await deleteMyAccount(confirmation).then(unwrapAction);
       if (!result.success) {
         // Nothing was deleted: the server requires a recent sign-in.
         setReauthRequired(true);

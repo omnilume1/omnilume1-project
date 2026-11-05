@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useState } from 'react';
 import { usePrivateChat } from '@/hooks/usePrivateChat';
 import { sendEncryptedMessage } from '@/actions/chat';
@@ -57,7 +58,7 @@ export default function PrivateChat({ chatId, currentUserId, receiverId, sharedK
 
       // 2. Send the scrambled ciphertext to the server
       try {
-        await sendEncryptedMessage({ chatId, receiverId, ciphertext, iv });
+        await sendEncryptedMessage({ chatId, receiverId, ciphertext, iv }).then(unwrapAction);
       } catch (error) {
         removeOptimisticMessage(optimisticMessageId);
         throw error;

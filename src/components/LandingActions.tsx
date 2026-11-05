@@ -1,5 +1,6 @@
 "use client";
 
+import { unwrapAction } from '@/lib/action-result';
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -61,7 +62,7 @@ export function LandingActions() {
     setMessage(null);
 
     try {
-      const result = await processRoomJoin(trimmed);
+      const result = await processRoomJoin(trimmed).then(unwrapAction);
 
       if (result.status === "approved") {
         router.push(`/room/${result.roomId}`);

@@ -1,5 +1,6 @@
 'use server';
 
+import { actionResult } from '@/lib/action-result';
 import { createClient } from '@/utils/supabase/server';
 import { assertActiveRoom } from '@/lib/room-lifecycle';
 import { assertEncryptedPayload } from '@/lib/message-limits';
@@ -11,7 +12,7 @@ function assertUuid(value: string, label: string) {
 }
 // The private key never leaves the browser. Only the public half is stored so
 // another user can derive the same shared key locally.
-export async function saveUserPublicKey(publicKey: string) {
+async function saveUserPublicKeyImpl(publicKey: string) {
   if (!publicKey || publicKey.length > 16_384) throw new Error('Invalid public key.');
 
   const supabase = await createClient();
@@ -60,8 +61,11 @@ export async function saveUserPublicKey(publicKey: string) {
   }
   return true;
 }
+export async function saveUserPublicKey(publicKey: string) {
+  return actionResult(() => saveUserPublicKeyImpl(publicKey));
+}
 
-export async function getUserPublicKey(userId: string) {
+async function getUserPublicKeyImpl(userId: string) {
   assertUuid(userId, 'user ID');
 
   const supabase = await createClient();
@@ -90,8 +94,11 @@ export async function getUserPublicKey(userId: string) {
   // Keep compatibility with accounts created before profiles gained the key.
   return profile?.public_key ?? legacyKey?.public_key ?? null;
 }
+export async function getUserPublicKey(userId: string) {
+  return actionResult(() => getUserPublicKeyImpl(userId));
+}
 
-export async function getOrCreatePrivateChat(friendId: string) {
+async function getOrCreatePrivateChatImpl(friendId: string) {
   assertUuid(friendId, 'friend ID');
 
   const supabase = await createClient();
@@ -153,8 +160,11 @@ export async function getOrCreatePrivateChat(friendId: string) {
 
   return chat.id;
 }
+export async function getOrCreatePrivateChat(friendId: string) {
+  return actionResult(() => getOrCreatePrivateChatImpl(friendId));
+}
 
-export async function sendEncryptedMessage({
+async function sendEncryptedMessageImpl({
   chatId,
   receiverId,
   ciphertext,
@@ -204,6 +214,14 @@ export async function sendEncryptedMessage({
   }
 
   return true;
+}
+export async function sendEncryptedMessage(input: {
+  chatId: string;
+  receiverId: string;
+  ciphertext: string;
+  iv: string;
+}) {
+  return actionResult(() => sendEncryptedMessageImpl(input));
 }
 
 export async function deleteMessageForEveryone(messageId: string, roomId: string) {

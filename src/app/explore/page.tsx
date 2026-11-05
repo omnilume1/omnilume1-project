@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -60,7 +61,7 @@ export default function ExploreRoomsPage() {
 
     async function fetchRooms() {
       try {
-        const [data, joined] = await Promise.all([getPublicRooms(), getMyJoinedRooms()]);
+        const [data, joined] = await Promise.all([getPublicRooms().then(unwrapAction), getMyJoinedRooms().then(unwrapAction)]);
         if (active) setRooms((data ?? []) as PublicRoom[]);
         if (active) setJoinedRooms((joined ?? []) as JoinedRoom[]);
       } catch {
@@ -113,15 +114,15 @@ export default function ExploreRoomsPage() {
       const token = identifier.trim().split('?')[0].split('#')[0].split('/').filter(Boolean).pop() ?? '';
       const isInvite = /^[a-f0-9]{48}$/i.test(token);
       if (isInvite) {
-        const invite = await validateRoomInvite(token);
+        const invite = await validateRoomInvite(token).then(unwrapAction);
         if (!invite) throw new Error('Invite is invalid or expired.');
-        const result = await joinRoomWithInvite(token);
+        const result = await joinRoomWithInvite(token).then(unwrapAction);
         setStatus({ type: 'success', message: result.role === 'guest' ? 'Temporary guest access granted.' : 'Invite accepted. Opening the room…' });
         router.push(`/room/${result.room_id}`);
         return;
       }
       if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(identifier.trim())) {
-        const eligibility = await getMyRoomJoinEligibility(identifier.trim());
+        const eligibility = await getMyRoomJoinEligibility(identifier.trim()).then(unwrapAction);
         if (eligibility.state === 'already_joined') {
           router.push(`/room/${identifier.trim()}`);
           return;
@@ -131,7 +132,7 @@ export default function ExploreRoomsPage() {
           return;
         }
       }
-      const result = await processRoomJoin(identifier);
+      const result = await processRoomJoin(identifier).then(unwrapAction);
       if (result.status === 'pending') {
         setStatus({ type: 'success', message: 'Request sent. You can keep browsing until the owner approves you.' });
       } else {

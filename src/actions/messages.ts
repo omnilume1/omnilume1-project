@@ -1,5 +1,6 @@
 'use server';
 
+import { actionResult } from '@/lib/action-result';
 import { createClient } from '@/utils/supabase/server';
 
 export type MessageRequestStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled';
@@ -60,7 +61,7 @@ function displayName(profile: ProfileRef) {
   return profile.display_name || profile.username || 'OmniLume member';
 }
 
-export async function getMyMessageInbox(): Promise<MessageInbox> {
+async function getMyMessageInboxImpl(): Promise<MessageInbox> {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
@@ -285,8 +286,11 @@ export async function getMyMessageInbox(): Promise<MessageInbox> {
 
   return { friends, groups, general };
 }
+export async function getMyMessageInbox() {
+  return actionResult(() => getMyMessageInboxImpl());
+}
 
-export async function sendMessageRequest(recipientId: string, message: string) {
+async function sendMessageRequestImpl(recipientId: string, message: string) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
@@ -298,8 +302,11 @@ export async function sendMessageRequest(recipientId: string, message: string) {
   if (error) throw new Error(error.message);
   return data;
 }
+export async function sendMessageRequest(recipientId: string, message: string) {
+  return actionResult(() => sendMessageRequestImpl(recipientId, message));
+}
 
-export async function acceptMessageRequest(requestId: string) {
+async function acceptMessageRequestImpl(requestId: string) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
@@ -310,8 +317,11 @@ export async function acceptMessageRequest(requestId: string) {
   if (error) throw new Error(error.message);
   return data;
 }
+export async function acceptMessageRequest(requestId: string) {
+  return actionResult(() => acceptMessageRequestImpl(requestId));
+}
 
-export async function rejectMessageRequest(requestId: string) {
+async function rejectMessageRequestImpl(requestId: string) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
@@ -322,8 +332,11 @@ export async function rejectMessageRequest(requestId: string) {
   if (error) throw new Error(error.message);
   return data;
 }
+export async function rejectMessageRequest(requestId: string) {
+  return actionResult(() => rejectMessageRequestImpl(requestId));
+}
 
-export async function cancelMessageRequest(requestId: string) {
+async function cancelMessageRequestImpl(requestId: string) {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
@@ -333,4 +346,7 @@ export async function cancelMessageRequest(requestId: string) {
   });
   if (error) throw new Error(error.message);
   return data;
+}
+export async function cancelMessageRequest(requestId: string) {
+  return actionResult(() => cancelMessageRequestImpl(requestId));
 }

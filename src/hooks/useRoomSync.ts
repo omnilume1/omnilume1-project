@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { isUuid } from '@/lib/message-limits';
@@ -709,7 +710,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     if (snapshotType) {
       // The server allocates the version while serializing the snapshot row.
       // Broadcast only after that authoritative version is known.
-      void saveRoomRealtimeSnapshot(roomId, snapshotType, 1, { eventType, payload: wirePayload })
+      void saveRoomRealtimeSnapshot(roomId, snapshotType, 1, { eventType, payload: wirePayload }).then(unwrapAction)
         .then((result) => {
           const authoritativeVersion = result?.state_version;
           if (!authoritativeVersion || !Number.isSafeInteger(authoritativeVersion)) return;
@@ -808,7 +809,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     let cancelled = false;
     if (!roomId) return () => { cancelled = true; };
 
-    void getRoomRealtimeSnapshots(roomId).then((snapshots) => {
+    void getRoomRealtimeSnapshots(roomId).then(unwrapAction).then((snapshots) => {
       if (cancelled) return;
       (snapshots as RealtimeSnapshot[]).forEach((snapshot) => {
         const snapshotType = snapshot.snapshot_type === 'media' || snapshot.snapshot_type === 'timer'

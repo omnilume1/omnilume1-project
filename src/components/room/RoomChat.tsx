@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
@@ -205,7 +206,7 @@ export default function RoomChat({ roomId }: RoomChatProps) {
 
   useEffect(() => {
     let active = true;
-    void getRoomControlState(roomId).then((state) => {
+    void getRoomControlState(roomId).then(unwrapAction).then((state) => {
       if (active) setAnnouncements((state.announcements ?? []) as RoomAnnouncementMessage[]);
     }).catch(() => undefined);
     return () => { active = false; };

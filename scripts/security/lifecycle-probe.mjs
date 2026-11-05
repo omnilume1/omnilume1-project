@@ -51,7 +51,6 @@ const record = (test, check, pass, detail = '') => {
   console.log(`${pass ? 'PASS' : 'FAIL'}  ${test}  ${check}${detail ? `  [${detail}]` : ''}`);
 };
 const codeOf = (res) => (res?.error ? String(res.error.code ?? res.error.statusCode ?? res.error.name ?? 'error') : 'ok');
-const one = (res) => (Array.isArray(res?.data) ? res.data[0] : res?.data);
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const options = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
 const service = createClient(url, serviceKey, options);

@@ -1,5 +1,6 @@
 "use client";
 
+import { unwrapAction } from '@/lib/action-result';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createRoomAnnouncement,
@@ -214,7 +215,7 @@ export default function RoomControlCenter({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const state = await getRoomControlState(roomId);
+      const state = await getRoomControlState(roomId).then(unwrapAction);
       const nextSettings = {
         ...DEFAULT_SETTINGS,
         ...(state.settings ?? {}),
@@ -233,7 +234,7 @@ export default function RoomControlCenter({
             permission.allowed,
         );
       const [history] = await Promise.all([
-        canManageInvites ? listRoomInviteHistory(roomId) : Promise.resolve([]),
+        canManageInvites ? listRoomInviteHistory(roomId).then(unwrapAction) : Promise.resolve([]),
       ]);
       const nextProfile = state.myRoomProfile as RoomProfile | null;
 
@@ -334,7 +335,7 @@ export default function RoomControlCenter({
     setWorking(key);
     setError(null);
     try {
-      await setRoomRolePermission(roomId, role, capability, allowed);
+      await setRoomRolePermission(roomId, role, capability, allowed).then(unwrapAction);
       setNotice(`${role} permission updated.`);
     } catch (actionError) {
       setPermissions(previous);
@@ -480,7 +481,7 @@ export default function RoomControlCenter({
                                 () =>
                                   updateRoomControls(roomId, {
                                     isLocked: !settings.is_locked,
-                                  }).then(() => undefined),
+                                  }).then(unwrapAction).then(() => undefined),
                                 settings.is_locked
                                   ? "Room unlocked."
                                   : "Room locked.",
@@ -542,7 +543,7 @@ export default function RoomControlCenter({
                                           featureFlags: {
                                             [feature.key]: !enabled,
                                           },
-                                        }).then(() => undefined),
+                                        }).then(unwrapAction).then(() => undefined),
                                       `${feature.label} ${enabled ? "disabled" : "enabled"}.`,
                                     )
                                   }
@@ -676,7 +677,7 @@ export default function RoomControlCenter({
                                         ? Number(guestMinutes)
                                         : undefined,
                                     },
-                                  );
+                                  ).then(unwrapAction);
                                   const newInvite = (
                                     Array.isArray(created)
                                       ? created[0]
@@ -721,7 +722,7 @@ export default function RoomControlCenter({
                                   void run(
                                     "revoke-latest",
                                     async () => {
-                                      await revokeRoomInvite(invite.id);
+                                      await revokeRoomInvite(invite.id).then(unwrapAction);
                                       setInvite(null);
                                     },
                                     "Invite revoked.",
@@ -773,7 +774,7 @@ export default function RoomControlCenter({
                                       onClick={() =>
                                         void run(
                                           `revoke-${item.id}`,
-                                          () => revokeRoomInvite(item.id),
+                                          () => revokeRoomInvite(item.id).then(unwrapAction),
                                           "Invite revoked.",
                                         )
                                       }
@@ -839,7 +840,7 @@ export default function RoomControlCenter({
                                 updateRoomControls(roomId, {
                                   rules: draftRules,
                                   welcomeMessage: draftWelcome,
-                                }).then(() => undefined),
+                                }).then(unwrapAction).then(() => undefined),
                               "Rules and welcome message saved.",
                             )
                           }
@@ -1026,7 +1027,7 @@ export default function RoomControlCenter({
                                             roomId,
                                             selectedMember.user_id,
                                             "admin",
-                                          ),
+                                          ).then(unwrapAction),
                                         "Member role updated to admin.",
                                       )
                                     }
@@ -1047,7 +1048,7 @@ export default function RoomControlCenter({
                                             roomId,
                                             selectedMember.user_id,
                                             "member",
-                                          ),
+                                          ).then(unwrapAction),
                                         "Member role updated to member.",
                                       )
                                     }
@@ -1066,7 +1067,7 @@ export default function RoomControlCenter({
                                         transferRoomOwnership(
                                           roomId,
                                           selectedMember.user_id,
-                                        ),
+                                        ).then(unwrapAction),
                                       "Ownership transferred.",
                                     )
                                   }
@@ -1136,7 +1137,7 @@ export default function RoomControlCenter({
                                       roomId,
                                       announcementBody,
                                       announcementPinned,
-                                    );
+                                    ).then(unwrapAction);
                                     setAnnouncementBody("");
                                     setAnnouncementPinned(false);
                                   },
@@ -1209,7 +1210,7 @@ export default function RoomControlCenter({
                                                 announcement.id,
                                                 editAnnouncementBody,
                                                 editAnnouncementPinned,
-                                              ).then(() => undefined),
+                                              ).then(unwrapAction).then(() => undefined),
                                             "Announcement updated.",
                                           )
                                         }
@@ -1285,7 +1286,7 @@ export default function RoomControlCenter({
                             const next = event.target.checked;
                             void run(
                               "ghost-mode",
-                              () => setRoomGhostMode(roomId, next).then(() => undefined),
+                              () => setRoomGhostMode(roomId, next).then(unwrapAction).then(() => undefined),
                               next ? "Ghost Mode enabled." : "Ghost Mode disabled.",
                             );
                           }}
@@ -1337,7 +1338,7 @@ export default function RoomControlCenter({
                                 displayName: profileName || null,
                                 avatarUrl: profileAvatarUrl || null,
                                 bio: profileBio || null,
-                              }).then(() => undefined),
+                              }).then(unwrapAction).then(() => undefined),
                             "Room-specific profile saved.",
                           )
                         }

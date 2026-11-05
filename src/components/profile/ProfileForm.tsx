@@ -1,5 +1,6 @@
 'use client';
 
+import { unwrapAction } from '@/lib/action-result';
 import type { FormEvent } from 'react';
 import { useState } from 'react';
 import { updateMyProfile } from '@/actions/profiles';
@@ -91,7 +92,7 @@ export default function ProfileForm({
     };
 
     try {
-      const result = await updateMyProfile(input);
+      const result = await updateMyProfile(input).then(unwrapAction);
       if (!result.success) {
         setErrorMessage(result.error);
         return;

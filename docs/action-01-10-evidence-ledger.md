@@ -1066,6 +1066,115 @@ are no longer missing. They are unverified in the browser.
 - Not run: browser flows for the whiteboard, GIF picker and merged `main`
   panels (waived), Preview deployment and Cron execution.
 
+## Phase 1 final audit of Actions 01–10 (2026-11-05)
+
+### State
+- Branch `fix/actions-01-10-final-audit`, cut from `main` at 65755a7 (PR #17 merge).
+- Migration `20261105120000` (7-day recovery, room destruction functions,
+  minimum age 13): re-run in a rolled-back transaction (`due=8,
+  recovery_window=12, under13_update=blocked, exactly13_update=allowed`,
+  delete grants service-role only), then applied with `npx supabase db push`.
+  `supabase migration list --linked`: local and remote match for every
+  timestamped migration. Live catalog after the push: 7-day window, no
+  24-hour text, age trigger present, `destroy_expired_room` and
+  `list_rooms_due_for_destruction` executable by `service_role` only.
+- `GIPHY_API_KEY` present in `.env.local`.
+
+### Automated checks (after the fixes below)
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` | pass |
+| `npm run lint` | 0 errors, 13 warnings (unchanged pre-existing `<img>`/unused warnings) |
+| `npm run test:unit` | 48/48 pass (adds `server-action-results.test.ts`) |
+| `node --test tests/*.mjs` | 5/5 pass |
+| `npm run build` | pass |
+| `authorization-probe.mjs full` | 173 pass, 1 fail, 0 blocked, 8 info. The one failure (anon EXECUTE `convert_active_room_to_permanent`) had no error code; the catalog shows anon has no EXECUTE, and three `anon` re-runs each PASS with 42501. A later full run hit 3 network errors (empty error code, Realtime `CHANNEL_ERROR`) in checks that passed in the previous run. Risk noted: some denial checks accept any error, so a dropped request can also pass. |
+| `authorization-probe.mjs routes http://localhost:3000` (production build) | 17 pass, 0 fail |
+| `lifecycle-probe.mjs` (new) | 25 pass, 0 fail |
+
+The authorization probe now also covers A10 (member whiteboard save and
+stale-version rejection, personal-note privacy, room-note edits, the
+permanent PDF library, PDF annotations, non-admin file delete denied) and
+A06 (`destroy_expired_room` / `list_rooms_due_for_destruction` denied to
+`anon` and `authenticated`). The lifecycle probe proves, on disposable
+fixtures: the database rejects a date of birth under 13 and accepts a 13th
+birthday; an expired recoverable room enters the recovery window, its
+content is unreadable while quarantined, a non-member cannot request or
+approve recovery, approval reopens it for exactly 7 days and restores
+access; a pending request keeps a room past 7 days; a room 8 days past
+expiry without a request is due and is deleted with every row (rooms,
+members, messages, notes, whiteboard, files, controls) and every stored
+object; rejecting a held request makes the room due and it is deleted.
+
+### Browser walkthrough (two accounts, production build, real browser)
+Run on `next start` with QA account A (owner) and QA account B (approved
+member) in separate incognito sessions (`localhost` and `127.0.0.1`).
+
+| Item | Result |
+| --- | --- |
+| Whiteboard | Room rail opens it. B's pen stroke saves (v1, "All changes saved") and appears on A's open board live. Rectangle and arrow from both accounts persist. Forced version race (a save made behind B's back): B's next stroke merges onto the newer board and saves v6 with 6 elements, no conflict error (after fix 1). |
+| GIF picker | 24 trending GIFs load from GIPHY CDNs, search focus, "Powered by GIPHY". Search "thumbs up" returns 24 results with "Load more". Sending one closes the picker; the GIF renders for B and arrives live for A with its title as alt text. |
+| Study notes | Empty state, create room note, autosave. Edits typed while a save is in flight are saved (database: new title and full body, version 6) (after fix 2). Concurrent edit shows the conflict with "Keep my version" / "Load latest"; keeping saves over the other member's version (version 8). |
+| PDF panel | Lists the room PDF, opens it in the viewer from a signed URL, page controls; annotation added by A is visible to B. |
+| File library | Upload of a PDF into the permanent library lists it (name, type, size); Download returns the PDF (`200 application/pdf`, `%PDF-`) from a signed storage URL. |
+| Upload cancel/retry | 40 MB cast upload shows progress, Cancel leaves "Upload cancelled." with Retry; Retry completes, the server verifies and registers it; storage holds exactly one object (no orphan from the cancelled attempt). Cast to room: both accounts get a `<video>` with their own signed URL. |
+| 7-day recovery screens | Expired recoverable room: "Data is preserved but inaccessible for 7 days. If no recovery is requested…". Request shows pending, and the owner's Approve/Reject appear at once with "Recovery requested by you." (after fix 5). Approve reopens with ~168 h left; Reject shows "Recovery request was rejected."; a non-member gets "Space Not Found". |
+| Age-13 form | Date of birth field has `max` = 13 years ago and the help text; the browser blocks an under-13 date; with the limit removed, the server returns "You must be at least 13 years old to use OmniLume." and nothing is saved. |
+| Error messages | An invalid invite code shows the server's real message ("This room is unavailable…") instead of a minified React error (after fix 1). |
+
+### Bugs found and fixed in this run
+1. **Server Action errors were hidden in production.** React replaces any
+   error thrown by a Server Action with "Minified React error #441", so
+   every error message in 80 throw-style actions (study, files, room
+   controls, rooms, members, profiles, messages, chat) reached users as that
+   code, and the whiteboard and study-note conflict handling could never see
+   "expected version". Actions now return `{ ok, data | error }` through
+   `actionResult` (`src/lib/action-result.ts`, Next.js control-flow errors
+   re-thrown with `unstable_rethrow`) and every call site unwraps with
+   `.then(unwrapAction)`, which re-throws the real message so existing
+   `try/catch` blocks keep working. `deleteMyAccount` is wrapped the same
+   way. A unit test fails if any exported Server Action can throw to the
+   browser again.
+2. **Study notes lost edits.** A save that finished cleared the dirty flag
+   even when the user typed during the request, so later edits were never
+   saved while the panel said "Saved.". Fixed with an edit revision counter;
+   conflicts now keep the local text and offer "Keep my version" or "Load
+   latest (discard mine)".
+3. **File library flicker.** Background refreshes replaced the list with
+   "Loading files…" every 60 s; only the first load shows the loading state.
+4. **PDF annotation double submit.** "Add annotation" now shows "Adding…"
+   and is disabled while saving or empty.
+5. **Recovery review.** After requesting recovery the owner had to reload to
+   see Approve/Reject, and the requester was shown as a raw user UUID. The
+   list refreshes after the request, and requesters are labelled "you" or by
+   public display name.
+- Whiteboard: a pointer-capture failure no longer aborts drawing.
+
+### Open items
+- **Nightly cleanup is not running in production.** Two irreversible rooms
+  expired before 00:00 UTC on 2026-11-05 (oldest at 22:05 UTC on 2026-11-04)
+  and were still present afterwards, although the code deployed at that time
+  deleted such rooms. Vercel's environment and Cron logs cannot be read from
+  this session (the Vercel CLI is outside the shell allowlist and the Vercel
+  connector is not authorized).
+- **2 profiles are under 13** (unchanged; the trigger checks new and changed
+  dates of birth only).
+- **`GIPHY_API_KEY` on Vercel**: cannot be verified from this session.
+
+### Verdict per action (roadmap "What must be fixed or built" + Definition of Done)
+| Action | Verdict | Evidence |
+| --- | --- | --- |
+| 01 Foundation and Evidence | COMPLETE | Ledger, audit pack 01–09, reusable authorization / lifecycle / route probes on disposable fixtures. |
+| 02 Authentication and Identity | INCOMPLETE (blocked on owner) | Routes 17/17, profile gate and safe redirects verified; the DoD's Google OAuth runtime (no duplicate users, SSR/client agree) needs a real Google sign-in, which this session cannot perform. |
+| 03 Database, RLS, Storage | COMPLETE | Catalog audit 01–09, D1–D9 fixed, every migration applied (list matches), probe 0 failures. |
+| 04 Profiles, Privacy, Follows, Friends, Posts | COMPLETE | Privacy/follow/friend/post/message-request matrix in the probe; age 13 enforced in the browser form, server action and database; deletion re-auth. Data decision pending: 2 existing under-13 profiles. |
+| 05 Rooms, Membership, Roles, Control | COMPLETE | Invites, join/approve, roles, kick/ban, transfer, controls and feature toggles probed (T1–T3); member action menus present in the members list; Ghost Mode excluded by owner decision. |
+| 06 Lifecycle, Expiry, Recovery, Cleanup | INCOMPLETE (blocked on owner) | Code and database verified end to end (lifecycle probe 25/25, recovery screens in the browser), but the production cron did not delete rooms due at its last run. |
+| 07 Shared Realtime Foundation | COMPLETE | D7 hostile-client probes; browser: live whiteboard hints, live GIF delivery, per-viewer media resolution. |
+| 08 Room Messaging and Notifications | INCOMPLETE (fixable) | Missing: edit own messages, replies/threads, reactions UI, mentions, message pins, shared-PDF and timer-owner notifications, Notification Center, DND/mute, chat unread/read state. Present: send/history/delete, announcements, GIFs, room notification read state. |
+| 09 Adaptive Room Workspace | INCOMPLETE (fixable) | Missing: layout presets, themes, room dashboard. Present: resizable chat/side panels with saved per-user sizes, feature visibility, whiteboard (no empty tab). |
+| 10 Files, PDFs, Media, Storage | INCOMPLETE (fixable + owner decision) | Present and browser-verified: permanent files, shared PDFs, signed links, upload progress/retry/cancel, subtitles. Missing: media metadata/artwork/attribution/fallback and PDF-share notification (fixable); lyrics need a licensed provider (owner decision). |
+
 ## Dashboard extensions result (2026-11-04)
 
 | Finding | Classification | Evidence and disposition |

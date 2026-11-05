@@ -1,5 +1,6 @@
 'use server';
 
+import { actionResult } from '@/lib/action-result';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { createClient } from '@/utils/supabase/server';
 import { ACCOUNT_DELETION_CONFIRMATION, isRecentAuthentication, sessionAuthenticatedAt } from '@/lib/account-deletion';
@@ -48,33 +49,35 @@ async function removePersonalStorage(admin: ReturnType<typeof createAdminClient>
  * so the client can show the sign-in step in production builds) and nothing is
  * deleted.
  */
-export async function deleteMyAccount(confirmation: string): Promise<{ success: true } | { success: false; reauthRequired: true }> {
-  if (confirmation !== ACCOUNT_DELETION_CONFIRMATION) {
-    throw new Error(`Type ${ACCOUNT_DELETION_CONFIRMATION} to confirm account deletion.`);
-  }
+export async function deleteMyAccount(confirmation: string) {
+  return actionResult(async (): Promise<{ success: true } | { success: false; reauthRequired: true }> => {
+    if (confirmation !== ACCOUNT_DELETION_CONFIRMATION) {
+      throw new Error(`Type ${ACCOUNT_DELETION_CONFIRMATION} to confirm account deletion.`);
+    }
 
-  const { supabase, user } = await requireUser();
+    const { supabase, user } = await requireUser();
 
-  // Read the sign-in time from the verified token of this exact session.
-  // Checked before any deletion work starts.
-  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
-  if (claimsError || !claimsData || claimsData.claims.sub !== user.id) throw new Error('Unauthorized');
-  if (!isRecentAuthentication(sessionAuthenticatedAt(claimsData.claims.amr), Date.now())) {
-    return { success: false as const, reauthRequired: true as const };
-  }
+    // Read the sign-in time from the verified token of this exact session.
+    // Checked before any deletion work starts.
+    const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
+    if (claimsError || !claimsData || claimsData.claims.sub !== user.id) throw new Error('Unauthorized');
+    if (!isRecentAuthentication(sessionAuthenticatedAt(claimsData.claims.amr), Date.now())) {
+      return { success: false as const, reauthRequired: true as const };
+    }
 
-  const admin = createAdminClient();
+    const admin = createAdminClient();
 
-  const { error: prepareError } = await supabase.rpc('prepare_account_deletion', {
-    p_user_id: user.id,
+    const { error: prepareError } = await supabase.rpc('prepare_account_deletion', {
+      p_user_id: user.id,
+    });
+    if (prepareError) throw new Error('Unable to prepare account deletion.');
+
+    await removePersonalStorage(admin, user.id);
+
+    const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
+    if (deleteError) throw new Error('Unable to complete account deletion.');
+
+    await supabase.auth.signOut().catch(() => undefined);
+    return { success: true as const };
   });
-  if (prepareError) throw new Error('Unable to prepare account deletion.');
-
-  await removePersonalStorage(admin, user.id);
-
-  const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
-  if (deleteError) throw new Error('Unable to complete account deletion.');
-
-  await supabase.auth.signOut().catch(() => undefined);
-  return { success: true as const };
 }
