@@ -2159,3 +2159,64 @@ are not removed when their room is deleted (no FK on the polymorphic target;
 unreadable since membership fails). Now-playing rows stay (one per user,
 filtered by age). Presence audience is friends only: room/group members who are
 not friends see nothing. Existing probes were not re-run.
+
+## Action 16 Stage 4 (custom sources, decision 9)
+
+Migration `20261112100000_action16_music_custom_sources.sql` (additive): one
+table `music_custom_sources` (RLS on, `REVOKE ALL … FROM PUBLIC, anon,
+authenticated`, then SELECT/INSERT/DELETE and column-limited UPDATE to
+`authenticated`; one owner-only policy; inline URL CHECKs = `https://` without
+user-info, or `http://localhost|127.0.0.1` for local development; search URL
+must contain `{query}`; `responsibility_accepted` must be true; ≤ 10 per account
+(54000); `owner_id` cascades with the auth user). No SECURITY DEFINER code and
+no server route: the browser fetches the manifest, search and health URLs
+(`credentials: 'omit'`, no referrer, `redirect: 'error'`, 8 s timeout, 1 MB
+cap), so there is no server-side request to abuse. Source tracks are never
+uploads (no `uploadId`), so presence, history, Listen Together, playlists and
+sharing (all keyed on `music_uploads`) cannot include them. OmniLume ships no
+source. Contract (`src/lib/music-sources.ts`): manifest `{ "omnilume": 1, name,
+search: "…{query}…", health? }`; search answer `{ tracks: [{ id, title, artist?,
+album?, durationMs?, artwork?, audio }] }`, invalid entries dropped, text
+cleaned and capped, ≤ 50 tracks.
+
+- database-security, dry run (migration + checks in one transaction ended by
+  `RAISE`, as owner / other user / `anon`): **31/31** — https add ok; non-local
+  http, user-info, missing `{query}`, `javascript:`, unticked responsibility and
+  `localhost.evil.example` 23514; duplicate 23505; owner cannot change
+  `owner_id` or `manifest_url` (42501) nor break the URL rule by update (23514);
+  other user reads 0, cannot insert for the owner (42501), update/delete touch
+  nothing; anon read/insert 42501; cap: 9 in one statement refused, 8 allowed,
+  11th refused, separate per user; RLS on, anon no privilege, FK cascades. Then
+  `supabase db push` (local = remote before, one migration applied).
+- database-security, live `scripts/security/music-probe.mjs`: **83 pass, 0
+  fail** (Stage 3's 72 + 11 source checks: add, non-local http / no
+  responsibility / no `{query}` refused, other users cannot read, delete or add
+  for someone else, toggle + health recording ok, `manifest_url` not
+  rewritable, anon refused, rows cascade with account deletion).
+- static: `tests/music-sources.test.ts` (URL rule incl. `localhost.evil`,
+  user-info, `javascript:`/`data:`, whitespace, length; manifest contract;
+  `{query}` encoding in every slot + 100-char cap; result cleaning, unsafe
+  audio/artwork refused, ≤ 50; migration contract; no server route imports the
+  fetcher). `npm run test:unit` **169/169**; lint 0 errors / 13 warnings
+  (baseline); `next build` ok.
+- local runtime / browser (`next start`, incognito, throw-away account deleted
+  after; a scratchpad-only node test source on `http://localhost:3099` with
+  CORS): Settings → "Add Source" stays disabled until the responsibility box is
+  ticked; `http://music.example/…` refused in the browser; a manifest without
+  `{query}` and a 404 manifest each refused with their message; the valid
+  source added ("Working", form reset). Search "glow" → "From your sources"
+  row; ⋯ menu offers only Play Next / Add to Queue; play → audio fetched from
+  the source, LCD + Media Session "playing", no `record_music_play`,
+  `set_music_now_playing` or `music_listen_control` request. Search "e" → the
+  source returned 3 entries, the `javascript:` one was dropped; source artwork
+  shown. Check → Working; toggle off; source stopped → Check → "Not working:
+  Not reachable …"; Remove → list empty. Settings and search at 390/1440: no
+  horizontal overflow.
+
+Limits: the `http://localhost` exception exists for local testing (a browser
+treats localhost as a secure context); on the deployed https site it only
+reaches the user's own machine. A source must send CORS headers or it cannot
+be added. Source audio and artwork load directly from the source host (its
+operator sees the listener's IP, as with any web media). No HTTPS source was
+tried (no public test host); the https path is the same code with the
+protocol check. Existing non-music probes were not re-run.

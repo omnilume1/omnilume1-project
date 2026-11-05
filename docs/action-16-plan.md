@@ -1,6 +1,6 @@
 # Action 16 plan (branch `feat/action-16`)
 
-**Status: approved with the owner decisions below; Stage 1 (16.1 + 16.2) done in `0b63be7`; Stage 2 (16.4 + 16.5) done in `4787d07`; Stage 3 (presence + Listen Together, decisions 5/6; uploads part of 16.11) built and live-probed, not yet committed (ledger "Action 16 Stage 3"); Stage 4 (custom sources) awaits the owner's go.**
+**Status: approved with the owner decisions below; Stage 1 (16.1 + 16.2) done in `0b63be7`; Stage 2 (16.4 + 16.5) done in `4787d07`; Stage 3 (presence + Listen Together, decisions 5/6; uploads part of 16.11) done in `0d79181` (ledger "Action 16 Stage 3"); Stage 4 (custom sources, decision 9) done — see 16.14 (ledger "Action 16 Stage 4"). Remaining: providers (deferred, decision 1), 16.12 final regression, 16.13 (deferred).**
 Resume point. Tick an item only with its commit hash; evidence goes in
 `docs/action-01-10-evidence-ledger.md` (new section "Action 16", same layout as
 Actions 13-15: Database / database-security / static / local runtime / Limits).
@@ -133,6 +133,8 @@ Source terms below are from general knowledge, NOT re-verified on 2026-11-05: ch
 | Lyrics, licensed | Musixmatch (commercial plan; display requirements) | Best for a public product; costs money. Needs API key (server-only). |
 | Lyrics, licensed (enterprise) | LyricFind | Only if OmniLume grows. |
 | NEVER | Genius (API has no lyrics; scraping forbidden), scraping any lyrics site, BitChord-style spoofed-origin fetches | Out of scope permanently. |
+
+- [x] **16.14 Custom sources (Stage 4, decision 9).** User-added manifest (`"omnilume": 1`, `name`, `search` with `{query}`, optional `health`), browser-only calls, owner-only `music_custom_sources` rows (≤ 10, https or localhost-only http, responsibility box), health check, owner-only playback (no `uploadId` → never shared, together, presence, history or playlists). Files: `…action16_music_custom_sources.sql`, `src/lib/music-sources.ts`, `src/hooks/useMusicSources.ts`, `src/components/music/MusicSources.tsx`, Settings + Search wiring. Evidence: dry run 31/31, `music-probe` 83/83, `tests/music-sources.test.ts`, browser (ledger "Action 16 Stage 4"). Commit: see `git log` (feat(action-16) … Stage 4).
 
 - [ ] **16.13 Metadata + lyrics enrichment (deferred).**
   Server route `GET /api/music/metadata` (MusicBrainz lookup by ISRC, else title+artist+duration; Cover Art Archive artwork), cache table `music_metadata_cache` (service role only; RLS on, no client grants; TTL ≤ 30 days; rate ledger 1 req/s), "Fix tags" UI on an upload (user confirms before overwrite), lyrics provider interface `{name, enabled, fetch(track)}` with a per-user/owner setting; providers enabled one at a time (LRCLIB only after the owner accepts the risk; Musixmatch after a key and plan exist); synced-lyrics view reuses 16.4's `.lrc` renderer; provider attribution shown where required.

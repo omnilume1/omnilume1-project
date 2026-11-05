@@ -312,6 +312,30 @@ async function main() {
     record('fresh unregistered object is not swept yet (< 1 h)', !orphanUp.error && !(orphanFresh.data ?? []).some((rowIn) => rowIn.name === orphan), codeOf(orphanUp));
     const sweep = await service.storage.from(BUCKET).list(A.id, { limit: 1000 });
     record('account-deletion sweep sees music objects at <uid>/', (sweep.data ?? []).some((entry) => entry.id && `${A.id}/${entry.name}` === orphan));
+
+    // Stage 4: custom sources (owner-only rows; the server never calls a source).
+    const source = { manifest_url: 'https://qa16-source.example/omnilume.json', name: 'QA source', search_url: 'https://qa16-source.example/search?q={query}', health_url: null, responsibility_accepted: true };
+    const added = await A.client.from('music_custom_sources').insert(source).select('id').single();
+    record('owner adds an https custom source', !added.error, codeOf(added));
+    const plainHttp = await A.client.from('music_custom_sources').insert({ ...source, manifest_url: 'http://qa16-source.example/m.json' });
+    record('non-local http source refused', codeOf(plainHttp) === '23514', codeOf(plainHttp));
+    const noResponsibility = await A.client.from('music_custom_sources').insert({ ...source, manifest_url: 'https://qa16-two.example/m.json', responsibility_accepted: false });
+    record('source without the responsibility box refused', codeOf(noResponsibility) === '23514', codeOf(noResponsibility));
+    const noQuery = await A.client.from('music_custom_sources').insert({ ...source, manifest_url: 'https://qa16-two.example/m.json', search_url: 'https://qa16-two.example/search' });
+    record('search URL without {query} refused', codeOf(noQuery) === '23514', codeOf(noQuery));
+    const mSources = await M.client.from('music_custom_sources').select('id');
+    record('other users cannot read my sources', rows(mSources) === 0, `${rows(mSources)} row(s)`);
+    await M.client.from('music_custom_sources').delete().eq('id', added.data?.id ?? randomUUID());
+    const stillMine = await A.client.from('music_custom_sources').select('id').eq('id', added.data?.id ?? randomUUID());
+    record('other users cannot delete my sources', rows(stillMine) === 1, `${rows(stillMine)} row(s)`);
+    const forA = await B.client.from('music_custom_sources').insert({ ...source, owner_id: A.id, manifest_url: 'https://qa16-three.example/m.json' });
+    record('cannot add a source for someone else', codeOf(forA) === '42501', codeOf(forA));
+    const toggle = await A.client.from('music_custom_sources').update({ enabled: false, last_status: 'error', last_message: 'probe', last_checked_at: new Date().toISOString() }).eq('id', added.data?.id);
+    record('owner can toggle and record a health check', !toggle.error, codeOf(toggle));
+    const moveUrl = await A.client.from('music_custom_sources').update({ manifest_url: 'https://elsewhere.example/m.json' }).eq('id', added.data?.id);
+    record('manifest URL cannot be rewritten (re-add instead)', codeOf(moveUrl) === '42501', codeOf(moveUrl));
+    const anonSources = await anon.from('music_custom_sources').select('id');
+    record('anon cannot read sources', Boolean(anonSources.error), codeOf(anonSources));
   } finally {
     // Account-deletion order: objects first, then the auth users (rows cascade).
     for (const user of [A, M, B]) {
@@ -326,6 +350,8 @@ async function main() {
     for (const id of throwaway) await service.auth.admin.deleteUser(id);
     const leftover = await service.from('music_uploads').select('id').in('owner_id', throwaway);
     record('fixtures removed (rows cascade with the users)', rows(leftover) === 0, `${rows(leftover)} row(s)`);
+    const leftoverSources = await service.from('music_custom_sources').select('id').in('owner_id', throwaway);
+    record('custom sources cascade with account deletion', rows(leftoverSources) === 0, `${rows(leftoverSources)} row(s)`);
   }
 
   const failed = results.filter((pass) => !pass).length;
