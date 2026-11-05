@@ -403,6 +403,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .auth-shell { padding: 12px; }
   .auth-card { border-radius: 19px; }
   .auth-form-pane { padding: 24px 20px 28px; }
+  /* Room header: title on its own row, actions wrap instead of running off
+     screen (Upgrade/Request buttons + four icon actions exceed 375px). */
+  .room-header { flex-wrap: wrap; row-gap: 6px; padding-block: 8px; }
+  .room-header-title { flex: 1 1 100%; }
+  .room-actions { flex: 1 1 100%; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
   .auth-community-pane { min-height: 330px; padding: 28px 20px; }
   .auth-community-pane h2 { font-size: 2.25rem; }
   .auth-stat-row { gap: 8px; }
@@ -863,9 +868,56 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .media-now-playing-title { margin: 0; overflow: hidden; color: white; font-size: clamp(15px, 2.4vh, 22px); font-weight: 800; line-height: 1.25; text-overflow: ellipsis; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .media-now-playing-sub { margin: 4px 0 0; overflow: hidden; color: #d4d4d8; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .media-now-playing-source { margin: 8px 0 0; color: var(--omni-muted); font-size: 11px; }
+/* Provider player elements (youtube-video etc.) ship a 300px min-width in
+   their shadow :host styles, which overflowed the stage on phones. */
+[data-media-area] :is(youtube-video, vimeo-video, twitch-video, hls-video, video) { min-width: 0; max-width: 100%; }
+.media-audio-caption { margin: 0 auto 12px; max-width: 42rem; padding: 8px 14px; border-radius: 10px; background: rgba(0, 0, 0, 0.75); color: #fff; font-size: 15px; line-height: 1.45; text-align: center; white-space: pre-line; }
 @media (max-width: 520px) {
   .media-now-playing { flex-direction: column; text-align: center; padding-top: 64px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .media-now-playing { animation: none !important; }
+}
+
+/* Watch queue, clips and Now Playing (Action 11). */
+.watch-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 16px; background: rgba(17,17,17,.96); box-shadow: 0 22px 60px -14px rgba(0,0,0,.75); backdrop-filter: blur(14px); }
+.watch-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid rgba(255,255,255,.08); padding: 8px 10px; }
+.watch-panel-tabs { display: flex; gap: 4px; }
+.watch-panel-tabs button { border: 0; border-radius: 8px; background: none; padding: 6px 10px; color: var(--omni-muted); font-size: 12px; font-weight: 700; cursor: pointer; }
+.watch-panel-tabs button[aria-selected="true"] { background: rgba(var(--room-accent-rgb, 168, 85, 247), .16); color: white; }
+.watch-panel-close, .watch-panel-icon { display: inline-flex; min-width: 30px; height: 30px; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: none; color: var(--omni-muted); font-size: 13px; cursor: pointer; }
+.watch-panel-close:hover, .watch-panel-icon:hover:not(:disabled), .watch-panel-icon:focus-visible { background: rgba(255,255,255,.08); color: white; }
+.watch-panel-icon:disabled { cursor: not-allowed; opacity: .4; }
+.watch-panel-error { margin: 8px 10px 0; border-radius: 8px; background: rgba(239,68,68,.1); padding: 6px 10px; color: #fca5a5; font-size: 12px; }
+.watch-panel-body { min-height: 0; flex: 1; overflow-y: auto; padding: 8px; }
+.watch-panel-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.watch-panel-row { display: flex; align-items: center; gap: 6px; border-radius: 10px; padding: 6px 8px; background: rgba(255,255,255,.03); }
+.watch-panel-index { width: 18px; flex-shrink: 0; color: var(--omni-faint); font-size: 11px; font-weight: 800; text-align: center; }
+.watch-panel-title { display: block; overflow: hidden; color: white; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.watch-panel-meta { display: block; overflow: hidden; color: var(--omni-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.watch-panel-time { flex-shrink: 0; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; background: rgba(255,255,255,.04); padding: 4px 8px; color: #c4b5fd; font-size: 11px; font-variant-numeric: tabular-nums; font-weight: 700; cursor: pointer; }
+.watch-panel-time:disabled { cursor: default; color: var(--omni-muted); }
+.watch-panel-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px 12px; color: var(--omni-muted); font-size: 12px; text-align: center; }
+.watch-panel-empty p { margin: 0; }
+.watch-panel-hint { color: var(--omni-faint); font-size: 11px; }
+.watch-panel-skeleton { height: 120px; border-radius: 12px; background: linear-gradient(90deg, rgba(255,255,255,.04), rgba(255,255,255,.08), rgba(255,255,255,.04)); background-size: 200% 100%; animation: notification-skeleton 1.2s ease-in-out infinite; }
+.watch-panel-clip-form { display: grid; grid-template-columns: 1fr; gap: 6px; margin-bottom: 8px; }
+.now-playing-slot { position: absolute; bottom: 12px; left: 12px; z-index: 30; max-width: min(440px, calc(100% - 24px)); }
+.now-playing-bar { display: flex; align-items: center; gap: 10px; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 8px 8px 8px 12px; background: rgba(17,18,23,.94); box-shadow: 0 16px 40px -14px rgba(0,0,0,.8); backdrop-filter: blur(14px); animation: room-chat-pop 200ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.now-playing-pulse { width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: var(--omni-faint); }
+.now-playing-pulse.is-playing { background: #34d399; box-shadow: 0 0 10px rgba(52,211,153,.8); }
+.now-playing-main { display: flex; min-width: 0; flex: 1; flex-direction: column; border: 0; background: none; color: white; text-align: left; cursor: pointer; }
+.now-playing-title { overflow: hidden; font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.now-playing-meta { overflow: hidden; color: var(--omni-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.now-playing-toggle { display: inline-flex; width: 34px; height: 34px; flex-shrink: 0; align-items: center; justify-content: center; border: 0; border-radius: 10px; background: rgba(var(--room-accent-rgb, 168, 85, 247), .2); color: white; cursor: pointer; }
+.now-playing-toggle:hover, .now-playing-toggle:focus-visible { background: rgba(var(--room-accent-rgb, 168, 85, 247), .32); }
+/* The bar floats; every main layer reserves room under it so the last
+   tiles, study controls and the whiteboard canvas are never covered. */
+.workspace-main:has(> .now-playing-slot) [data-now-playing-pad] { padding-bottom: 76px; }
+@media (max-width: 520px) {
+  /* Phones scroll the whole room page, so pin the bar above the dock. */
+  .now-playing-slot { position: fixed; left: 8px; right: 8px; bottom: calc(76px + env(safe-area-inset-bottom)); max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .now-playing-bar, .watch-panel-skeleton { animation: none !important; }
 }

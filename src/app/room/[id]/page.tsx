@@ -39,6 +39,7 @@ import { isRoomExpired } from '@/lib/room-lifecycle';
 import { roomWorkspacePreferenceKey } from '@/lib/room-workspace-preferences';
 import { minimizeRoom } from '@/lib/minimized-rooms';
 import RoomDashboard from '@/components/room/RoomDashboard';
+import NowPlayingBar from '@/components/room/NowPlayingBar';
 import {
   DEFAULT_ROOM_APPEARANCE,
   HOME_CHAT_WIDTH,
@@ -673,6 +674,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           <div
             data-stage-layer
             aria-hidden={activity !== 'study'}
+            data-now-playing-pad
             className={`absolute inset-0 flex min-h-0 ${activity === 'study' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
           >
             {featureEnabled('study') ? <StudyStage
@@ -683,7 +685,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           </div>
 
           {activity === 'home' && (
-            <div className="room-dashboard-layer relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto">
+            <div data-now-playing-pad className="room-dashboard-layer relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto">
               <RoomDashboard
                 roomId={roomData.id}
                 room={roomData}
@@ -692,6 +694,12 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
                 onOpenActivity={setMainActivity}
                 onOpenTool={openTool}
               />
+            </div>
+          )}
+
+          {activity !== 'watch' && featureEnabled('watch') && roomSync.mediaState && (
+            <div className="now-playing-slot">
+              <NowPlayingBar roomId={roomData.id} onOpen={() => setMainActivity('watch')} />
             </div>
           )}
 
@@ -707,7 +715,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           )}
 
           {activity === 'whiteboard' && (
-            <div className="relative z-10 flex min-h-0 flex-1 flex-col p-3">
+            <div data-now-playing-pad className="relative z-10 flex min-h-0 flex-1 flex-col p-3">
               {featureEnabled('study')
                 ? <StudyWhiteboardPanel roomId={roomData.id} />
                 : <div className="flex flex-1 items-center justify-center rounded-xl border border-neutral-800 bg-[#0a0a0a] p-6 text-center text-sm text-neutral-500">The whiteboard is part of Study, which this room has disabled.</div>}

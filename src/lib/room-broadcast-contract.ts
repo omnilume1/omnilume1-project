@@ -34,6 +34,11 @@ export const ROOM_BROADCAST_EVENT_TYPES = [
   'timer_reset',
   'subtitle_upload',
   'whiteboard_changed',
+  // Action 11: the controller's position for drift correction, and revision
+  // hints for the shared queue and clips (contents are re-read through RLS).
+  'media_heartbeat',
+  'queue_changed',
+  'clips_changed',
 ] as const;
 
 export type RoomBroadcastEventType = (typeof ROOM_BROADCAST_EVENT_TYPES)[number];
@@ -91,11 +96,15 @@ const EVENT_FIELDS: Record<RoomBroadcastEventType, Record<string, FieldKind>> = 
   // A revision hint only: members re-read the board through the protected
   // getRoomWhiteboard action; drawing content never travels over Broadcast.
   whiteboard_changed: { version: 'version' },
+  media_heartbeat: { mediaId: 'uuid', castId: 'id', time: 'number', speed: 'number', playing: 'boolean' },
+  queue_changed: { version: 'version' },
+  clips_changed: { version: 'version' },
 };
 
 // Media events are useless without a mediaId: receivers resolve the playable
 // URL, title and subtitle from it through an authenticated fetch.
-const MEDIA_ID_REQUIRED = new Set<RoomBroadcastEventType>(['play', 'pause', 'seek', 'mute', 'cast', 'force_sync', 'subtitle_upload']);
+const MEDIA_ID_REQUIRED = new Set<RoomBroadcastEventType>(['play', 'pause', 'seek', 'mute', 'cast', 'force_sync', 'subtitle_upload', 'media_heartbeat']);
+const VERSION_REQUIRED = new Set<RoomBroadcastEventType>(['whiteboard_changed', 'queue_changed', 'clips_changed']);
 const EVENT_TYPES = new Set<string>(ROOM_BROADCAST_EVENT_TYPES);
 
 export function isRoomBroadcastEventType(value: unknown): value is RoomBroadcastEventType {
@@ -137,7 +146,7 @@ export function toRoomBroadcastPayload(eventType: unknown, payload: unknown): Re
     if (isValidField(kind, source[key])) wire[key] = source[key];
   }
   if (MEDIA_ID_REQUIRED.has(eventType) && typeof wire.mediaId !== 'string') return null;
-  if (eventType === 'whiteboard_changed' && typeof wire.version !== 'number') return null;
+  if (VERSION_REQUIRED.has(eventType) && typeof wire.version !== 'number') return null;
   return wire;
 }
 

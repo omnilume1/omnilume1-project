@@ -28,6 +28,7 @@ export type OmniIconName =
   | 'camera'
   | 'pin'
   | 'smile'
+  | 'pause'
   | 'pen'
   | 'at'
   | 'reply'
@@ -64,6 +65,7 @@ const paths: Record<OmniIconName, ReactNode> = {
   pen: <><path d="M4 20l4-1L19 8l-3-3L5 16z" /><path d="M14 6l3 3M4 20h16" /></>,
   camera: <><path d="M4 8h3l1.3-2h7.4L17 8h3v11H4z" /><circle cx="12" cy="13.5" r="3.25" /></>,
   pin: <><path d="M9 4h6l-1 6 3 3v1H7v-1l3-3z" /><path d="M12 14v6" /></>,
+  pause: <><path d="M8.5 5v14M15.5 5v14" /></>,
   smile: <><circle cx="12" cy="12" r="8.5" /><path d="M8.5 14a4 4 0 0 0 7 0" /><path d="M9.5 9.5h.01M14.5 9.5h.01" /></>,
 };
 

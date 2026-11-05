@@ -1536,3 +1536,109 @@ or rolled-back dry runs, against the linked project.
 | 08 Messaging/notifications | COMPLETE | sections 3–4 |
 | 09 Adaptive workspace | COMPLETE | section 5 |
 | 10 Files/media | COMPLETE | section 6; lyrics owner-dropped |
+
+## Actions 11–12
+
+**Branch:** `feat/actions-11-12` from `main` at `b72e19e`. Plan and resume
+point: `docs/action-11-12-plan.md`. Labels: **static** (source/unit),
+**local runtime** (production build on :3000), **multi-user** (two real
+accounts, two browser tabs), **database-security** (linked project, probes
+and rolled-back dry runs as `authenticated`).
+
+### Part A — Actions 01–10 re-verified on main (2026-11-05)
+
+- static: `tsc` clean; lint 0 errors / 13 warnings (pre-existing); unit
+  tests 89/89; `next build` ok.
+- database-security: `supabase migration list --linked` local = remote
+  (42 rows before Action 11). Probe suite, all `authenticated`/anon
+  disposable-account probes: authorization 175, lifecycle 26, site-owner 43,
+  notification 26, messaging 37, workspace 20, media 12 — all pass, 0 fail.
+- local runtime: `/admin/recovery` signed in as a non-owner → 404. Route
+  smoke 9/10 gated as expected (`/explore` is public by design).
+- Cleanup cron: overlap safety covered by the existing unit tests; the due
+  list was read with a read-only query (4 due). The route was not invoked
+  (a run deletes rooms).
+- GIPHY: a real search request with the local `GIPHY_API_KEY` returned 200.
+  The Vercel environment could not be inspected (Vercel connector not
+  authorised); the owner redeploy note above still applies.
+- Result: no regressions, so no fix commit was needed.
+
+### Action 11 — Watch and shared media reliability
+
+Database (`20261106100000_action11_watch_queue_clips.sql`, applied):
+`room_media_queue` and `room_media_clips` with FKs (`temporary_media`
+`ON DELETE CASCADE`), unique `(room_id, media_id)`, CHECKs (position ≥ 0,
+start/end range, label 1–120). RLS: SELECT only where
+`room_has_capability(room_id, auth.uid(), 'watch')`; `REVOKE ALL` + `GRANT
+SELECT` (no direct writes). Writes only through SECURITY DEFINER RPCs with
+`search_path = ''`, `GRANT EXECUTE … TO authenticated`: add (watch, live
+media in this room, max 50, duplicate → 23505), remove (own with watch, or
+watch_control; positions repacked), move (watch_control), create clip
+(watch, max 200 per media), delete clip (own or watch_control).
+
+- database-security, dry run (BEGIN … `SET LOCAL ROLE authenticated` with
+  JWT claims … RAISE → ROLLBACK): member add/clip ok; member move refused
+  42501; owner move ok; outsider add refused and sees 0 rows; anon has no
+  EXECUTE; Watch feature off → add refused, rows hidden; deleting the media
+  cascades queue and clips. Then `npx supabase db push`; migration list
+  local = remote (43 rows).
+- database-security, `scripts/security/watch-probe.mjs` (disposable room,
+  owner/member/admin/outsider/anon): **20 pass, 0 fail** — queue/clip rules
+  per role, direct table writes refused, a member's heartbeat on
+  `sync-control` is not delivered (watch_control required to publish), the
+  owner's heartbeat and queue hint reach the member, Watch off hides clips
+  and refuses queueing.
+- static, `tests/watch-sync.test.ts` (in the 97/97 unit run): expected
+  position (speed, restored snapshots, cap, no rewind), drift threshold,
+  echo-free native broadcast rules, seek coalescing, queue reorder, wire
+  contract (heartbeat carries only ids + playback state; hints only a
+  version), player contract (`src`/`currentTime`; no `url=`,
+  `getInternalPlayer`, `config.file`, ` as any`), heartbeat on the
+  control topic, controller-only heartbeat acceptance, still exactly five
+  room channels, migration RLS/grant/search_path contract, and the three
+  walkthrough regressions below.
+
+Walkthrough (multi-user, local runtime): owner A = `user4` on
+`localhost:3000`, member B = `rohan` on `127.0.0.1:3000`, disposable room
+`qa-2026-11-05-browser-walkthrough`, generated 240 s / 12 s tagged MP3s and a
+VTT. Desktop (1002–1280 px) and mobile (390 × 844).
+
+| Check | Result |
+| --- | --- |
+| Play/pause/seek parity | B paused at A's exact position (125.28 s); seek back/forward followed |
+| Throttled seeking | listener on `sync-control`: pause, seek 100, seek 20, four rapid seeks → **one** seek 80, play |
+| Drift correction | B nudged 4 s behind → corrected within one heartbeat (< 2 s) to 0.17 s of A |
+| Speed | 1.5x on A → B `playbackRate` 1.5, 0.25 s apart |
+| Late join | B reloaded while A played at 1.5x → joined at the live position, 0.37 s off; paused room → joined at 60.00 s |
+| Permissions | B (member) has no speed/stop/force-sync/subtitle controls; clip "Jump" disabled with reason; Realtime refuses member heartbeats (probe) |
+| Subtitles | A uploaded VTT → B track `showing`, cue active; audio casts now show the cue text |
+| External / unsupported | YouTube cast plays in sync on B (heartbeats received); missing URL → error + Retry on both, Retry re-attempts |
+| Queue | Queue from history (A and B), "Added by" names, B sees reorder live, A removes B's item, auto-advance at end plays next and empties queue on both |
+| Clips | B saved "Key definition" (15 s) → A saw it live, jumped the room, B followed; B deleted own clip → removed on A |
+| Now Playing | outside Watch: title/artist, Playing/Paused + position, next item; A paused/resumed the room from the bar, B followed; B's bar has no toggle |
+| Mobile 390 px | no horizontal overflow on either account; queue panel, viewer controls, YouTube player fit; bar pinned above the dock |
+
+Bugs found in the walkthrough and fixed (all re-verified above):
+
+1. A controller who reloaded came back on a *restored* snapshot and
+   `broadcastPlayback` refused to send from a restored state, so nobody
+   could control the room and no heartbeats went out (B drifted and never
+   corrected). Explicit user actions by a watch_control member now act on a
+   restored snapshot (native events are still filtered by
+   `shouldBroadcastNative`).
+2. The sync effect armed the 500 ms echo guard on every state change,
+   including this client's own seek broadcast, so a play pressed right
+   after a seek was swallowed and then reverted. The guard now arms only
+   when the effect really changes the element.
+3. Audio casts never displayed subtitle cues (audio elements draw none):
+   the active cue is rendered as an `aria-live` caption line.
+4. Stage toolbar overflowed ("Force sync" clipped) once Queue was added →
+   wraps. YouTube's player element has a 300 px min-width and overflowed
+   phones → overridden. Room header ran off-screen at 390 px (pre-existing)
+   → wraps. Now Playing bar covered home tiles → layers reserve space under
+   it; on phones it is pinned above the dock.
+
+Not verifiable in the browser harness: forcing a real Realtime disconnect.
+11.10 reconnect is covered by source + unit contract (`connectionGeneration
+> 1` → `request_sync`, the same path as late join, which was verified live).
+Native FLAC speed uses the same `playbackRate` sync path (static).

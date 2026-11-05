@@ -81,8 +81,23 @@ export type RoomSyncValue = {
   // Highest whiteboard version announced by another member. The board itself
   // is re-read through getRoomWhiteboard (see room-broadcast-contract.ts).
   whiteboardVersion: number;
+  // Action 11: the active controller's last announced position (drift
+  // correction) and revision counters for the shared queue and clips.
+  mediaHeartbeat: MediaHeartbeat | null;
+  queueVersion: number;
+  clipsVersion: number;
   recordMediaTime: (time: number) => void;
   broadcastEvent: (eventType: SyncEventType, payload?: Record<string, unknown>) => void;
+};
+
+export type MediaHeartbeat = {
+  mediaId: string;
+  castId: string | null;
+  time: number;
+  speed: number;
+  playing: boolean;
+  senderId: string;
+  receivedAt: number;
 };
 
 export type RoomMessageEvent = {
@@ -239,6 +254,9 @@ function isMediaEvent(eventType: SyncEventType) {
 
 function channelKindForEvent(eventType: SyncEventType): RoomChannelKind {
   if (eventType === 'typing') return 'chat';
+  // Only Watch controllers may publish on sync-control (realtime policy).
+  if (eventType === 'media_heartbeat') return 'control';
+  if (eventType === 'queue_changed' || eventType === 'clips_changed') return 'watch';
   if (eventType === 'timer_start' || eventType === 'timer_pause' || eventType === 'timer_reset' || eventType === 'whiteboard_changed') return 'study';
   if (eventType === 'request_sync') return 'watch';
   return isMediaEvent(eventType) ? 'control' : 'general';
@@ -361,6 +379,9 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   const [roomControlVersion, setRoomControlVersion] = useState(0);
   const [connectionGeneration, setConnectionGeneration] = useState(0);
   const [whiteboardVersion, setWhiteboardVersion] = useState(0);
+  const [mediaHeartbeat, setMediaHeartbeat] = useState<MediaHeartbeat | null>(null);
+  const [queueVersion, setQueueVersion] = useState(0);
+  const [clipsVersion, setClipsVersion] = useState(0);
   // Server-allocated versions of the persisted media/timer snapshots. Older
   // Broadcasts and snapshots are ignored.
   const stateVersionsRef = useRef<Record<'media' | 'timer', number>>({ media: 0, timer: 0 });
@@ -586,6 +607,34 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       return;
     }
 
+    if (event.event_type === 'queue_changed') {
+      setQueueVersion((current) => current + 1);
+      return;
+    }
+
+    if (event.event_type === 'clips_changed') {
+      setClipsVersion((current) => current + 1);
+      return;
+    }
+
+    // Only the current controller's heartbeat counts; it never changes room
+    // state, it only lets viewers correct drift locally.
+    if (event.event_type === 'media_heartbeat') {
+      const current = mediaStateRef.current;
+      if (!current || (current.controllerId && current.controllerId !== event.sender_id)) return;
+      if (payload.mediaId !== current.mediaId) return;
+      setMediaHeartbeat({
+        mediaId: payload.mediaId as string,
+        castId: typeof payload.castId === 'string' ? payload.castId : null,
+        time: payload.time as number,
+        speed: typeof payload.speed === 'number' ? payload.speed : 1,
+        playing: payload.playing === true,
+        senderId: event.sender_id,
+        receivedAt: Date.now(),
+      });
+      return;
+    }
+
     if (event.event_type === 'timer_start' || event.event_type === 'timer_pause' || event.event_type === 'timer_reset') {
       applyTimerEvent(event.event_type, payload);
       return;
@@ -675,6 +724,9 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       ? { ...payload, castId: asString(payload.castId, createEventId()) }
       : payload;
     if (isMediaEvent(eventType) && !canControlMedia) return;
+    if (eventType === 'media_heartbeat' && !canControlMedia) return;
+    if (eventType === 'queue_changed') setQueueVersion((current) => current + 1);
+    if (eventType === 'clips_changed') setClipsVersion((current) => current + 1);
     const meta: MediaEventMeta = {
       eventId: createEventId(),
       timestamp: Date.now(),
@@ -786,6 +838,9 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       setRoomControlVersion(0);
       setConnectionGeneration(0);
       setWhiteboardVersion(0);
+      setMediaHeartbeat(null);
+      setQueueVersion(0);
+      setClipsVersion(0);
     }, 0);
 
     // Refresh the restored URL under current authorization: signed URLs
@@ -988,6 +1043,9 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     roomControlVersion,
     connectionGeneration,
     whiteboardVersion,
+    mediaHeartbeat,
+    queueVersion,
+    clipsVersion,
     recordMediaTime,
     broadcastEvent,
   };
