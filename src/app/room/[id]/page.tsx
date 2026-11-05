@@ -43,6 +43,8 @@ import { roomWorkspacePreferenceKey } from '@/lib/room-workspace-preferences';
 import { minimizeRoom } from '@/lib/minimized-rooms';
 import RoomDashboard from '@/components/room/RoomDashboard';
 import NowPlayingBar from '@/components/room/NowPlayingBar';
+import RoomPulseBar from '@/components/room/RoomPulseBar';
+import { BookmarkToggle } from '@/components/room/BookmarkButton';
 import {
   DEFAULT_ROOM_APPEARANCE,
   HOME_CHAT_WIDTH,
@@ -616,6 +618,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
               </div>
             )}
           </div>
+          <BookmarkToggle roomId={roomData.id} kind="room" entityId={roomData.id} className="room-action" labels={['☆ Save', '★ Saved']} subject="room" />
           <NotificationBell roomId={roomData.id} />
           <button type="button" onClick={() => setShowControlCenter(true)} className="room-action room-action-controls"><OmniIcon name="settings" size={14} /><span>Controls</span></button>
           <button type="button" onClick={minimizeActiveRoom} className="room-action" title="Return to Rooms without leaving"><span aria-hidden="true">—</span><span>Minimize room</span></button>
@@ -625,6 +628,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
       <RoomNotifications roomId={roomData.id} />
       <RoomRoleChangeNotification events={roomSync.roomControlEvents} currentUserId={roomSync.currentUserId} />
+      <RoomPulseBar roomId={roomData.id} />
       <RoomAnnouncementBanner roomId={roomData.id} />
       <RoomEntryPrompts roomId={roomData.id} onOpenRoomProfile={() => { setControlCenterTab('profile'); setShowControlCenter(true); }} />
 

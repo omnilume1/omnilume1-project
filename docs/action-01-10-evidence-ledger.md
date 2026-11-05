@@ -1766,3 +1766,68 @@ Provider substitutions and limits (free path, no external keys):
   adequate for room-sized data).
 - 12.17 Scheduled rooms already ship (`scheduled_for` in create-room and the
   room access gate); no Action 12 change.
+
+## Actions 13–14
+
+**Branch:** `feat/actions-13-14` from `main` at `783ba5d` (PR #19 merged).
+Plan and resume point: `docs/action-13-14-plan.md`. Baseline: migration list
+local = remote (45 rows), `tsc` clean.
+
+### Action 13 — Activity, discovery, events and management
+
+Database (`20261108100000_action13_activity_discovery.sql`, applied after a
+rolled-back dry run as `authenticated`/`anon`; owner/member/admin/outsider/anon
+all checked). New tables, all RLS, `REVOKE ALL` + `GRANT SELECT` only:
+`room_activity` (kind + actor + entity id only; labels resolved at read by
+capability; in the realtime publication), `room_bookmarks`, `room_templates`
+(+3 built-in), `room_exports` (audit), `room_event_rsvps`. 17 SECURITY
+DEFINER functions (`search_path = ''`, EXECUTE `authenticated`; only
+`discover_rooms` also `anon`). Trust levels are derived, never stored.
+
+- database-security, dry run: public discovery returned the public room and
+  none of the private, locked or scheduled ones (member and anon); a
+  non-member's text search for a private room's description found nothing;
+  history/pulse/export refused for outsiders (42501); direct inserts refused;
+  export rate limit P0429 on the 4th call; export held no key, ciphertext or
+  link; room deletion still cascades (activity trigger guards a gone room).
+- database-security, `scripts/security/management-probe.mjs` (live,
+  disposable accounts): **26 pass, 0 fail**, including: an outsider receives
+  no live `room_activity` over Postgres Changes for the private room while the
+  member does; saved items are private; member/admin/owner differences for
+  templates, trust, export.
+- static, `tests/room-management.test.ts` (in the 116/116 run): activity
+  wording per kind, merge/de-dup of live + refetched rows, day grouping,
+  pulse chips (capability-gated numbers hidden), smart organization buckets,
+  discovery argument bounds, export file names, migration contract
+  (RLS/grants/search_path/anon only for discovery), realtime stays on the
+  existing five private channels, export never selects keys/paths/links.
+  Lint 0 errors / 13 warnings (unchanged); `next build` ok.
+
+Walkthrough (multi-user, local runtime): owner A on `localhost:3000`, member B
+on `127.0.0.1:3000`, disposable rooms `qa13 browser public/private`.
+
+| Check | Result |
+| --- | --- |
+| 13.2 Activity feed | Seeded rows shown grouped under Today; A started a poll → B's feed and pulse updated without reload (2 online, 5 updates) |
+| 13.3 Pulse bar | "N online · messages in 15 min · updates this hour · Next: event in 3h · task for you" (B), counts only |
+| 13.1 Search/filters | B: name search → 1 result; lifespan "permanent" → 0; feature Watch → 1, Study → 0 (after template turned Study off); My rooms → public room only (A's private room never listed); Save toggle works |
+| 13.5 Bookmarks | B saved a chat message from the message menu (menu then offers "Remove from saved"), the room from Explore; both listed on Home and removable |
+| 13.6 Templates | A saved a template, applied "Watch party" → B saw Study disabled and the rose theme live; create-room with "Study session" prefilled private + 24 h and created a room with emerald theme, Watch off and the rules text |
+| 13.10 Export | A downloaded `omnilume-…json` (2.6 kB) and the SHA-256 was shown; audit rows recorded |
+| 13.8 Trust | A sees "Steward" for self; member list badges (managers see all) |
+| 13.11 RSVP | B pressed Going → "Going · 1" selected; Home shows the same event with RSVP buttons |
+| 13.4/13.7/13.9 Home | Room home has the activity feed; Home groups rooms into Expiring soon / Needs attention / …, upcoming events, assigned tasks (hidden when Study is off) and Saved |
+| Mobile 390 px (same-origin iframe: the preview tab cannot be resized while hidden) | `/home`, `/explore`, room page: no horizontal overflow (scrollWidth 375); filters wrap to two columns |
+
+Bugs found in the walkthrough and fixed: (1) every temporary room was
+bucketed "Expiring soon" because the threshold was 24 h; now the last 3 h
+(unit-tested). (2) lint: `Date.now()` during render in the new RSVP row (now
+set when events load) and `aria-pressed` on a menu item (removed).
+
+Decisions / notes: E2EE exists for personal chats only, so "E2EE rooms" are
+not a room type; discovery and export never read ciphertext. Locked rooms are
+treated as invite-only and hidden; legacy `is_group` rooms are hidden from
+discovery. Export is signed with a recorded SHA-256 digest (no signing secret
+is configured; a keyed signature would need an owner-provided secret).
+Template apply at creation is best-effort (scheduled rooms are not yet
+"active", so apply is skipped; the owner can apply from Controls).

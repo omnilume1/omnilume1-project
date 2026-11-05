@@ -10,6 +10,7 @@ import type { CurrentAccount } from '@/lib/current-account';
 import { createClient } from '@/utils/supabase/client';
 import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
+import HomeOverview from '@/components/home/HomeOverview';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 
 interface Friend {
@@ -145,10 +146,7 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
               <div className="glass-card-ambient dashboard-stat"><OmniIcon name="user" size={17} /><strong>{account.profileDetailsCompleted ? 'Ready' : 'Set up'}</strong><span>Profile</span></div>
             </div>
 
-            <section className="glass-panel glass-card-ambient dashboard-empty-section">
-              <div className="section-header"><div><p className="section-kicker">Your calendar</p><h2 className="section-title">Upcoming schedules</h2></div></div>
-              <div className="dashboard-empty-copy"><OmniIcon name="clock" size={18} /><p>No upcoming schedules yet. Shared room events will appear here when they are available.</p></div>
-            </section>
+            <HomeOverview />
 
             <section className="glass-panel glass-card-ambient">
               <div className="section-header"><div><p className="section-kicker">Discover</p><h2 className="section-title">Public rooms to explore</h2></div><Link href="/explore" className="text-xs text-violet-300 hover:text-violet-200">View all</Link></div>
@@ -158,7 +156,6 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
               })}</div>}
             </section>
 
-            <section className="glass-panel glass-card-ambient"><p className="section-kicker">History</p><h2 className="section-title">Recent rooms</h2><p className="mt-4 text-sm text-neutral-500">No recent room history is available yet.</p></section>
           </div>
 
           <aside className="glass-card-ambient dashboard-profile-card">

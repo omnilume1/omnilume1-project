@@ -81,6 +81,14 @@ async function createRoomImpl(formData: FormData) {
 
   if (memberError) throw new Error(memberError.message);
 
+  // Optional template (Action 13): features, layout, theme and rules. The room
+  // is already created, so a template that cannot be applied is not fatal;
+  // the owner can apply it again from the room's Controls.
+  const templateId = formData.get('template_id');
+  if (typeof templateId === 'string' && /^[0-9a-f-]{36}$/i.test(templateId)) {
+    await supabase.rpc('apply_room_template', { p_room_id: roomId, p_template_id: templateId });
+  }
+
   return roomId;
 }
 export async function createRoom(formData: FormData) {

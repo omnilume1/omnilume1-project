@@ -4,7 +4,10 @@ import { unwrapAction } from '@/lib/action-result';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { getMyJoinedRooms, getPublicRooms, processRoomJoin } from '@/actions/rooms';
+import { getMyJoinedRooms, processRoomJoin } from '@/actions/rooms';
+import { discoverRooms, type DiscoveredRoom } from '@/lib/management-data';
+import { DEFAULT_DISCOVER_FILTERS, DISCOVER_PAGE_SIZE, activeFilterCount, type DiscoverFilters } from '@/lib/room-management-model';
+import { useBookmarks } from '@/components/room/BookmarkButton';
 import { getMyRoomJoinEligibility, joinRoomWithInvite, previewRoomInvite } from '@/actions/room-controls';
 import { roomDeletionPolicy } from '@/lib/room-deletion-policy';
 import { getLoginPath } from '@/lib/auth';
@@ -14,15 +17,6 @@ import InternalTopbar from '@/components/ui/InternalTopbar';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import { getMinimizedRoomIds, restoreMinimizedRoom } from '@/lib/minimized-rooms';
 
-interface PublicRoom {
-  id: string;
-  name: string;
-  description: string | null;
-  username: string | null;
-  expiration_type: string | null;
-  deletion_scheduled_at: string | null;
-  room_members: Array<{ count: number }>;
-}
 type InvitePreview = Awaited<ReturnType<typeof previewRoomInvite>> extends { ok: true; data: infer T } | { ok: false; error: string } ? T : never;
 type JoinedRoom = { role: string; rooms: { id: string; name: string; username: string | null } | { id: string; name: string; username: string | null }[] };
 
@@ -48,12 +42,17 @@ function eligibilityMessage(state: string) {
 }
 
 export default function ExploreRoomsPage() {
-  const [rooms, setRooms] = useState<PublicRoom[]>([]);
+  const [rooms, setRooms] = useState<DiscoveredRoom[]>([]);
   const [joinedRooms, setJoinedRooms] = useState<JoinedRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [filters, setFilters] = useState<DiscoverFilters>(DEFAULT_DISCOVER_FILTERS);
+  const [debouncedFilters, setDebouncedFilters] = useState<DiscoverFilters>(DEFAULT_DISCOVER_FILTERS);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+  const roomBookmarks = useBookmarks('room');
   const [roomCode, setRoomCode] = useState('');
   const [status, setStatus] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   // An invite shows the room and its deletion policy before joining (§9).
@@ -63,25 +62,42 @@ export default function ExploreRoomsPage() {
   const supabase = createClient();
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedFilters(filters), 300);
+    return () => window.clearTimeout(timer);
+  }, [filters]);
+
+  // Search and filters run in discover_rooms, so what a viewer sees is decided
+  // by the database (public/unlocked rooms, or only their own for "My rooms").
+  useEffect(() => {
     let active = true;
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      void discoverRooms(debouncedFilters).then((result) => {
+        if (!active) return;
+        if (!result.ok) { setLoadError(result.error); setLoading(false); return; }
+        setLoadError(null);
+        setRooms(result.data);
+        setHasMore(result.data.length === DISCOVER_PAGE_SIZE);
+        setLoading(false);
+      });
+    }, 0);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [debouncedFilters, reloadToken]);
 
-    async function fetchRooms() {
-      try {
-        const [data, joined] = await Promise.all([getPublicRooms().then(unwrapAction), getMyJoinedRooms().then(unwrapAction)]);
-        if (active) setRooms((data ?? []) as PublicRoom[]);
-        if (active) setJoinedRooms((joined ?? []) as JoinedRoom[]);
-      } catch {
-        if (active) setLoadError('Public rooms could not be loaded right now. Please refresh to try again.');
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
-    void fetchRooms();
-    return () => {
-      active = false;
-    };
+  useEffect(() => {
+    let active = true;
+    void getMyJoinedRooms().then(unwrapAction).then((joined) => { if (active) setJoinedRooms((joined ?? []) as JoinedRoom[]); }).catch(() => undefined);
+    return () => { active = false; };
   }, []);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    const result = await discoverRooms(debouncedFilters, rooms.length);
+    setLoadingMore(false);
+    if (!result.ok) { setLoadError(result.error); return; }
+    setRooms((current) => [...current, ...result.data.filter((room) => !current.some((existing) => existing.id === room.id))]);
+    setHasMore(result.data.length === DISCOVER_PAGE_SIZE);
+  };
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
@@ -160,10 +176,9 @@ export default function ExploreRoomsPage() {
     }
   };
 
-  const filteredRooms = useMemo(() => rooms.filter((room) => (
-    room.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (room.username?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
-  )), [rooms, searchQuery]);
+  const filteredRooms = rooms;
+  const filterCount = activeFilterCount(filters);
+  const setFilter = <K extends keyof DiscoverFilters>(key: K, value: DiscoverFilters[K]) => setFilters((current) => ({ ...current, [key]: value }));
 
   return (
     <div className="omni-internal">
@@ -176,13 +191,13 @@ export default function ExploreRoomsPage() {
             <h2 className="section-title">Find your next room</h2>
             <p className="section-copy">Search by room name or username, then join when the space feels right.</p>
           </div>
-          <span className="explore-room-count"><OmniIcon name="rooms" size={14} /> {loading ? 'Loading rooms' : `${rooms.length} public rooms`}</span>
+          <span className="explore-room-count"><OmniIcon name="rooms" size={14} /> {loading ? 'Loading rooms' : `${rooms.length}${hasMore ? '+' : ''} ${filters.scope === 'mine' ? 'of your rooms' : 'public rooms'}`}</span>
         </section>
 
         <section className="explore-controls">
           <div className="glass-card-ambient explore-control-card">
-            <label htmlFor="room-search" className="explore-control-label"><OmniIcon name="search" size={16} /> Search public rooms</label>
-            <input id="room-search" type="search" placeholder="Search by name or @username..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="omni-input" />
+            <label htmlFor="room-search" className="explore-control-label"><OmniIcon name="search" size={16} /> Search {filters.scope === 'mine' ? 'your rooms' : 'public rooms'}</label>
+            <input id="room-search" type="search" placeholder="Search by name, @username or topic..." value={filters.query} maxLength={100} onChange={(event) => setFilter('query', event.target.value)} className="omni-input" />
           </div>
           <div className="glass-card-ambient explore-control-card">
             <label htmlFor="room-code" className="explore-control-label"><OmniIcon name="lock" size={16} /> Join with a link or code</label>
@@ -191,6 +206,28 @@ export default function ExploreRoomsPage() {
               <button type="submit" disabled={!roomCode.trim() || processingId === roomCode} className="omni-button omni-button-primary shrink-0">{processingId === roomCode ? 'Joining...' : 'Join'}</button>
             </form>
           </div>
+        </section>
+
+        <section className="glass-card-ambient discover-filters" aria-label="Room filters">
+          <div className="discover-scope" role="group" aria-label="Where to search">
+            <button type="button" className={`omni-button ${filters.scope === 'public' ? 'omni-button-primary' : 'omni-button-ghost'}`} aria-pressed={filters.scope === 'public'} onClick={() => setFilter('scope', 'public')}>Public rooms</button>
+            <button type="button" className={`omni-button ${filters.scope === 'mine' ? 'omni-button-primary' : 'omni-button-ghost'}`} aria-pressed={filters.scope === 'mine'} onClick={() => setFilter('scope', 'mine')}>My rooms</button>
+          </div>
+          <label className="discover-field"><span>Lifespan</span>
+            <select className="omni-input" value={filters.lifespan} onChange={(event) => setFilter('lifespan', event.target.value as DiscoverFilters['lifespan'])}>
+              <option value="">Any</option><option value="permanent">Permanent</option><option value="recoverable">Temporary (recoverable)</option><option value="irreversible">Temporary (final)</option>
+            </select></label>
+          <label className="discover-field"><span>Has feature</span>
+            <select className="omni-input" value={filters.feature} onChange={(event) => setFilter('feature', event.target.value as DiscoverFilters['feature'])}>
+              <option value="">Any</option><option value="watch">Watch</option><option value="study">Study</option><option value="chat">Chat</option><option value="files">Files</option>
+            </select></label>
+          <label className="discover-field"><span>Min. members</span>
+            <input className="omni-input" type="number" min={0} max={100000} inputMode="numeric" value={filters.minMembers ?? ''} onChange={(event) => setFilter('minMembers', event.target.value === '' ? null : Number(event.target.value))} placeholder="Any" /></label>
+          <label className="discover-field"><span>Sort by</span>
+            <select className="omni-input" value={filters.sort} onChange={(event) => setFilter('sort', event.target.value as DiscoverFilters['sort'])}>
+              <option value="newest">Newest</option><option value="members">Most members</option><option value="active">Recently active</option>
+            </select></label>
+          {(filterCount > 0 || filters.query) && <button type="button" className="omni-button omni-button-ghost discover-reset" onClick={() => setFilters(DEFAULT_DISCOVER_FILTERS)}>Clear{filterCount > 0 ? ` (${filterCount})` : ''}</button>}
         </section>
 
         {invitePreview && (() => {
@@ -211,16 +248,22 @@ export default function ExploreRoomsPage() {
 
         <section className="explore-list-section">
           <div className="explore-list-heading"><div><p className="section-kicker !mb-0">Rooms open to everyone</p><p className="mt-2 text-sm text-neutral-500">Showing real public rooms currently available to join.</p></div><span className="text-xs text-neutral-500">{filteredRooms.length} found</span></div>
-          {loading ? <div className="glass-card-ambient empty-state">Loading public spaces...</div> : loadError ? <div className="form-error">{loadError}</div> : filteredRooms.length === 0 ? <div className="glass-card-ambient empty-state">No public rooms match your search.</div> : <div className="explore-room-grid">{filteredRooms.map((room) => {
-            const memberCount = room.room_members[0]?.count ?? 0;
+          {loading ? <div className="glass-card-ambient empty-state" aria-busy="true">Loading rooms...</div> : loadError ? <div className="form-error" role="alert">{loadError} <button type="button" className="underline" onClick={() => setReloadToken((value) => value + 1)}>Retry</button></div> : filteredRooms.length === 0 ? <div className="glass-card-ambient empty-state">{filters.scope === 'mine' ? 'None of your rooms match.' : 'No public rooms match your search.'}</div> : <div className="explore-room-grid">{filteredRooms.map((room) => {
+            const memberCount = room.member_count;
             const policy = roomDeletionPolicy(room);
+            const joinedAlready = room.viewer_role !== null;
             return <article key={room.id} className="glass-card-ambient explore-room-card">
-              <div className="explore-room-card-top"><span className="room-chip text-violet-200">Public</span><span className="explore-room-members"><OmniIcon name="users" size={14} /> {memberCount} joined</span></div>
+              <div className="explore-room-card-top"><span className="room-chip text-violet-200">{room.is_private ? 'Private' : 'Public'}</span><span className="explore-room-members"><OmniIcon name="users" size={14} /> {memberCount} joined</span></div>
               <p className="text-xs text-neutral-400" title={policy.description}><span className="font-semibold text-amber-100">{policy.label}</span><span className="sr-only">: {policy.description}</span></p>
               <div className="min-w-0"><h3 className="truncate text-lg font-semibold text-neutral-100">{room.name}</h3>{room.username && <p className="mt-1 text-xs text-violet-300">@{room.username}</p>}{room.description && <p className="explore-room-description">{room.description}</p>}</div>
-              <button onClick={() => void handleJoin(room.id)} disabled={processingId === room.id} className="omni-button omni-button-ghost mt-auto w-full">{processingId === room.id ? 'Joining...' : 'Join room'} <OmniIcon name="arrow" size={14} /></button>
+              <div className="mt-auto flex gap-2">
+                <button onClick={() => joinedAlready ? router.push(`/room/${room.id}`) : void handleJoin(room.id)} disabled={processingId === room.id} className="omni-button omni-button-ghost w-full">{processingId === room.id ? 'Joining...' : joinedAlready ? 'Open room' : 'Join room'} <OmniIcon name="arrow" size={14} /></button>
+                <button type="button" className="omni-button omni-button-ghost shrink-0" aria-pressed={roomBookmarks.saved.has(room.id)} disabled={roomBookmarks.busy === room.id} aria-label={roomBookmarks.saved.has(room.id) ? `Remove ${room.name} from saved` : `Save ${room.name}`} onClick={() => void roomBookmarks.toggle(room.id, room.id)}>{roomBookmarks.saved.has(room.id) ? '★' : '☆'}</button>
+              </div>
             </article>;
           })}</div>}
+          {!loading && !loadError && hasMore && <div className="mt-4 text-center"><button type="button" className="omni-button omni-button-ghost" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? 'Loading…' : 'Show more rooms'}</button></div>}
+          {roomBookmarks.error && <p role="alert" className="form-error mt-3">{roomBookmarks.error}</p>}
         </section>
       </main>
       <FloatingDock />

@@ -10,6 +10,8 @@ import {
   type Countdown, type Poll, type PollResult, type RoomEventRow, type SearchHit,
 } from '@/lib/collab-data';
 import { formatDuration } from '@/lib/collab-hooks';
+import { listEventRsvpCounts, setEventRsvp, type RsvpCounts } from '@/lib/management-data';
+import { RSVP_LABELS, type RsvpResponse } from '@/lib/room-management-model';
 
 type Tab = 'polls' | 'countdowns' | 'events' | 'search';
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -232,13 +234,24 @@ function EventsSection({ roomId }: { roomId: string }) {
   const [startsAt, setStartsAt] = useState(() => localDateTimeInput(60));
   const [busy, setBusy] = useState(false);
 
+  const [rsvps, setRsvps] = useState<Map<string, RsvpCounts>>(new Map());
+  const [loadedAt, setLoadedAt] = useState(0);
+
   const load = useCallback(async () => {
-    const result = await listEvents(roomId);
+    const [result, counts] = await Promise.all([listEvents(roomId), listEventRsvpCounts(roomId)]);
     setLoading(false);
+    setLoadedAt(Date.now());
     if (!result.ok) { setError(result.error); return; }
     setItems(result.data); setError(null);
+    if (counts.ok) setRsvps(new Map(counts.data.map((row) => [row.event_id, row])));
   }, [roomId]);
   useHintedLoad(['events'], () => { void load(); });
+
+  const respond = async (eventId: string, response: RsvpResponse | null) => {
+    const result = await setEventRsvp(eventId, response);
+    if (!result.ok) { setError(result.error); return; }
+    void load();
+  };
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
@@ -273,6 +286,17 @@ function EventsSection({ roomId }: { roomId: string }) {
               <p className="collab-card-title">{item.title}{item.cancelled_at && <span className="collab-badge">Cancelled</span>}</p>
               <p className="collab-meta"><time dateTime={item.starts_at}>{new Date(item.starts_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time> · {names.get(item.created_by) ?? 'Member'}</p>
               {item.details && <p className="collab-text">{item.details}</p>}
+              {!item.cancelled_at && new Date(item.ends_at ?? item.starts_at).getTime() + (item.ends_at ? 0 : 3_600_000) > loadedAt && (() => {
+                const counts = rsvps.get(item.id);
+                return (
+                  <div className="rsvp-row" role="group" aria-label={`Your response to ${item.title}`}>
+                    {(Object.keys(RSVP_LABELS) as RsvpResponse[]).map((response) => (
+                      <button key={response} type="button" className={`rsvp-button ${counts?.my_response === response ? 'is-selected' : ''}`} aria-pressed={counts?.my_response === response}
+                        onClick={() => void respond(item.id, counts?.my_response === response ? null : response)}>{RSVP_LABELS[response]}{counts ? ` · ${counts[response]}` : ''}</button>
+                    ))}
+                  </div>
+                );
+              })()}
               {!item.cancelled_at && (item.created_by === currentUserId || capabilities.manageAnnouncements) && (
                 <button type="button" className="collab-link is-danger" onClick={() => void cancelEvent(item.id).then((result) => { if (!result.ok) setError(result.error); else { announce('events'); void load(); } })}>Cancel event</button>
               )}
