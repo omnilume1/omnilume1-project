@@ -6,7 +6,8 @@ import { listRoomFiles, type RoomFileRow } from '@/actions/room-files';
 
 export type StudyNote = { id: string; room_id: string; owner_id: string; scope: 'room' | 'personal'; title: string; content: string; version: number; created_at: string; updated_at: string };
 export type PdfAnnotation = { id: string; room_id: string; file_id: string; owner_id: string; page_number: number; position: Record<string, unknown>; content: string; created_at: string; updated_at: string };
-export type RoomWhiteboard = { room_id: string; state: { dataUrl?: string | null }; version: number; updated_by: string; updated_at: string };
+// state is parsed and sanitized client-side by src/lib/whiteboard-model.ts.
+export type RoomWhiteboard = { room_id: string; state: Record<string, unknown>; version: number; updated_by: string; updated_at: string };
 
 async function studyClient(roomId: string) {
   const supabase = await createClient();

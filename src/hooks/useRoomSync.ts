@@ -77,6 +77,9 @@ export type RoomSyncValue = {
   // (first join and every rejoin). Rows committed before that are never
   // replayed, so persistent views (chat) re-fetch through RLS when it changes.
   connectionGeneration: number;
+  // Highest whiteboard version announced by another member. The board itself
+  // is re-read through getRoomWhiteboard (see room-broadcast-contract.ts).
+  whiteboardVersion: number;
   recordMediaTime: (time: number) => void;
   broadcastEvent: (eventType: SyncEventType, payload?: Record<string, unknown>) => void;
 };
@@ -233,7 +236,7 @@ function isMediaEvent(eventType: SyncEventType) {
 
 function channelKindForEvent(eventType: SyncEventType): RoomChannelKind {
   if (eventType === 'typing') return 'chat';
-  if (eventType === 'timer_start' || eventType === 'timer_pause' || eventType === 'timer_reset') return 'study';
+  if (eventType === 'timer_start' || eventType === 'timer_pause' || eventType === 'timer_reset' || eventType === 'whiteboard_changed') return 'study';
   if (eventType === 'request_sync') return 'watch';
   return isMediaEvent(eventType) ? 'control' : 'general';
 }
@@ -354,6 +357,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
   const [roomControlEvents, setRoomControlEvents] = useState<RoomControlEvent[]>([]);
   const [roomControlVersion, setRoomControlVersion] = useState(0);
   const [connectionGeneration, setConnectionGeneration] = useState(0);
+  const [whiteboardVersion, setWhiteboardVersion] = useState(0);
   // Server-allocated versions of the persisted media/timer snapshots. Older
   // Broadcasts and snapshots are ignored.
   const stateVersionsRef = useRef<Record<'media' | 'timer', number>>({ media: 0, timer: 0 });
@@ -573,6 +577,12 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       return;
     }
 
+    if (event.event_type === 'whiteboard_changed') {
+      const version = payload.version as number;
+      setWhiteboardVersion((current) => Math.max(current, version));
+      return;
+    }
+
     if (event.event_type === 'timer_start' || event.event_type === 'timer_pause' || event.event_type === 'timer_reset') {
       applyTimerEvent(event.event_type, payload);
       return;
@@ -772,6 +782,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
       setRoomControlEvents([]);
       setRoomControlVersion(0);
       setConnectionGeneration(0);
+      setWhiteboardVersion(0);
     }, 0);
 
     // Refresh the restored URL under current authorization: signed URLs
@@ -973,6 +984,7 @@ export function useRoomSync(roomId: string, canControlMedia = false): RoomSyncVa
     roomControlEvents,
     roomControlVersion,
     connectionGeneration,
+    whiteboardVersion,
     recordMediaTime,
     broadcastEvent,
   };

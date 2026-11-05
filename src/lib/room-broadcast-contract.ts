@@ -8,7 +8,8 @@
 // or signed URLs.
 //
 // Persistent protected data reaches clients only through RLS-checked Postgres
-// Changes (chat) or authenticated fetches (Watch media via resolveRoomMedia).
+// Changes (chat) or authenticated fetches (Watch media via resolveRoomMedia,
+// the whiteboard via getRoomWhiteboard).
 // Broadcast carries only identifiers, playback/timer state and revision hints.
 // Both the sender and the receiver pass every payload through
 // toRoomBroadcastPayload, so a client that still sends extra fields cannot
@@ -32,11 +33,12 @@ export const ROOM_BROADCAST_EVENT_TYPES = [
   'timer_pause',
   'timer_reset',
   'subtitle_upload',
+  'whiteboard_changed',
 ] as const;
 
 export type RoomBroadcastEventType = (typeof ROOM_BROADCAST_EVENT_TYPES)[number];
 
-type FieldKind = 'uuid' | 'id' | 'number' | 'boolean' | 'source' | 'subject';
+type FieldKind = 'uuid' | 'id' | 'number' | 'version' | 'boolean' | 'source' | 'subject';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // castId and timer sessionId are client-generated event ids (UUIDs, or a
@@ -86,6 +88,9 @@ const EVENT_FIELDS: Record<RoomBroadcastEventType, Record<string, FieldKind>> = 
   timer_start: TIMER_FIELDS,
   timer_pause: TIMER_FIELDS,
   timer_reset: TIMER_FIELDS,
+  // A revision hint only: members re-read the board through the protected
+  // getRoomWhiteboard action; drawing content never travels over Broadcast.
+  whiteboard_changed: { version: 'version' },
 };
 
 // Media events are useless without a mediaId: receivers resolve the playable
@@ -105,6 +110,8 @@ function isValidField(kind: FieldKind, value: unknown) {
       return typeof value === 'string' && EVENT_ID_PATTERN.test(value);
     case 'number':
       return typeof value === 'number' && Number.isFinite(value);
+    case 'version':
+      return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
     case 'boolean':
       return typeof value === 'boolean';
     case 'source':
@@ -130,6 +137,7 @@ export function toRoomBroadcastPayload(eventType: unknown, payload: unknown): Re
     if (isValidField(kind, source[key])) wire[key] = source[key];
   }
   if (MEDIA_ID_REQUIRED.has(eventType) && typeof wire.mediaId !== 'string') return null;
+  if (eventType === 'whiteboard_changed' && typeof wire.version !== 'number') return null;
   return wire;
 }
 

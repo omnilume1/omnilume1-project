@@ -8,6 +8,7 @@ import MembersTab from '@/components/room/MembersTab';
 import FilesTab from '@/components/room/FilesTab';
 import MediaStage from '@/components/room/MediaStage'; 
 import StudyStage, { StudyMiniTimer } from '@/components/room/StudyStage';
+import StudyWhiteboardPanel from '@/components/room/StudyWhiteboardPanel';
 import { getRoomAccess } from '@/actions/members';
 import { convertRoomToGroup } from '@/actions/rooms';
 import {
@@ -540,6 +541,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           <div className="workspace-rail-group w-full">
             <button type="button" aria-label="Watch" title={featureEnabled('watch') ? 'Watch' : 'Watch is disabled by this room'} aria-disabled={!featureEnabled('watch')} onClick={() => setMainActivity('watch')} className={`workspace-tool ${mainActivity === 'watch' ? 'is-active' : ''} ${!featureEnabled('watch') ? 'opacity-40' : ''}`}><OmniIcon name="play" size={17} /></button>
             <button type="button" aria-label="Study" title={featureEnabled('study') ? 'Study' : 'Study is disabled by this room'} aria-disabled={!featureEnabled('study')} onClick={() => setMainActivity('study')} className={`workspace-tool ${mainActivity === 'study' ? 'is-active' : ''} ${!featureEnabled('study') ? 'opacity-40' : ''}`}><OmniIcon name="study" size={18} /></button>
+            <button type="button" aria-label="Whiteboard" title={featureEnabled('study') ? 'Whiteboard' : 'The whiteboard is part of Study, which is disabled by this room'} aria-disabled={!featureEnabled('study')} onClick={() => setMainActivity('whiteboard')} className={`workspace-tool ${mainActivity === 'whiteboard' ? 'is-active' : ''} ${!featureEnabled('study') ? 'opacity-40' : ''}`}><OmniIcon name="pen" size={17} /></button>
           </div>
           <div className="my-2 h-px w-8 bg-neutral-800" />
           <div className="workspace-rail-group w-full">
@@ -586,10 +588,10 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           )}
 
           {mainActivity === 'whiteboard' && (
-            <div className="relative z-10 flex min-h-0 flex-1 flex-col p-4">
-              <div className="flex flex-1 items-center justify-center rounded-xl border border-neutral-800 bg-[#0a0a0a]">
-                <span className="text-sm text-neutral-500">Whiteboard coming soon...</span>
-              </div>
+            <div className="relative z-10 flex min-h-0 flex-1 flex-col p-3">
+              {featureEnabled('study')
+                ? <StudyWhiteboardPanel roomId={roomData.id} />
+                : <div className="flex flex-1 items-center justify-center rounded-xl border border-neutral-800 bg-[#0a0a0a] p-6 text-center text-sm text-neutral-500">The whiteboard is part of Study, which this room has disabled.</div>}
             </div>
           )}
         </main>

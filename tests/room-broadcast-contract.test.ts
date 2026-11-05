@@ -30,7 +30,9 @@ const leakyPayload = () => ({
   segmentStartedAt: Date.now(),
   completed: false,
   subject: 'Linear algebra',
+  version: 3,
   // Everything below is protected and must never survive.
+  elements: [{ id: 'a', kind: 'text', text: SECRET_MARKER }],
   url: `https://project.supabase.co/storage/v1/object/sign/room_attachments/x.mp4?token=${SECRET_MARKER}`,
   subtitleUrl: `https://project.supabase.co/storage/v1/object/sign/x.vtt?token=${SECRET_MARKER}`,
   title: `${SECRET_MARKER} private title.mp4`,
@@ -47,7 +49,7 @@ test('no Broadcast event type can carry chat text, titles, URLs or storage paths
     const serialized = JSON.stringify(wire);
     assert.ok(!serialized.includes(SECRET_MARKER), `${eventType} leaked protected content: ${serialized}`);
     assert.ok(!/https?:|\/storage\/v1\/|token=|\/media\/|\/subtitles\//i.test(serialized), `${eventType} leaked a URL or path: ${serialized}`);
-    for (const key of ['url', 'subtitleUrl', 'title', 'message', 'content', 'file_url', 'storage_path']) {
+    for (const key of ['url', 'subtitleUrl', 'title', 'message', 'content', 'file_url', 'storage_path', 'elements']) {
       assert.ok(!(key in wire), `${eventType} kept ${key}`);
     }
   }
