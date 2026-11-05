@@ -2159,3 +2159,122 @@ are not removed when their room is deleted (no FK on the polymorphic target;
 unreadable since membership fails). Now-playing rows stay (one per user,
 filtered by age). Presence audience is friends only: room/group members who are
 not friends see nothing. Existing probes were not re-run.
+
+## Action 16 Stage 4 (custom sources, decision 9)
+
+Migration `20261112100000_action16_music_custom_sources.sql` (additive): one
+table `music_custom_sources` (RLS on, `REVOKE ALL … FROM PUBLIC, anon,
+authenticated`, then SELECT/INSERT/DELETE and column-limited UPDATE to
+`authenticated`; one owner-only policy; inline URL CHECKs = `https://` without
+user-info, or `http://localhost|127.0.0.1` for local development; search URL
+must contain `{query}`; `responsibility_accepted` must be true; ≤ 10 per account
+(54000); `owner_id` cascades with the auth user). No SECURITY DEFINER code and
+no server route: the browser fetches the manifest, search and health URLs
+(`credentials: 'omit'`, no referrer, `redirect: 'error'`, 8 s timeout, 1 MB
+cap), so there is no server-side request to abuse. Source tracks are never
+uploads (no `uploadId`), so presence, history, Listen Together, playlists and
+sharing (all keyed on `music_uploads`) cannot include them. OmniLume ships no
+source. Contract (`src/lib/music-sources.ts`): manifest `{ "omnilume": 1, name,
+search: "…{query}…", health? }`; search answer `{ tracks: [{ id, title, artist?,
+album?, durationMs?, artwork?, audio }] }`, invalid entries dropped, text
+cleaned and capped, ≤ 50 tracks.
+
+- database-security, dry run (migration + checks in one transaction ended by
+  `RAISE`, as owner / other user / `anon`): **31/31** — https add ok; non-local
+  http, user-info, missing `{query}`, `javascript:`, unticked responsibility and
+  `localhost.evil.example` 23514; duplicate 23505; owner cannot change
+  `owner_id` or `manifest_url` (42501) nor break the URL rule by update (23514);
+  other user reads 0, cannot insert for the owner (42501), update/delete touch
+  nothing; anon read/insert 42501; cap: 9 in one statement refused, 8 allowed,
+  11th refused, separate per user; RLS on, anon no privilege, FK cascades. Then
+  `supabase db push` (local = remote before, one migration applied).
+- database-security, live `scripts/security/music-probe.mjs`: **83 pass, 0
+  fail** (Stage 3's 72 + 11 source checks: add, non-local http / no
+  responsibility / no `{query}` refused, other users cannot read, delete or add
+  for someone else, toggle + health recording ok, `manifest_url` not
+  rewritable, anon refused, rows cascade with account deletion).
+- static: `tests/music-sources.test.ts` (URL rule incl. `localhost.evil`,
+  user-info, `javascript:`/`data:`, whitespace, length; manifest contract;
+  `{query}` encoding in every slot + 100-char cap; result cleaning, unsafe
+  audio/artwork refused, ≤ 50; migration contract; no server route imports the
+  fetcher). `npm run test:unit` **169/169**; lint 0 errors / 13 warnings
+  (baseline); `next build` ok.
+- local runtime / browser (`next start`, incognito, throw-away account deleted
+  after; a scratchpad-only node test source on `http://localhost:3099` with
+  CORS): Settings → "Add Source" stays disabled until the responsibility box is
+  ticked; `http://music.example/…` refused in the browser; a manifest without
+  `{query}` and a 404 manifest each refused with their message; the valid
+  source added ("Working", form reset). Search "glow" → "From your sources"
+  row; ⋯ menu offers only Play Next / Add to Queue; play → audio fetched from
+  the source, LCD + Media Session "playing", no `record_music_play`,
+  `set_music_now_playing` or `music_listen_control` request. Search "e" → the
+  source returned 3 entries, the `javascript:` one was dropped; source artwork
+  shown. Check → Working; toggle off; source stopped → Check → "Not working:
+  Not reachable …"; Remove → list empty. Settings and search at 390/1440: no
+  horizontal overflow.
+
+Limits: the `http://localhost` exception exists for local testing (a browser
+treats localhost as a secure context); on the deployed https site it only
+reaches the user's own machine. A source must send CORS headers or it cannot
+be added. Source audio and artwork load directly from the source host (its
+operator sees the listener's IP, as with any web media). No HTTPS source was
+tried (no public test host); the https path is the same code with the
+protocol check. Existing non-music probes were not re-run.
+
+## Action 16.13 (part: Fix tags) + 16.12 (final verification)
+
+Scope chosen by the owner on 2026-11-06: the final regression plus the
+MusicBrainz / Cover Art Archive part of 16.13. Providers (16.0, 16.3, 16.6-16.10)
+stay deferred (decision 1; they need accounts and keys); lyrics providers stay
+off (LRCLIB needs the owner's risk decision, Musixmatch a paid key).
+
+Fix tags: ⋯ → "Fix Tags…" on an own active upload. `GET
+/api/music/metadata?upload=<id>` reads the upload through RLS (owner only) and
+calls only the fixed MusicBrainz search endpoint (quoted Lucene phrase on title
++ artist, identifying User-Agent from `MUSICBRAINZ_USER_AGENT` or a default, 8 s
+timeout, no redirects, ≤ 1 request/s per server instance, one spaced retry on
+503); no user-supplied URL reaches the server. The owner picks a match and
+presses Apply; optional artwork is fetched by the browser from the Cover Art
+Archive, re-encoded to JPEG (≤ 1200 px, EXIF dropped) and put in the existing
+cover slot. Migration `20261113100000_action16_music_fix_tags.sql` adds one
+SECURITY DEFINER RPC `update_music_upload_tags` (`search_path = ''`,
+`auth.uid()` null → 42501, owner + active + unexpired only, validated lengths
+and ranges, NULL keeps a value, artwork attached only when none exists and the
+cover object is there; EXECUTE → `authenticated`, revoked from PUBLIC/anon).
+Clients still have no UPDATE on `music_uploads`.
+
+- database-security, dry run (RPC + checks in one transaction ended by
+  `RAISE`): **14/14** — owner fix ok, NULL keeps genre, bad year / blank title
+  22023, artwork flag without object 22023, with object attached, second cover
+  refused, other user and anon 42501 with the row unchanged, expired 42501,
+  `search_path` pinned, anon cannot execute. Then `supabase db push`.
+- database-security, live `scripts/security/music-probe.mjs`: **87 pass, 0
+  fail** (+4: owner fix, other user 42501, anon refused, artwork flag needs the
+  object).
+- regression: all 12 earlier probes re-run with two throw-away QA accounts
+  (deleted after, with their rooms): authorization (full) 175, lifecycle 26,
+  site-owner 43, notification 25, messaging 37, workspace 20, media 12, watch
+  20, collab 24, management 26, conversion 19, conversations 42 — **469 pass,
+  0 fail**.
+- static: `tests/music-metadata.test.ts` (phrase escaping incl. injection
+  attempts, response mapping and caps, artwork URL only for a valid id,
+  migration/route contract). `npm run test:unit` **173/173**; lint 0 errors /
+  13 warnings (baseline); `next build` ok.
+- local runtime / browser (`next start`, incognito, throw-away account deleted
+  after): a synthetic upload tagged "Clair de lune / Claude Debussy / Unknown
+  Mix" → Fix Tags listed 5 MusicBrainz matches; unknown upload id → 404; Apply
+  on "Moonlight Classics" saved title, album, year 1995 and track 6 (checked in
+  the database). None of those 5 releases has a Cover Art Archive front image
+  (404, previews hidden), so the dialog said the artwork could not be fetched
+  and kept the tags; a release that has art was fetched and decoded in the
+  browser (archive.org redirect, CORS `*`, 500×494 JPEG). Found during the
+  check: MusicBrainz returns 503 under rate limiting → one spaced retry added.
+  Final sweep, 12 music routes × {390, 1440}: no horizontal overflow.
+
+Limits: the throttle is per server instance and results are not cached
+(`shortcut:` comment in the route); add the planned cache/rate table if
+lookups become frequent. Set `MUSICBRAINZ_USER_AGENT` (app name + contact) in
+production as MusicBrainz asks. The full artwork apply (upload + attach) was not
+seen end-to-end in the browser because the matches had no art; its pieces were
+(browser fetch/decode here, cover upload in Stage 2, attach in the dry run).
+Cover previews load from the Cover Art Archive, which sees the viewer's IP.

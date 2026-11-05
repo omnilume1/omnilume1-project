@@ -16,6 +16,8 @@ export type MusicTrack = {
   expiresAt?: string;
   /** Set for uploads someone shared to one of my rooms/groups. */
   sharedFrom?: string;
+  /** Set for tracks from one of my custom sources (owner-only; never uploads). */
+  sourceName?: string;
   /** False once expired or deleted (shown as "Expired", not playable). */
   available?: boolean;
 };

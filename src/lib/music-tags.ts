@@ -48,7 +48,7 @@ function sampleHue(bitmap: ImageBitmap, fallback: number) {
 }
 
 /** Re-encode embedded art as JPEG ≤ 1200 px and ≤ 2 MB (drops EXIF and other metadata). */
-async function toCover(source: Blob, fallbackHue: number) {
+export async function toCover(source: Blob, fallbackHue: number) {
   try {
     const bitmap = await createImageBitmap(source);
     const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));

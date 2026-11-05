@@ -1,6 +1,7 @@
 import Form from 'next/form';
 import { MusicIcon } from '@/components/music/MusicIcon';
 import { PageTitle } from '@/components/music/MusicParts';
+import { SourceResults } from '@/components/music/MusicSources';
 import { SearchResults } from '@/components/music/MusicViews';
 
 export default async function MusicSearchPage({ searchParams }: { searchParams: Promise<{ q?: string | string[] }> }) {
@@ -15,10 +16,15 @@ export default async function MusicSearchPage({ searchParams }: { searchParams: 
           <input name="q" type="search" defaultValue={query} placeholder="Songs, albums, artists, playlists" aria-label="Search music" maxLength={100} data-music-search />
         </Form>
       </div>
-      {query ? <SearchResults query={query} /> : (
+      {query ? (
+        <>
+          <SearchResults query={query} />
+          <SourceResults key={query} query={query} />
+        </>
+      ) : (
         <>
           <PageTitle>Search</PageTitle>
-          <p className="mu-muted mu-section">Search your uploads, playlists and songs shared with you.</p>
+          <p className="mu-muted mu-section">Search your uploads, playlists, songs shared with you and your custom sources.</p>
         </>
       )}
     </>

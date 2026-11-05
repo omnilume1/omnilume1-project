@@ -394,6 +394,22 @@
 .music-app .mu-targets { display: grid; margin: 10px 0 0; padding: 0; list-style: none; }
 .music-app .mu-targets li { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; border-bottom: 0.5px solid var(--mu-divider); }
 .music-app .mu-targets .mu-text-button:disabled { opacity: .4; cursor: default; }
+.music-app .mu-source-form { display: grid; gap: 8px; max-width: 560px; margin-top: 12px; }
+.music-app .mu-source-form input[type='url'] {
+  height: 36px; padding: 0 14px; border: 0.5px solid var(--mu-search-border); border-radius: 1000px;
+  background: var(--mu-q5); color: var(--mu-text); font: inherit; font-size: 14px;
+}
+.music-app .mu-source-form .mu-check { margin: 4px 0; font-weight: 400; }
+.music-app .mu-source-form .mu-pill-button { justify-self: start; }
+.music-app .mu-sources { max-width: 720px; }
+.music-app .mu-sources li { flex-wrap: wrap; padding: 8px 0; }
+.music-app .mu-source-main { display: grid; gap: 2px; min-width: 0; }
+.music-app .mu-source-main strong, .music-app .mu-source-main .mu-fine { overflow-wrap: anywhere; }
+.music-app .mu-source-actions { display: flex; align-items: center; gap: 6px; }
+.music-app .mu-check.is-inline { margin: 0; font-weight: 400; }
+.music-app .mu-candidates li { padding: 0; }
+.music-app .mu-candidate { display: grid; grid-template-columns: auto 40px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 54px; cursor: pointer; }
+.music-app .mu-candidate img, .music-app .mu-candidate-blank { width: 40px; height: 40px; border-radius: 5px; background: var(--mu-q4); object-fit: cover; }
 
 /* ---------- Keyframes ---------- */
 @keyframes mu-shimmer { to { background-position: -200% 0; } }

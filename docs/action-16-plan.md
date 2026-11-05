@@ -1,6 +1,6 @@
 # Action 16 plan (branch `feat/action-16`)
 
-**Status: approved with the owner decisions below; Stage 1 (16.1 + 16.2) done in `0b63be7`; Stage 2 (16.4 + 16.5) done in `4787d07`; Stage 3 (presence + Listen Together, decisions 5/6; uploads part of 16.11) built and live-probed, not yet committed (ledger "Action 16 Stage 3"); Stage 4 (custom sources) awaits the owner's go.**
+**Status: approved with the owner decisions below; Stage 1 (16.1 + 16.2) done in `0b63be7`; Stage 2 (16.4 + 16.5) done in `4787d07`; Stage 3 (presence + Listen Together, decisions 5/6; uploads part of 16.11) done in `0d79181` (ledger "Action 16 Stage 3"); Stage 4 (custom sources, decision 9) done — see 16.14 (ledger "Action 16 Stage 4"). 16.12 final regression and the Fix-tags part of 16.13 done (ledger "Action 16.13 (part) + 16.12"). Still deferred until the owner supplies keys/decisions: providers (16.0, 16.3, 16.6-16.10, decision 1), YouTube room cast (16.11), 16.13 cache table and lyrics providers.**
 Resume point. Tick an item only with its commit hash; evidence goes in
 `docs/action-01-10-evidence-ledger.md` (new section "Action 16", same layout as
 Actions 13-15: Database / database-security / static / local runtime / Limits).
@@ -115,7 +115,7 @@ Limits).
   Tests/evidence: dry run **as `authenticated`** (member allowed, non-member/removed/blocked/anon refused; malformed topic returns false, never raises); live private-channel delivery/refusal probe (extend `music-probe.mjs`); `tests/music-sync.test.ts` (seq ordering, anchor maths); two-tab browser run; `public` channel join must fail ("PrivateOnly").
   Model: **Opus 5.5, high** (realtime authorization).
 
-- [ ] **16.12 Verification and ledger.** Per task above plus a final regression: re-run all existing probes (authorization, lifecycle, site-owner, notification, messaging, workspace, media, watch, collab, management, conversion, conversations) as `authenticated`/anon — 0 fail; `npm run test:unit`, `npm run lint` (no new errors), `next build`; browser at 1440/390; write the ledger "Action 16" section and tick this file with hashes. Model: Sonnet 5.5, medium.
+- [x] **16.12 Verification and ledger.** Done 2026-11-06 (ledger "Action 16.13 (part) + 16.12"): 12 probes 469/469, music-probe 87/87, 173 tests, lint baseline, build, 390/1440 sweep. Per task above plus a final regression: re-run all existing probes (authorization, lifecycle, site-owner, notification, messaging, workspace, media, watch, collab, management, conversion, conversations) as `authenticated`/anon — 0 fail; `npm run test:unit`, `npm run lint` (no new errors), `next build`; browser at 1440/390; write the ledger "Action 16" section and tick this file with hashes. Model: Sonnet 5.5, medium.
 
 ## Later stage: song info and lyrics sources (added 2026-11-05; deferred, owner starts it)
 
@@ -134,7 +134,9 @@ Source terms below are from general knowledge, NOT re-verified on 2026-11-05: ch
 | Lyrics, licensed (enterprise) | LyricFind | Only if OmniLume grows. |
 | NEVER | Genius (API has no lyrics; scraping forbidden), scraping any lyrics site, BitChord-style spoofed-origin fetches | Out of scope permanently. |
 
-- [ ] **16.13 Metadata + lyrics enrichment (deferred).**
+- [x] **16.14 Custom sources (Stage 4, decision 9).** User-added manifest (`"omnilume": 1`, `name`, `search` with `{query}`, optional `health`), browser-only calls, owner-only `music_custom_sources` rows (≤ 10, https or localhost-only http, responsibility box), health check, owner-only playback (no `uploadId` → never shared, together, presence, history or playlists). Files: `…action16_music_custom_sources.sql`, `src/lib/music-sources.ts`, `src/hooks/useMusicSources.ts`, `src/components/music/MusicSources.tsx`, Settings + Search wiring. Evidence: dry run 31/31, `music-probe` 83/83, `tests/music-sources.test.ts`, browser (ledger "Action 16 Stage 4"). Commit `70a764a`.
+
+- [ ] **16.13 Metadata + lyrics enrichment.** Part done (owner choice 2026-11-06, ledger "Action 16.13 (part) + 16.12"): "Fix Tags…" on an upload — `GET /api/music/metadata` (fixed MusicBrainz host, title + artist phrase query, 1 req/s per instance, one retry on 503; no cache table: shortcut), owner picks a match and presses Apply, optional Cover Art Archive artwork fetched and re-encoded in the browser, saved by `update_music_upload_tags` (migration `20261113100000`). Still open: cache/rate ledger table, ISRC lookup, lyrics providers (LRCLIB needs the owner's risk decision; Musixmatch needs a paid key).
   Server route `GET /api/music/metadata` (MusicBrainz lookup by ISRC, else title+artist+duration; Cover Art Archive artwork), cache table `music_metadata_cache` (service role only; RLS on, no client grants; TTL ≤ 30 days; rate ledger 1 req/s), "Fix tags" UI on an upload (user confirms before overwrite), lyrics provider interface `{name, enabled, fetch(track)}` with a per-user/owner setting; providers enabled one at a time (LRCLIB only after the owner accepts the risk; Musixmatch after a key and plan exist); synced-lyrics view reuses 16.4's `.lrc` renderer; provider attribution shown where required.
   Files: `src/app/api/music/metadata/route.ts`, `src/lib/music-metadata.ts` (server-only), `src/lib/music-lyrics-providers.ts`, `…action16_music_metadata_cache.sql`, UI in the upload detail view.
   Tests/evidence: `tests/music-metadata.test.ts` (ISRC/title match, malformed responses, host allow-list, rate limiter, text-only/length caps), dry run as `authenticated`/`anon` (cache not readable by clients), probe, browser at 1440/390.
