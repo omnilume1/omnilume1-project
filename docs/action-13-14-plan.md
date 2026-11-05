@@ -58,23 +58,23 @@ RPC/RLS and probed.
       push; two-account browser (desktop + mobile); ledger.
 
 ## Action 14 — Room-to-group conversion
-- [ ] 14.1 Schema: `groups` (no username/link; `source_room_id` UNIQUE,
+- [x] (`5ae937b`) 14.1 Schema: `groups` (no username/link; `source_room_id` UNIQUE,
       FK RESTRICT), `group_members`, `room_group_conversions` (audit +
       staged references + counts); RLS; constraints.
-- [ ] 14.2 `convert_room_to_group(room)`: one SECURITY DEFINER transaction;
+- [x] (`5ae937b`) 14.2 `convert_room_to_group(room)`: one SECURITY DEFINER transaction;
       owner only; eligibility (active, not irreversible, no deletion
       scheduled); row lock → idempotent; exact room name; approved
       non-guest, non-restricted members with roles; E2EE key check; ciphertext
       untouched; source room kept (permanent, private, locked, invites
       revoked, username cleared and recorded).
-- [ ] 14.3 Lifecycle: cleanup/destroy/due-list exclude converted rooms,
+- [x] (`5ae937b`) 14.3 Lifecycle: cleanup/destroy/due-list exclude converted rooms,
       `schedule_room_deletion` refuses, pending recovery/permanent requests
       and cleanup jobs resolved; legacy `convert_active_room_to_permanent`
       no longer executable; account deletion handles group rooms.
-- [ ] 14.4 Notify migrated members (`group_conversion`) and publish one
+- [x] (`5ae937b`) 14.4 Notify migrated members (`group_conversion`) and publish one
       `group_converted` control event.
-- [ ] 14.5 UI: conversion dialog (what is preserved, no username), result
+- [x] (`5ae937b`) 14.5 UI: conversion dialog (what is preserved, no username), result
       and idempotent retry, group badge; server action returns values.
-- [ ] 14.6 Unit tests; probes (member/admin/owner/outsider/anon, double
+- [x] (`5ae937b`) 14.6 Unit tests; probes (member/admin/owner/outsider/anon, double
       call, cleanup-never-deletes, ciphertext hash); dry run; push;
       two-account browser; ledger.

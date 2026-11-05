@@ -62,7 +62,9 @@ async function main() {
   console.log(`fixture tag ${tag}`);
   const R1 = await createRoom(A, tag, 'notify-1');
   const R2 = await createRoom(A, tag, 'notify-2');
-  const R3 = await createRoom(A, tag, 'notify-3');
+  // R3 is permanent from the start: room-deletion notices need a permanent
+  // room, and the legacy permanent-conversion RPC is no longer callable.
+  const R3 = await createRoom(A, tag, 'notify-3', 'permanent');
   const foreign = await createRoom(A, tag, 'not-a-member');
   const created = [R1, R2, R3, foreign];
 
@@ -136,14 +138,14 @@ async function main() {
     record('A08', 'a member mutes one room', !roomMute.error, codeOf(roomMute));
     const aPrefs = await A.client.from('notification_preferences').select('id').eq('user_id', B.id);
     record('A08', 'another user cannot see those preferences', !aPrefs.error && rows(aPrefs) === 0, `${codeOf(aPrefs)} rows=${rows(aPrefs)}`);
-    const convertMuted = await A.client.rpc('convert_active_room_to_permanent', { p_room_id: R2, p_username: null });
-    const mutedNotice = await B.client.from('room_notifications').select('id').eq('room_id', R2).eq('notification_type', 'permanent_conversion');
+    const convertMuted = await A.client.rpc('create_room_announcement', { p_room_id: R2, p_body: 'Muted room update', p_is_pinned: false });
+    const mutedNotice = await B.client.from('room_notifications').select('id').eq('room_id', R2).eq('notification_type', 'announcement');
     record('A08', 'a muted room\'s update notice is suppressed', !convertMuted.error && rows(mutedNotice) === 0, `${codeOf(convertMuted)} rows=${rows(mutedNotice)}`);
 
     const dnd = await B.client.rpc('set_notification_preference', { p_room_id: null, p_muted: true, p_muted_until: new Date(Date.now() + 3600_000).toISOString() });
     record('A08', 'a user turns on do-not-disturb for one hour', !dnd.error, codeOf(dnd));
-    const convertDnd = await A.client.rpc('convert_active_room_to_permanent', { p_room_id: R3, p_username: null });
-    const dndNotice = await B.client.from('room_notifications').select('id').eq('room_id', R3).eq('notification_type', 'permanent_conversion');
+    const convertDnd = await A.client.rpc('create_room_announcement', { p_room_id: R3, p_body: 'DND room update', p_is_pinned: false });
+    const dndNotice = await B.client.from('room_notifications').select('id').eq('room_id', R3).eq('notification_type', 'announcement');
     record('A08', 'do-not-disturb suppresses room update notices', !convertDnd.error && rows(dndNotice) === 0, `${codeOf(convertDnd)} rows=${rows(dndNotice)}`);
     const promote = await A.client.rpc('set_room_member_role', { p_room_id: R1, p_target_user_id: B.id, p_role: 'admin' });
     await sleep(1000);

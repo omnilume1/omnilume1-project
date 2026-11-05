@@ -1892,6 +1892,16 @@ above them, with a source-order regression test. (2) two clicks in the same tick
 could send two requests and the later "already converted" answer overwrote the
 result text → an in-flight ref now allows one request.
 
+Regression (database-security, all `authenticated`/anon disposable-account
+probes re-run after Action 14): authorization 175, lifecycle 26, site-owner 43,
+notification 26, messaging 37, workspace 20, media 12, watch 20, collab 24,
+management 26, conversion 19 — **0 fail**. The first notification-probe run
+failed 3 checks (3): it used the legacy `convert_active_room_to_permanent` to
+create "room update" notices and a permanent room, and that RPC is now
+intentionally not callable. The probe now creates the permanent room directly
+and uses announcements for the mute / do-not-disturb checks (26/26); no
+product code changed for this.
+
 Decisions / notes: conversion is owner-only (the roadmap's "explicit admin
 permission" would need a new capability; not added). Group membership is a
 snapshot at conversion; later room-role changes do not mirror into the group
