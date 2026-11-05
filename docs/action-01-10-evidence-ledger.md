@@ -1996,3 +1996,90 @@ page included), so evidence is computed styles and DOM state; no real audio
 yet (silent engine), so OS media keys were not exercised; Up Next reorder is
 drag or Alt+↑/↓ (no touch drag handle); the mesh backdrop uses the fixture hue
 (artwork colour sampling comes with uploads in 16.4).
+
+## Action 16.4 + 16.5 (Stage 2: uploads, 7-day storage, sharing, playlists, history)
+
+Migration `20261110100000_action16_music_library.sql` (additive): private
+bucket `music_uploads` (50 MB, audio MIME list + `image/jpeg`), one retention
+constant `music_upload_ttl()` = 7 days with `CHECK (expires_at = created_at +
+music_upload_ttl())`; tables `music_uploads`, `music_upload_shares`,
+`music_playlists`, `music_playlist_items`, `music_listening_history` (RLS on,
+`REVOKE ALL … FROM PUBLIC, anon, authenticated`, explicit grants, owner-only
+policies); storage INSERT (own flat prefix `<uid>/<uuid>.<ext|cover.jpg>`, ≤ 100
+objects) and SELECT (owner, registered + active + unexpired, or not yet
+registered) policies, no client UPDATE/DELETE; 16 SECURITY DEFINER functions with
+`search_path = ''`, `auth.uid()` null → 42501; policy helpers EXECUTE →
+`authenticated`; `register_music_upload`, `list_music_uploads_due_for_cleanup`,
+`list_music_orphan_objects`, `complete_music_upload_cleanup` → `service_role`
+only. Fixtures are gone; `/music` reads the real library (RLS selects + RPCs,
+no server actions).
+
+- database-security, dry run 1 (migration + checks in one transaction ended by
+  `RAISE`, as `service_role` / `authenticated` owner, room member, stranger /
+  `anon`): **92/92** — register only by the service role with a matching
+  object/MIME/size, caps 40 files and 300 MB (54000), duplicate id 23505, TTL
+  and path CHECKs 23514; own-prefix upload ok, other prefix / bad name / nested
+  path / anon 42501; owner reads own rows, member and stranger 0 rows; share
+  needs attestation (22023) and membership (42501); member plays only while
+  shared, revocation stops it; history deduped, owner-only; playlist items
+  only for own uploads; forced expiry → playback, share, record and object
+  read refused while the object still exists; cleanup lists it, tombstones it,
+  drops shares; orphan > 1 h listed, fresh one not; bucket private; no
+  definer without `search_path`; anon executes no music function. It also
+  found that `INSERT … RETURNING` was refused (new object not yet readable),
+  so unregistered own-prefix objects became readable → dry run 2: **16/16**
+  (RETURNING ok, other users and anon still 0 rows, expired object unreadable,
+  helpers executable by `authenticated`). Then `supabase db push` (local =
+  remote before, one migration applied). Advisors: music functions only show
+  the expected "authenticated can call a definer RPC" notice; no anon or
+  missing-policy finding.
+- database-security, live `scripts/security/music-probe.mjs`: **46 pass,
+  0 fail** (throw-away owner, room member, stranger, anon; real Storage API):
+  own-prefix upload; stranger/nested/anon upload AccessDenied; bucket refuses
+  `text/html`; users cannot call register/cleanup RPCs; 7 days exactly;
+  member/stranger cannot sign the object; share attestation/membership;
+  member playback only while shared; signed URL TTL ≤ remaining life (599 s for
+  10 min left); forced expiry refused everywhere with the object still present;
+  cleanup removes the object then tombstones the row; music objects sit flat
+  at `<uid>/` where account deletion's sweep finds them; fixtures removed.
+- static: `tests/music-lrc.test.ts` (stamps, fractions, multi-stamp, offset,
+  plain/malformed, caps, LRC round-trip), `tests/music-uploads.test.ts` (magic
+  bytes per format incl. renamed PDF/HTML, register-body validation, TTL
+  helper, cleanup storage-before-row and retry on failure with a fake client,
+  migration contract, route order: sniff before register, storage before row,
+  account deletion before the user cascade), shell contract += server pages
+  use plain-module constants. `npm run test:unit` **158/158**; lint 0 errors /
+  13 warnings (baseline); `next build` ok.
+- local runtime / browser (`next start`, incognito, throw-away account with one
+  room, deleted after with its objects; synthetic media from a scratchpad
+  script): upload of 5 files → MP3 (ID3 tags + PNG cover) and WAV (RIFF INFO
+  tags + `.lrc` sidecar) added; `broken.mp3` passed the browser tag reader but
+  the server sniff refused it (422) and its object was removed (2 objects left
+  in the prefix = audio + cover); renamed PDF refused in the browser. Cover
+  re-encoded to JPEG and served via `/api/music/uploads/<id>/cover`; hue 254
+  sampled; play → audio redirect to Storage, 206 on Range, signed-URL lifetime
+  3600 s, position advancing, Media Session playing with artwork; unknown id or
+  asset → 404. Synced `.lrc` lyrics: 4 lines, line at 0:04 active at 0:05.
+  Playlist create → page; ⋯ menu adds both songs; share dialog: Share disabled
+  until "I have the right to share" is ticked, share → stop → share; history
+  lists both plays. Forced expiry of one upload → history and playlist show it
+  dimmed "Expired" without a play button, Songs drops it, footer counts only
+  playable songs. Mini player keeps real audio playing on `/home`. Delete from
+  the menu → row tombstoned, 0 objects, 0 shares. Sweep of 15 music routes ×
+  {390, 1440}: no horizontal overflow. Fixed during the check: library
+  sections 404'd (a server page imported a constant from a `'use client'`
+  module, which arrives as a client reference → moved to `music-model.ts`, plus
+  a contract test); "Expires in 8 days" right after upload (client clock a few
+  seconds behind the DB with `ceil` → `round`); deleting the playing song now
+  stops the player; the share dialog's close button resets its state directly.
+
+Limits: the daily cron route was not run against the live project (it would
+also clean real rooms); its music step is covered by the probe (same calls)
+and the fake-client test. Uploads are visible to the owner as tombstones
+forever (no purge of `deleted` rows yet). The preview browser never runs
+rendering steps (`requestAnimationFrame` never fires), so dialog `close`
+events, screenshots and Esc-to-close could not be observed there. Hardware
+media keys and an embedded-art FLAC/M4A were not tried (no encoder on this
+machine; MP3 + WAV only). Existing probes were not re-run (QA credential files
+are not configured in this session); the migration adds bucket-scoped storage
+policies only.

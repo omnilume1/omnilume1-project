@@ -75,7 +75,7 @@ export function PlayerPill({ panel, panelOpen, onPanel, onExpand }: { panel: Sid
               </button>
               <div className="mu-lcd-body">
                 <p className="mu-lcd-title">{track.title}</p>
-                <p className="mu-lcd-subtitle">{track.artist} — {track.album}</p>
+                <p className={`mu-lcd-subtitle ${player.error ? 'is-error' : ''}`} role={player.error ? 'alert' : undefined}>{player.error ?? `${track.artist} — ${track.album}`}</p>
                 <Progress />
               </div>
             </>
@@ -154,8 +154,9 @@ function UpNextPanel() {
 export function Lyrics({ anchor }: { anchor: number }) {
   const player = useMusicPlayer();
   const lines = player.queue.current?.lyrics;
+  const synced = player.queue.current?.lyricsSynced !== false;
   const list = useRef<HTMLOListElement>(null);
-  const active = lines?.reduce((found, line, i) => (line.ms <= player.positionMs ? i : found), -1) ?? -1;
+  const active = synced ? lines?.reduce((found, line, i) => (line.ms <= player.positionMs ? i : found), -1) ?? -1 : -1;
 
   useEffect(() => {
     const scroller = list.current;
@@ -167,10 +168,10 @@ export function Lyrics({ anchor }: { anchor: number }) {
 
   if (!lines?.length) return <EmptyState title="No lyrics available" detail="Lyrics show up when a song includes them or you add an .lrc file." />;
   return (
-    <ol ref={list} className="mu-lyrics" aria-label="Lyrics">
+    <ol ref={list} className={`mu-lyrics ${synced ? '' : 'is-plain'}`} aria-label="Lyrics">
       {lines.map((line, i) => (
         <li key={`${line.ms}-${i}`} className={i === active ? 'is-active' : i < active ? 'is-past' : ''} aria-current={i === active ? 'true' : undefined}>
-          <button type="button" onClick={() => player.seek(line.ms)}>{line.text}</button>
+          {synced ? <button type="button" onClick={() => player.seek(line.ms)}>{line.text}</button> : <p>{line.text}</p>}
         </li>
       ))}
     </ol>
@@ -204,8 +205,14 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
     // No close() in cleanup: its async "close" event would re-close under Strict Mode; unmount removes it from the top layer.
     if (element && !element.open) element.showModal();
   }, []);
+  // Native Esc closes the dialog; keep the parent's state in sync (the close button calls onClose itself).
+  useEffect(() => {
+    const element = dialog.current;
+    element?.addEventListener('close', onClose);
+    return () => element?.removeEventListener('close', onClose);
+  }, [onClose]);
   return (
-    <dialog ref={dialog} className="mu-fullscreen" aria-label="Now playing" onClose={onClose}>
+    <dialog ref={dialog} className="mu-fullscreen" aria-label="Now playing">
       <MeshBackdrop hue={track?.hue ?? 260} playing={player.isPlaying} />
       <button type="button" className="mu-icon-button mu-fs-close" aria-label="Close full-screen player" onClick={onClose}><MusicIcon name="close" /></button>
       <div className="mu-fs-grid">

@@ -1,8 +1,10 @@
 'use client';
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { createSilentEngine, MUSIC_PREFS_KEY, type MusicEngine, type MusicTrack, type RepeatMode } from '@/lib/music-model';
+import { createAudioEngine } from '@/lib/music-audio-engine';
+import { MUSIC_PREFS_KEY, type MusicEngine, type MusicTrack, type RepeatMode } from '@/lib/music-model';
 import * as Q from '@/lib/music-queue';
+import { createClient } from '@/utils/supabase/client';
 
 type MusicActions = {
   playList: (tracks: MusicTrack[], index: number, source: string) => void;
@@ -32,6 +34,8 @@ export type MusicPlayer = MusicActions & {
   durationMs: number;
   volume: number;
   muted: boolean;
+  /** Set when the current song cannot be played (expired, revoked, unreadable). */
+  error: string | null;
 };
 
 const MusicPlayerContext = createContext<MusicPlayer | null>(null);
@@ -63,15 +67,17 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const [durationMs, setDurationMs] = useState(0);
   const [volume, setVolumeState] = useState(1);
   const [muted, setMuted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const actions = useMemo<MusicActions>(() => {
-    const engine = () => (engineRef.current ??= createSilentEngine());
+    const engine = () => (engineRef.current ??= createAudioEngine());
     const commit = (next: Q.MusicQueue) => {
       queueRef.current = next;
       setQueue(next);
     };
     const loadAndPlay = (next: Q.MusicQueue) => {
       commit(next);
+      setError(null);
       if (!next.current) return;
       engine().load(next.current);
       engine().play();
@@ -127,7 +133,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   // Engine events. The engine lives for the whole app (root layout), so only listeners are removed.
   useEffect(() => {
-    const engine = (engineRef.current ??= createSilentEngine());
+    const engine = (engineRef.current ??= createAudioEngine());
     const offs = [
       engine.on('time', () => {
         const position = engine.currentTime();
@@ -149,6 +155,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       engine.on('pause', () => {
         playingRef.current = false;
         setIsPlaying(false);
+      }),
+      engine.on('error', () => {
+        playingRef.current = false;
+        setIsPlaying(false);
+        setError('This song isn’t available any more.');
       }),
       engine.on('ended', () => {
         const queue = queueRef.current;
@@ -188,6 +199,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   // Media Session: lock-screen / hardware keys.
   const current = queue.current;
+
+  // Listening history (owner-only RLS); plays of uploads only, deduped server-side.
+  const uploadId = current?.uploadId;
+  useEffect(() => {
+    if (!uploadId) return;
+    createClient().rpc('record_music_play', { p_upload_id: uploadId }).then(({ error: recordError }: { error: { code?: string } | null }) => {
+      if (recordError) console.warn('Listening history was not updated.', recordError.code);
+    });
+  }, [uploadId]);
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
     navigator.mediaSession.metadata = current
@@ -227,8 +247,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   }, [actions]);
 
   const value = useMemo<MusicPlayer>(
-    () => ({ ...actions, queue, isPlaying, positionMs, durationMs, volume, muted }),
-    [actions, queue, isPlaying, positionMs, durationMs, volume, muted],
+    () => ({ ...actions, queue, isPlaying, positionMs, durationMs, volume, muted, error }),
+    [actions, queue, isPlaying, positionMs, durationMs, volume, muted, error],
   );
 
   return <MusicPlayerContext.Provider value={value}>{children}</MusicPlayerContext.Provider>;

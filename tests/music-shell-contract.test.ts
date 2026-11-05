@@ -32,6 +32,13 @@ test('music CSS is scoped to .music-app and globals.css is untouched', () => {
   assert.doesNotMatch(globals, /music-app|--mu-/);
 });
 
+test('server pages validate params with plain-module values, not client-module exports', () => {
+  // A 'use client' module's non-component exports reach server components as client references.
+  const page = read('src/app/music/library/[section]/page.tsx');
+  assert.match(page, /import \{ LIBRARY_SECTIONS, type LibrarySectionKey \} from '@\/lib\/music-model'/);
+  assert.doesNotMatch(read('src/lib/music-model.ts'), /^'use client'/);
+});
+
 test('DM Sans loads only in the music layout; the player provider lives in the root layout', () => {
   assert.match(read('src/app/music/layout.tsx'), /DM_Sans\(/);
   const root = read('src/app/layout.tsx');

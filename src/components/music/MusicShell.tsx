@@ -4,18 +4,35 @@ import Form from 'next/form';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { MusicLibraryProvider, useMusicLibrary } from '@/hooks/useMusicLibrary';
 import { useMusicPlayer } from '@/hooks/useMusicPlayer';
-import { MUSIC_PLAYLISTS } from '@/lib/music-fixtures';
 import { musicShortcutFor } from '@/lib/music-shortcuts';
 import { MusicIcon, type MusicIconName } from './MusicIcon';
+import { ShareDialog } from './MusicLibraryParts';
 import { FullScreenPlayer, PlayerPill, SidePanel, type SidePanelKind } from './MusicPlayerChrome';
 
 const LIBRARY: [string, string, MusicIconName][] = [
+  ['uploads', 'Uploads', 'expand'],
   ['songs', 'Songs', 'note'],
   ['albums', 'Albums', 'album'],
   ['artists', 'Artists', 'artist'],
   ['playlists', 'Playlists', 'playlist'],
+  ['shared', 'Shared with Me', 'queue'],
+  ['history', 'Recently Played', 'repeat'],
 ];
+
+function SidebarPlaylists({ pathname }: { pathname: string }) {
+  const { playlists } = useMusicLibrary();
+  if (playlists.length === 0) return null;
+  return (
+    <>
+      <h2 className="mu-nav-heading">Playlists</h2>
+      {playlists.map((playlist) => (
+        <NavItem key={playlist.id} href={`/music/playlist/${playlist.id}`} icon="playlist" active={pathname === `/music/playlist/${playlist.id}`}>{playlist.title}</NavItem>
+      ))}
+    </>
+  );
+}
 
 function NavItem({ href, icon, children, active }: { href: string; icon: MusicIconName; children: ReactNode; active: boolean }) {
   return (
@@ -26,7 +43,11 @@ function NavItem({ href, icon, children, active }: { href: string; icon: MusicIc
   );
 }
 
-export default function MusicShell({ fontClass, children }: { fontClass: string; children: ReactNode }) {
+export default function MusicShell(props: { fontClass: string; children: ReactNode }) {
+  return <MusicLibraryProvider><Shell {...props} /></MusicLibraryProvider>;
+}
+
+function Shell({ fontClass, children }: { fontClass: string; children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const player = useMusicPlayer();
@@ -99,10 +120,7 @@ export default function MusicShell({ fontClass, children }: { fontClass: string;
           {LIBRARY.map(([section, label, icon]) => (
             <NavItem key={section} href={`/music/library/${section}`} icon={icon} active={pathname === `/music/library/${section}`}>{label}</NavItem>
           ))}
-          <h2 className="mu-nav-heading">Playlists</h2>
-          {MUSIC_PLAYLISTS.map((playlist) => (
-            <NavItem key={playlist.id} href={`/music/playlist/${playlist.id}`} icon="playlist" active={pathname === `/music/playlist/${playlist.id}`}>{playlist.title}</NavItem>
-          ))}
+          <SidebarPlaylists pathname={pathname} />
         </nav>
         <div className="mu-sidebar-foot">
           <NavItem href="/music/settings" icon="settings" active={pathname === '/music/settings'}>Settings</NavItem>
@@ -115,6 +133,7 @@ export default function MusicShell({ fontClass, children }: { fontClass: string;
       <PlayerPill panel={panel} panelOpen={panelOpen} onPanel={togglePanel} onExpand={() => setFullScreen(true)} />
       <SidePanel kind={panel} open={panelOpen} />
       {fullScreen ? <FullScreenPlayer onClose={() => setFullScreen(false)} /> : null}
+      <ShareDialog />
     </div>
   );
 }

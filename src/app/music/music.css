@@ -349,6 +349,51 @@
 .music-app .mu-mesh i:nth-child(3) { top: 20vh; left: 35vw; width: 45vmax; height: 45vmax; background: hsl(calc(var(--mu-hue) - 35) 65% 40%); animation-duration: 21s; }
 .music-app .mu-mesh[data-playing='true'] i { animation-play-state: running; }
 
+/* ---------- Library: uploads, sharing, playlists, states ---------- */
+.music-app .mu-badge { display: inline-block; padding: 1px 6px; border-radius: 5px; background: var(--mu-q4); color: var(--mu-text-2); font-size: 10px; font-weight: 500; line-height: 13px; }
+.music-app .mu-error { margin: 8px 0 0; color: #ff8a80; line-height: 18px; }
+.music-app .mu-fine { margin: 4px 0 0; color: var(--mu-text-3); font-size: 12px; line-height: 15px; }
+.music-app .is-destructive { color: #ff6b60; }
+.music-app .mu-menu > .is-destructive:hover, .music-app .mu-menu > .is-destructive:focus-visible { background: #ff3b30; }
+.music-app .mu-track.is-unavailable { opacity: .55; }
+.music-app .mu-lcd-subtitle.is-error { color: #ff8a80; }
+.music-app .mu-lyrics.is-plain p { margin: 0; padding: 6px 4px; color: var(--mu-text-2); font-size: 18px; font-weight: 600; line-height: 1.35; }
+.music-app .mu-section-actions { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+.music-app .mu-upload { margin-bottom: 20px; }
+.music-app .mu-dropzone {
+  display: grid; justify-items: center; gap: 8px; padding: 26px 20px; border: 1px dashed var(--mu-search-border); border-radius: 14px;
+  background: var(--mu-q5); color: var(--mu-text-2); text-align: center; transition: border-color .1s ease-in, background .1s ease-in;
+}
+.music-app .mu-dropzone.is-dragging { border-color: var(--mu-key); background: #8d7bff1f; }
+.music-app .mu-dropzone h2 { margin: 0; color: var(--mu-text); font-size: 17px; font-weight: 700; line-height: 22px; }
+.music-app .mu-dropzone p { max-width: 62ch; margin: 0; line-height: 18px; }
+.music-app .mu-dropzone code { padding: 0 4px; border-radius: 4px; background: var(--mu-q4); font-size: 12px; }
+.music-app .mu-jobs { display: grid; gap: 4px; margin: 12px 0 0; padding: 0; list-style: none; }
+.music-app .mu-jobs li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 8px 10px; border-radius: 8px; background: var(--mu-q5); }
+.music-app .mu-jobs li.is-error .mu-job-state { color: #ff8a80; }
+.music-app .mu-job-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-app .mu-job-state { color: var(--mu-text-2); text-align: right; }
+.music-app .mu-jobs progress { grid-column: 1 / -1; width: 100%; height: 3px; accent-color: var(--mu-key); }
+.music-app .mu-inline-form { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+.music-app .mu-inline-form input {
+  flex: 1 1 220px; min-width: 0; height: 36px; padding: 0 14px; border: 0.5px solid var(--mu-search-border); border-radius: 1000px;
+  background: var(--mu-q5); color: var(--mu-text); font: inherit; font-size: 14px;
+}
+.music-app .mu-inline-form .mu-error { flex-basis: 100%; margin: 0; }
+.music-app .mu-modal {
+  width: min(440px, calc(100vw - 24px)); max-height: min(640px, calc(100dvh - 24px)); padding: 18px 20px 20px; overflow: auto; border: 0; border-radius: 14px;
+  background: var(--mu-thick); backdrop-filter: var(--mu-thin-filter); box-shadow: var(--mu-glass-shadow), var(--mu-stroke); color: var(--mu-text);
+}
+.music-app .mu-modal[open] { animation: mu-modal-in .2s var(--mu-ease); }
+.music-app .mu-modal::backdrop { background: var(--mu-scrim); }
+.music-app .mu-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.music-app .mu-modal-header h2 { margin: 0; overflow: hidden; font-size: 17px; font-weight: 700; line-height: 22px; text-overflow: ellipsis; white-space: nowrap; }
+.music-app .mu-check { display: flex; align-items: center; gap: 10px; margin: 14px 0 6px; font-weight: 600; cursor: pointer; }
+.music-app .mu-check input { width: 18px; height: 18px; accent-color: var(--mu-key-bg); }
+.music-app .mu-targets { display: grid; margin: 10px 0 0; padding: 0; list-style: none; }
+.music-app .mu-targets li { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; border-bottom: 0.5px solid var(--mu-divider); }
+.music-app .mu-targets .mu-text-button:disabled { opacity: .4; cursor: default; }
+
 /* ---------- Keyframes ---------- */
 @keyframes mu-shimmer { to { background-position: -200% 0; } }
 @keyframes mu-bars { from { transform: scaleY(.3); } to { transform: scaleY(1); } }

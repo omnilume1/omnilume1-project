@@ -1,0 +1,231 @@
+// Music library probe (Action 16 Stage 2, migration 20261110100000).
+//
+//   node scripts/security/music-probe.mjs
+//
+// Throw-away accounts (service role, deleted at the end): A owner, M member of
+// A's room, B stranger; plus an anonymous client. Covers the real Storage API
+// (own-prefix upload, cross-user/anon refusal, owner-only reads), service
+// registration, playback authorization, opt-in room sharing with attestation
+// and revocation, history and playlists RLS, signed-URL lifetime capped by the
+// upload's remaining life, forced expiry (unreadable while the object still
+// exists), cleanup (storage first, then the tombstone row) and the flat
+// per-user prefix that account deletion sweeps. Output: codes and pass/fail only.
+
+import { createClient } from '@supabase/supabase-js';
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+const projectRoot = resolve(import.meta.dirname, '..', '..');
+const env = Object.fromEntries(readFileSync(resolve(projectRoot, '.env.local'), 'utf8')
+  .split(/\r?\n/).map((line) => line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/)).filter(Boolean)
+  .map((match) => [match[1], match[2].replace(/^(['"])(.*)\1$/, '$2')]));
+const options = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
+const service = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, options);
+const anon = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, options);
+const BUCKET = 'music_uploads';
+
+const results = [];
+const record = (check, pass, detail = '') => {
+  results.push(pass);
+  console.log(`${pass ? 'PASS' : 'FAIL'}  A16  ${check}${detail ? `  [${detail}]` : ''}`);
+};
+const codeOf = (res) => (res?.error ? String(res.error.code ?? res.error.statusCode ?? res.error.status ?? 'error') : 'ok');
+const rows = (res) => (Array.isArray(res?.data) ? res.data.length : res?.data ? 1 : 0);
+const mp3 = () => new Blob([new Uint8Array([0x49, 0x44, 0x33, 0x04, 0, 0, 0, 0, 0, 0, 0xff, 0xfb, 0x90, 0x64, ...new Array(2000).fill(0)])], { type: 'audio/mpeg' });
+const jwtExp = (signedUrl) => JSON.parse(Buffer.from(new URL(signedUrl).searchParams.get('token').split('.')[1], 'base64url').toString()).exp;
+
+const throwaway = [];
+async function makeUser(tag) {
+  const email = `qa16-${tag}-${randomUUID().slice(0, 8)}@example.invalid`;
+  const password = `Pw-${randomUUID()}`;
+  const created = await service.auth.admin.createUser({ email, password, email_confirm: true });
+  if (created.error) throw new Error(`createUser ${tag}: ${created.error.message}`);
+  const id = created.data.user.id;
+  throwaway.push(id);
+  await service.from('profiles').upsert({ id, display_name: `qa16 ${tag}`, username: `qa16${tag}${id.slice(0, 6)}`, date_of_birth: '1990-01-01', gender: 'non_binary', profile_completed: true });
+  const client = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, options);
+  const signed = await client.auth.signInWithPassword({ email, password });
+  if (signed.error) throw new Error(`signIn ${tag}: ${signed.error.message}`);
+  return { client, id };
+}
+
+const register = (owner, uploadId, overrides = {}) => service.rpc('register_music_upload', {
+  p_owner_id: owner.id, p_upload_id: uploadId, p_ext: 'mp3', p_mime_type: 'audio/mpeg', p_original_name: 'probe.mp3',
+  p_title: 'Probe Song', p_artist: 'Probe', p_album: 'Probe Album', p_album_artist: '', p_track_no: 1, p_year: 2026,
+  p_genre: '', p_duration_ms: 1000, p_hue: 260, p_lyrics: '[00:00.50]probe', p_has_cover: false, ...overrides,
+});
+
+async function main() {
+  const A = await makeUser('a');
+  const M = await makeUser('m');
+  const B = await makeUser('b');
+  const rooms = [];
+  const objects = [];
+
+  try {
+    // Room R owned by A, M approved as a member.
+    const R = randomUUID();
+    const room = await A.client.from('rooms').insert({ id: R, name: `qa16-${R.slice(0, 6)}`, description: 'Disposable music probe.', is_private: true, expiration_type: 'recoverable', expires_at: new Date(Date.now() + 2 * 3600_000).toISOString(), created_by: A.id, username: null });
+    if (room.error) throw new Error(`room: ${codeOf(room)}`);
+    rooms.push(R);
+    await A.client.from('room_members').insert({ room_id: R, user_id: A.id, role: 'owner', join_status: 'approved' });
+    await M.client.rpc('request_room_join', { p_identifier: R });
+    const approve = await A.client.rpc('review_room_member', { p_room_id: R, p_target_user_id: M.id, p_action: 'approve', p_reason: '' });
+    if (approve.error) throw new Error(`approve: ${codeOf(approve)}`);
+
+    // Storage: own-prefix upload through the real Storage API; others refused.
+    const U = randomUUID();
+    const path = `${A.id}/${U}.mp3`;
+    objects.push(path);
+    const up = await A.client.storage.from(BUCKET).upload(path, mp3(), { contentType: 'audio/mpeg', upsert: false });
+    record('owner uploads into own prefix (Storage API)', !up.error, codeOf(up));
+    const intoA = await B.client.storage.from(BUCKET).upload(`${A.id}/${randomUUID()}.mp3`, mp3(), { contentType: 'audio/mpeg' });
+    record('stranger cannot upload into owner prefix', Boolean(intoA.error), codeOf(intoA));
+    const nested = await A.client.storage.from(BUCKET).upload(`${A.id}/x/${randomUUID()}.mp3`, mp3(), { contentType: 'audio/mpeg' });
+    record('nested path refused', Boolean(nested.error), codeOf(nested));
+    const anonUp = await anon.storage.from(BUCKET).upload(`${A.id}/${randomUUID()}.mp3`, mp3(), { contentType: 'audio/mpeg' });
+    record('anon upload refused', Boolean(anonUp.error), codeOf(anonUp));
+    const badType = await A.client.storage.from(BUCKET).upload(`${A.id}/${randomUUID()}.mp3`, new Blob(['<html>'], { type: 'text/html' }), { contentType: 'text/html' });
+    record('bucket refuses a non-audio MIME type', Boolean(badType.error), codeOf(badType));
+
+    // Registration is service-role only (the route sniffs bytes first).
+    const userRegister = await A.client.rpc('register_music_upload', { p_owner_id: A.id, p_upload_id: U, p_ext: 'mp3', p_mime_type: 'audio/mpeg', p_original_name: 'x.mp3', p_title: 'x', p_artist: '', p_album: '', p_album_artist: '', p_track_no: null, p_year: null, p_genre: '', p_duration_ms: null, p_hue: 1, p_lyrics: '', p_has_cover: false });
+    record('users cannot call register_music_upload', Boolean(userRegister.error), codeOf(userRegister));
+    const wrongOwner = await register(B, U);
+    record('register refuses an object the owner does not hold', Boolean(wrongOwner.error), codeOf(wrongOwner));
+    const reg = await register(A, U);
+    record('service registers the upload', !reg.error, codeOf(reg));
+    const life = reg.data ? (Date.parse(reg.data.expires_at) - Date.parse(reg.data.created_at)) / 3600_000 : 0;
+    record('expiry is exactly 7 days from upload', life === 168, `${life} h`);
+    const dup = await register(A, U);
+    record('double registration refused', codeOf(dup) === '23505', codeOf(dup));
+
+    // Owner reads.
+    const ownRows = await A.client.from('music_uploads').select('id, state');
+    record('owner sees own row', rows(ownRows) === 1, `${rows(ownRows)} row(s)`);
+    const ownPlay = await A.client.rpc('get_music_playback', { p_upload_id: U });
+    record('owner playback path', rows(ownPlay) === 1 && ownPlay.data?.[0]?.object_path === path, codeOf(ownPlay));
+    const ownSigned = await A.client.storage.from(BUCKET).createSignedUrl(path, 60);
+    record('owner storage read allowed while active', !ownSigned.error, codeOf(ownSigned));
+
+    // Sharing: opt-in, attested, members only.
+    const mBefore = await M.client.rpc('get_music_playback', { p_upload_id: U });
+    record('member cannot play before it is shared', codeOf(mBefore) === '42501', codeOf(mBefore));
+    const noAttest = await A.client.rpc('share_music_upload', { p_upload_id: U, p_target_kind: 'room', p_target_id: R, p_attest: false });
+    record('share without attestation refused', codeOf(noAttest) === '22023', codeOf(noAttest));
+    const bShare = await B.client.rpc('share_music_upload', { p_upload_id: U, p_target_kind: 'room', p_target_id: R, p_attest: true });
+    record('non-owner cannot share', codeOf(bShare) === '42501', codeOf(bShare));
+    const targets = await A.client.rpc('list_music_share_targets');
+    record('owner sees the room as a share target', (targets.data ?? []).some((t) => t.target_id === R), codeOf(targets));
+    const shared = await A.client.rpc('share_music_upload', { p_upload_id: U, p_target_kind: 'room', p_target_id: R, p_attest: true });
+    record('owner shares to own room', !shared.error, codeOf(shared));
+    const mList = await M.client.rpc('list_music_shared_with_me');
+    record('member sees the shared song', rows(mList) === 1 && mList.data[0].upload_id === U, `${rows(mList)} row(s)`);
+    const mPlay = await M.client.rpc('get_music_playback', { p_upload_id: U });
+    record('member playback allowed', rows(mPlay) === 1, codeOf(mPlay));
+    const mRows = await M.client.from('music_uploads').select('id');
+    record('member cannot read upload rows', rows(mRows) === 0, `${rows(mRows)} row(s)`);
+    const mSigned = await M.client.storage.from(BUCKET).createSignedUrl(path, 60);
+    record('member cannot sign the object directly', Boolean(mSigned.error), codeOf(mSigned));
+    const bPlay = await B.client.rpc('get_music_playback', { p_upload_id: U });
+    record('stranger playback refused', codeOf(bPlay) === '42501', codeOf(bPlay));
+    const bList = await B.client.rpc('list_music_shared_with_me');
+    record('stranger sees nothing shared', rows(bList) === 0, `${rows(bList)} row(s)`);
+    const bSigned = await B.client.storage.from(BUCKET).createSignedUrl(path, 60);
+    record('stranger cannot sign the object', Boolean(bSigned.error), codeOf(bSigned));
+    const anonPlay = await anon.rpc('get_music_playback', { p_upload_id: U });
+    record('anon playback refused', Boolean(anonPlay.error), codeOf(anonPlay));
+    const anonRows = await anon.from('music_uploads').select('id');
+    record('anon reads no rows', Boolean(anonRows.error) || rows(anonRows) === 0, codeOf(anonRows));
+
+    // History and playlists.
+    const mRecord = await M.client.rpc('record_music_play', { p_upload_id: U });
+    const mHistory = await M.client.rpc('list_my_music_history', { p_limit: 10 });
+    record('member play recorded in own history', !mRecord.error && rows(mHistory) === 1 && mHistory.data[0].playable === true, codeOf(mRecord));
+    const bRecord = await B.client.rpc('record_music_play', { p_upload_id: U });
+    record('stranger cannot record a play', codeOf(bRecord) === '42501', codeOf(bRecord));
+    const aHistoryOfM = await A.client.from('music_listening_history').select('id').eq('user_id', M.id);
+    record('owner cannot read member history', rows(aHistoryOfM) === 0, `${rows(aHistoryOfM)} row(s)`);
+    const pl = await A.client.from('music_playlists').insert({ name: 'qa16 list' }).select('id').single();
+    const item = pl.data ? await A.client.from('music_playlist_items').insert({ playlist_id: pl.data.id, upload_id: U }) : pl;
+    record('owner playlist + item', !pl.error && !item.error, `${codeOf(pl)}/${codeOf(item)}`);
+    const mPl = await M.client.from('music_playlists').insert({ name: 'm list' }).select('id').single();
+    const mItem = mPl.data ? await M.client.from('music_playlist_items').insert({ playlist_id: mPl.data.id, upload_id: U }) : mPl;
+    record('member cannot add someone else\'s upload to a playlist', Boolean(mItem.error), codeOf(mItem));
+    const mSeesA = await M.client.from('music_playlists').select('id').eq('id', pl.data?.id ?? randomUUID());
+    record('playlists are owner-only', rows(mSeesA) === 0, `${rows(mSeesA)} row(s)`);
+
+    // Signed URL lifetime = min(1 h, remaining life).
+    const tenMinutes = new Date(Date.now() + 10 * 60_000);
+    const shift = await service.from('music_uploads').update({ created_at: new Date(tenMinutes.getTime() - 7 * 86_400_000).toISOString(), expires_at: tenMinutes.toISOString() }).eq('id', U);
+    const playNow = await A.client.rpc('get_music_playback', { p_upload_id: U });
+    const remaining = Math.floor((Date.parse(playNow.data?.[0]?.expires_at) - Date.now()) / 1000);
+    const ttl = Math.max(0, Math.min(3600, remaining));
+    const signed = await service.storage.from(BUCKET).createSignedUrl(path, ttl);
+    const exp = signed.data ? jwtExp(signed.data.signedUrl) : 0;
+    record('signed URL never outlives the upload', !shift.error && ttl <= 600 && exp > 0 && exp <= Math.ceil(tenMinutes.getTime() / 1000) + 2, `ttl=${ttl}s`);
+
+    // Revocation.
+    const shareRow = await A.client.from('music_upload_shares').select('id').eq('upload_id', U).single();
+    const unshare = await A.client.rpc('unshare_music_upload', { p_share_id: shareRow.data?.id });
+    const mAfter = await M.client.rpc('get_music_playback', { p_upload_id: U });
+    record('revoking the share stops member playback', unshare.data === true && codeOf(mAfter) === '42501', codeOf(mAfter));
+    await A.client.rpc('share_music_upload', { p_upload_id: U, p_target_kind: 'room', p_target_id: R, p_attest: true });
+
+    // Forced expiry: refused everywhere although the object still exists.
+    const base = Date.now(); // one clock read: the TTL CHECK needs expires_at - created_at = exactly 7 days
+    const expire = await service.from('music_uploads').update({ created_at: new Date(base - 8 * 86_400_000).toISOString(), expires_at: new Date(base - 86_400_000).toISOString() }).eq('id', U);
+    const aExpired = await A.client.rpc('get_music_playback', { p_upload_id: U });
+    record('expired: owner playback refused', !expire.error && codeOf(aExpired) === '42501', codeOf(aExpired));
+    const aExpiredSign = await A.client.storage.from(BUCKET).createSignedUrl(path, 60);
+    record('expired: owner storage read refused', Boolean(aExpiredSign.error), codeOf(aExpiredSign));
+    const mExpired = await M.client.rpc('list_music_shared_with_me');
+    record('expired: no longer shared', rows(mExpired) === 0, `${rows(mExpired)} row(s)`);
+    const stillThere = await service.storage.from(BUCKET).list(A.id, { search: U });
+    record('expired: object still present (cron not needed for expiry)', (stillThere.data ?? []).length === 1, `${(stillThere.data ?? []).length}`);
+    const mHistExpired = await M.client.rpc('list_my_music_history', { p_limit: 10 });
+    record('expired: history keeps the entry, not playable', rows(mHistExpired) === 1 && mHistExpired.data[0].playable === false);
+
+    // Cleanup: storage first, then the tombstone row.
+    const due = await service.rpc('list_music_uploads_due_for_cleanup', { p_limit: 500 });
+    const mine = (due.data ?? []).find((rowIn) => rowIn.id === U);
+    record('cleanup lists the expired upload', Boolean(mine), codeOf(due));
+    const removed = mine ? await service.storage.from(BUCKET).remove([mine.object_path]) : { error: { message: 'missing' } };
+    const completed = await service.rpc('complete_music_upload_cleanup', { p_upload_id: U, p_error: removed.error ? removed.error.message : null });
+    const tomb = await service.from('music_uploads').select('state').eq('id', U).single();
+    const gone = await service.storage.from(BUCKET).list(A.id, { search: U });
+    record('cleanup removes the object and tombstones the row', !removed.error && !completed.error && tomb.data?.state === 'deleted' && (gone.data ?? []).length === 0, tomb.data?.state);
+    const userComplete = await A.client.rpc('complete_music_upload_cleanup', { p_upload_id: U, p_error: null });
+    record('users cannot call the cleanup RPC', Boolean(userComplete.error), codeOf(userComplete));
+
+    // Unregistered object: owner-visible, listed flat under <uid>/ (what account deletion sweeps).
+    const orphan = `${A.id}/${randomUUID()}.mp3`;
+    objects.push(orphan);
+    const orphanUp = await A.client.storage.from(BUCKET).upload(orphan, mp3(), { contentType: 'audio/mpeg' });
+    const orphanFresh = await service.rpc('list_music_orphan_objects', { p_limit: 500 });
+    record('fresh unregistered object is not swept yet (< 1 h)', !orphanUp.error && !(orphanFresh.data ?? []).some((rowIn) => rowIn.name === orphan), codeOf(orphanUp));
+    const sweep = await service.storage.from(BUCKET).list(A.id, { limit: 1000 });
+    record('account-deletion sweep sees music objects at <uid>/', (sweep.data ?? []).some((entry) => entry.id && `${A.id}/${entry.name}` === orphan));
+  } finally {
+    // Account-deletion order: objects first, then the auth users (rows cascade).
+    for (const user of [A, M, B]) {
+      const listed = await service.storage.from(BUCKET).list(user.id, { limit: 1000 });
+      const paths = (listed.data ?? []).filter((entry) => entry.id).map((entry) => `${user.id}/${entry.name}`);
+      if (paths.length) await service.storage.from(BUCKET).remove(paths);
+    }
+    for (const id of rooms) await service.from('rooms').delete().eq('id', id);
+    for (const id of throwaway) await service.auth.admin.deleteUser(id);
+    const leftover = await service.from('music_uploads').select('id').in('owner_id', throwaway);
+    record('fixtures removed (rows cascade with the users)', rows(leftover) === 0, `${rows(leftover)} row(s)`);
+  }
+
+  const failed = results.filter((pass) => !pass).length;
+  console.log(`\nA16 music probe: ${results.length - failed} pass, ${failed} fail`);
+  process.exit(failed ? 1 : 0);
+}
+
+main().catch((error) => {
+  console.error(`A16 music probe aborted: ${error.message}`);
+  process.exit(1);
+});

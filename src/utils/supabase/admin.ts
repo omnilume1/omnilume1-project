@@ -9,13 +9,27 @@ type AdminDatabase = {
   public: {
     Tables: Record<string, never>;
     Views: Record<string, never>;
-    // Deliberately narrow: the only public RPC the service role calls from
-    // app code caches media metadata the server read from the stored file
-    // itself (Action 10; clients cannot write temporary_media).
+    // Deliberately narrow: the public RPCs the service role calls from app
+    // code. Action 10 caches media metadata the server read from the stored
+    // file itself; Action 16 registers a music upload after the server sniffed
+    // its first bytes, and finalises deletes after removing the objects.
     Functions: {
       cache_temporary_media_metadata: {
         Args: { p_media_id: string; p_room_id: string; p_metadata: Record<string, unknown> };
         Returns: boolean;
+      };
+      register_music_upload: {
+        Args: {
+          p_owner_id: string; p_upload_id: string; p_ext: string; p_mime_type: string; p_original_name: string;
+          p_title: string; p_artist: string; p_album: string; p_album_artist: string; p_track_no: number | null;
+          p_year: number | null; p_genre: string; p_duration_ms: number | null; p_hue: number; p_lyrics: string;
+          p_has_cover: boolean;
+        };
+        Returns: { id: string; expires_at: string };
+      };
+      complete_music_upload_cleanup: {
+        Args: { p_upload_id: string; p_error: string | null };
+        Returns: undefined;
       };
     };
   };
