@@ -15,10 +15,6 @@ type ExpiredMedia = {
   subtitle_path: string | null;
 };
 
-type ExpiredRoom = {
-  id: string;
-};
-
 type PendingRoomFile = {
   id: string;
   object_path: string;

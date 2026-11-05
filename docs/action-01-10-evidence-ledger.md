@@ -979,8 +979,8 @@ with migration need a reviewed migration and approval.
 
 | # | Item | Action | Effort | Needs |
 | --- | --- | --- | --- | --- |
-| 1 | Clean up destroyed recoverable rooms | 06 | S | Decision (deletes production data) |
-| 2 | Replace the whiteboard placeholder (hide it, or build the whiteboard on the existing RPCs) | 09/10 | S (hide) / L (build) | Decision |
+| 1 | Clean up destroyed recoverable rooms | 06 | — | **DONE** (7-day window, migration 20261105120000, not yet applied) |
+| 2 | Replace the whiteboard placeholder | 09/10 | — | **DONE** (vector whiteboard) |
 | 3 | Edit own messages (+ edited marker) | 08 | S | Migration |
 | 4 | Reactions UI on the existing table | 08 | M | — |
 | 5 | Replies | 08 | M | Migration |
@@ -989,7 +989,7 @@ with migration need a reviewed migration and approval.
 | 8 | Member 3-dot actions | 05/08 | S–M | — |
 | 9 | Notification Center + DND/mute + timer/PDF notifications | 08 | L | Migration |
 | 10 | Chat unread/read state | 08 | M | Migration |
-| 11 | GIFs | 08 | M | Provider and API key decision |
+| 11 | GIFs | 08 | — | **DONE** (GIPHY, room chat) |
 | 12 | Permanent room files UI (RPCs exist) | 10 | M–L | — |
 | 13 | Shared PDFs viewer + annotations (RPCs exist; native browser viewer, no new dependency) | 10 | L | — |
 | 14 | Study notes UI (RPCs exist) | 10 | M | — |
@@ -997,11 +997,74 @@ with migration need a reviewed migration and approval.
 | 16 | Scheduled room creation UI (DB exists) | 06 | S–M | — |
 | 17 | Layout presets, owner layout, themes, dashboard | 09 | L | — |
 | 18 | Presence states, bookmarks, guest identity mode | 05/09 | M each | Design detail |
-| 19 | Ghost Mode UI (DB exists) | 05/09 | S–M | Decision (earlier exclusion) |
+| 19 | Ghost Mode UI (DB exists) | 05/09 | — | **WON'T DO** (owner decision) |
 | 20 | Media metadata/artwork/lyrics | 10 | L | Provider decision |
-| 21 | Minimum-age rule | 04 | S | Decision |
+| 21 | Minimum-age rule | 04 | — | **DONE** (13; migration 20261105120000, not yet applied) |
 
 S ≈ under half a day, M ≈ about a day, L ≈ two or more days.
+
+## Owner decisions implemented and main reconciled (2026-11-05)
+
+### Merge with `main`
+
+`origin/main` carried a separate Actions 05–10 build: Study notes, a PDF
+panel, a raster whiteboard, the permanent room-file library, upload
+cancel/retry, a server storage provider and persisted realtime snapshots.
+It was merged into this branch, and six conflicting files were resolved so
+that both sides survive:
+
+- Kept from `main`: the features above, the `sync-chat`, `sync-study` and
+  `sync-watch` topics, and server-side verification of stored metadata
+  before media is registered.
+- Kept from this branch (D7): Broadcast **and the persisted snapshot**
+  carry only the wire contract (ids and playback/timer state). Each viewer
+  resolves URLs through `resolveRoomMedia`. Media is re-typed to its storage
+  contract MIME type before `assertRoomFileInput`.
+- Hardened during the merge: `cleanupUnregisteredTemporaryMedia` (a
+  service-role delete) now refuses objects that a `temporary_media` row
+  references.
+- `main`'s `tests/action09-flac-contract.test.mjs` asserted the storage-path
+  design. It now asserts the media-id design.
+
+**This changes the requirement audit above for Actions 09 and 10.** Study
+notes, the PDF panel and annotations, the permanent file library and upload
+retry/cancel exist after the merge. Backlog items 12, 13 (viewer), 14 and 15
+are no longer missing. They are unverified in the browser.
+
+### Decisions
+
+| # | Decision | Implementation | Verification |
+| --- | --- | --- | --- |
+| 1 | Recovery period of 1 week; after it, delete everything | Migration `20261105120000`: `room_lifecycle_state` keeps a recoverable room in `recovery-window` for 7 days after expiry, and for as long as a recovery request is `pending`. `list_rooms_due_for_destruction` and `destroy_expired_room` (service role only; the room is locked and re-checked before the delete) replace the irreversible-only cleanup. The cron route removes the room's storage prefix, then deletes the room, and all 21 room foreign keys cascade. UI copy now says 7 days. | Dry run on the linked project inside a rolled-back transaction: `due=8`, `recovery_window=11`, grants `anon:false, authenticated:false, service_role:true`. Afterwards the function still says 24 hours and `destroy_expired_room` does not exist (not persisted). Static tests in `tests/owner-decisions.test.ts`. |
+| 2 | Very good, interactive whiteboard | `StudyWhiteboardPanel` rebuilt as a vector board (`src/lib/whiteboard-model.ts`). Tools: select/move/resize, pan, pen, highlighter, eraser, line, arrow, rectangle, ellipse, text, sticky notes, colours, widths and fill. Also: zoom and pinch, fit, grid, PNG export, undo/redo and shortcuts. Opened from a new room-rail button and from the Study tab. A lost version race merges local edits onto the newer board and retries. Live updates use a version-only `whiteboard_changed` Broadcast followed by `getRoomWhiteboard`, so no drawing content travels over Broadcast. | `tests/whiteboard-model.test.ts` (sanitising, hostile rows, merge, legacy raster, simplification, wire payload). Browser runtime **UNVERIFIED** (browser step waived). |
+| 3 | No Ghost Mode | No UI added. `set_room_ghost_mode` stays DB-only and is unreachable from the app. | — |
+| 4 | GIFs via GIPHY | Room chat GIF picker (`GifPicker`, `searchGifs` server action). The key is in server-only `GIPHY_API_KEY`, search is limited to signed-in users, and the rating is `pg-13`. A GIF is sent as `[gif:<id>|<title>]` through the normal RLS-checked insert, and the image URL is built from the id. | Live GIPHY call: trending and search each returned 24 of 24 usable results, and the id-built image URL returned `200 image/gif`. `tests/gif-message.test.ts`. |
+| 5 | Minimum age 13 | Form validation and `max` date (`latestAllowedDateOfBirth`). Trigger `profiles_enforce_minimum_age` on insert and on date-of-birth change. The trigger error maps to a clear message. | Dry run: an under-13 update was `blocked` and an update to exactly 13 was `allowed`. Unit tests. **Note:** 2 existing profiles are under 13. They are not changed (the trigger only checks new or changed dates of birth), and the owner must decide what to do with them. |
+| 6 | All AI features in Action 17 | Recorded. "Live AI Meeting Assistant" is out of scope for 01–10. | — |
+
+### Deployment notes
+
+- Migration `20261105120000` is **prepared, not applied**. Until it is
+  applied, the new cleanup route returns an error, because its RPCs do not
+  exist, and nothing is deleted. Recovery stays at 24 hours in the database,
+  even though the UI says 7 days.
+- Once it is applied, the **next cron run permanently deletes 8 rooms**
+  (measured 2026-11-05) with all of their data and storage.
+- Two irreversible rooms were still present past expiry, so the existing
+  cron may not be running in production. Check `CRON_SECRET` and the Vercel
+  Cron logs.
+- `GIPHY_API_KEY` must be added to the Vercel project environment (it is
+  only in the gitignored `.env.local`).
+
+### Validation (this run)
+
+- `npm run test:unit`: 44 of 44 pass. The `main` contract tests
+  (`node --test tests/*.mjs`): 5 of 5 pass.
+- `npx tsc --noEmit`, `npm run lint` (0 errors) and `npm run build` pass.
+- `authorization-probe.mjs full` against the linked project after the merge:
+  **156 pass, 0 fail, 0 blocked, 7 info.**
+- Not run: browser flows for the whiteboard, GIF picker and merged `main`
+  panels (waived), Preview deployment and Cron execution.
 
 ## Dashboard extensions result (2026-11-04)
 
