@@ -1,6 +1,6 @@
 # Action 16 plan (branch `feat/action-16`)
 
-**Status: approved with the owner decisions below; Stage 1 (16.1 + 16.2) in progress.**
+**Status: approved with the owner decisions below; Stage 1 (16.1 + 16.2) done in `0b63be7`; Stage 2 awaits the owner's go.**
 Resume point. Tick an item only with its commit hash; evidence goes in
 `docs/action-01-10-evidence-ledger.md` (new section "Action 16", same layout as
 Actions 13-15: Database / database-security / static / local runtime / Limits).
@@ -58,14 +58,14 @@ Limits).
 
 - [ ] **16.0 Access prerequisites (no code).** Owner supplies, before the task that needs them: Google Cloud project + YouTube Data API key (16.3) + OAuth consent screen/client (16.6); `MUSIC_TOKEN_ENC_KEY` (16.6); Spotify app (16.7); Apple Developer membership + MusicKit key (16.8); TIDAL developer access (16.9); Qobuz partner contact (16.10). Start the **YouTube quota-extension request early** (see Risks).
 
-- [ ] **16.1 UI shell, the look (fixtures only, no player, no network).**
+- [x] **16.1 UI shell, the look (fixtures only, no player, no network).** `0b63be7` (ledger "Action 16.1 + 16.2")
   Layout: sidebar 260 px glass (16 px blur, saturate 2.2), scrolling content column, floating 668×56 pill, 300 px right panel (0.3 s slide), phone top bar + mini-player < 484 px, gutters 25/40, shelf grid + arrows ≥ 1000 px, breakpoints 484/767/1000/1260/1580/1940, skeleton / empty / error states, focus rings, reduced motion. Pages: Home, Search (landing + results), Library (songs/albums/artists from fixtures), Album/Playlist detail, Settings (connections placeholder), Not found.
   Files: `src/app/music/{layout.tsx,music.css,page.tsx,loading.tsx,error.tsx,not-found.tsx}`, `src/app/music/{search,library/[section],album/[id],playlist/[id],settings}/page.tsx`, `src/components/music/{MusicShell,MusicSidebar,MusicMobileBar,PlayerPill,NowPlayingLcd,VolumeControl,SidePanel,UpNextPanel,LyricsPanel,FullScreenPlayer,MeshBackdrop,Shelf,Lockups,TrackList,Artwork,SearchField,States,ContextMenu}.tsx`, `src/lib/music-fixtures.ts` (synthetic titles, no real artists/artwork), nav link in the internal nav, `isAuthRequiredPath` += `/music` (`src/lib/auth.ts`, `tests/auth-redirects.test.ts`).
   DB: none.
   Tests/evidence: `tests/music-shell-contract.test.ts` (music CSS only under `.music-app`, no `globals.css` edit, font loaded in music layout only, reduced-motion + focus-visible blocks, route is auth-gated); browser computed-style table vs the teardown (sidebar 260, pill 668×56, radius 1000 px, h1 34/40 700, row 46/54, artwork radii 5/7/10, glass values) at 1440/1024/768/390, no horizontal overflow at 390, keyboard + a11y landmarks; `npm run lint`, `next build`.
   Model: Sonnet 5.5, medium.
 
-- [ ] **16.2 Player core (engine-agnostic).**
+- [x] **16.2 Player core (engine-agnostic).** `0b63be7` + global mini player (decision 8)
   Queue model (context / hand-queued "play next" + "add to queue" / autoplay slot), shuffle (restores order when off), repeat off→all→one, back restarts after 10 s, Up Next reorder/remove/clear, volume/mute, LCD progress scrub, keyboard (Space, ⌘/Ctrl+←→↑↓, ⌘/Ctrl+F or `/`, Esc), Media Session (metadata, state, prev/next, position), `localStorage` persistence (shuffle/repeat/volume/mute). Engine interface `{load, play, pause, seek, setVolume, currentTime, duration, on(event)}` with a silent test engine.
   Files: `src/lib/music-queue.ts` (pure), `src/lib/music-model.ts`, `src/hooks/useMusicPlayer.tsx` (provider + reducer), `src/lib/music-shortcuts.ts`; wire the 16.1 components.
   DB: none.
