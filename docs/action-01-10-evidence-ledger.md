@@ -2220,3 +2220,61 @@ be added. Source audio and artwork load directly from the source host (its
 operator sees the listener's IP, as with any web media). No HTTPS source was
 tried (no public test host); the https path is the same code with the
 protocol check. Existing non-music probes were not re-run.
+
+## Action 16.13 (part: Fix tags) + 16.12 (final verification)
+
+Scope chosen by the owner on 2026-11-06: the final regression plus the
+MusicBrainz / Cover Art Archive part of 16.13. Providers (16.0, 16.3, 16.6-16.10)
+stay deferred (decision 1; they need accounts and keys); lyrics providers stay
+off (LRCLIB needs the owner's risk decision, Musixmatch a paid key).
+
+Fix tags: ⋯ → "Fix Tags…" on an own active upload. `GET
+/api/music/metadata?upload=<id>` reads the upload through RLS (owner only) and
+calls only the fixed MusicBrainz search endpoint (quoted Lucene phrase on title
++ artist, identifying User-Agent from `MUSICBRAINZ_USER_AGENT` or a default, 8 s
+timeout, no redirects, ≤ 1 request/s per server instance, one spaced retry on
+503); no user-supplied URL reaches the server. The owner picks a match and
+presses Apply; optional artwork is fetched by the browser from the Cover Art
+Archive, re-encoded to JPEG (≤ 1200 px, EXIF dropped) and put in the existing
+cover slot. Migration `20261113100000_action16_music_fix_tags.sql` adds one
+SECURITY DEFINER RPC `update_music_upload_tags` (`search_path = ''`,
+`auth.uid()` null → 42501, owner + active + unexpired only, validated lengths
+and ranges, NULL keeps a value, artwork attached only when none exists and the
+cover object is there; EXECUTE → `authenticated`, revoked from PUBLIC/anon).
+Clients still have no UPDATE on `music_uploads`.
+
+- database-security, dry run (RPC + checks in one transaction ended by
+  `RAISE`): **14/14** — owner fix ok, NULL keeps genre, bad year / blank title
+  22023, artwork flag without object 22023, with object attached, second cover
+  refused, other user and anon 42501 with the row unchanged, expired 42501,
+  `search_path` pinned, anon cannot execute. Then `supabase db push`.
+- database-security, live `scripts/security/music-probe.mjs`: **87 pass, 0
+  fail** (+4: owner fix, other user 42501, anon refused, artwork flag needs the
+  object).
+- regression: all 12 earlier probes re-run with two throw-away QA accounts
+  (deleted after, with their rooms): authorization (full) 175, lifecycle 26,
+  site-owner 43, notification 25, messaging 37, workspace 20, media 12, watch
+  20, collab 24, management 26, conversion 19, conversations 42 — **469 pass,
+  0 fail**.
+- static: `tests/music-metadata.test.ts` (phrase escaping incl. injection
+  attempts, response mapping and caps, artwork URL only for a valid id,
+  migration/route contract). `npm run test:unit` **173/173**; lint 0 errors /
+  13 warnings (baseline); `next build` ok.
+- local runtime / browser (`next start`, incognito, throw-away account deleted
+  after): a synthetic upload tagged "Clair de lune / Claude Debussy / Unknown
+  Mix" → Fix Tags listed 5 MusicBrainz matches; unknown upload id → 404; Apply
+  on "Moonlight Classics" saved title, album, year 1995 and track 6 (checked in
+  the database). None of those 5 releases has a Cover Art Archive front image
+  (404, previews hidden), so the dialog said the artwork could not be fetched
+  and kept the tags; a release that has art was fetched and decoded in the
+  browser (archive.org redirect, CORS `*`, 500×494 JPEG). Found during the
+  check: MusicBrainz returns 503 under rate limiting → one spaced retry added.
+  Final sweep, 12 music routes × {390, 1440}: no horizontal overflow.
+
+Limits: the throttle is per server instance and results are not cached
+(`shortcut:` comment in the route); add the planned cache/rate table if
+lookups become frequent. Set `MUSICBRAINZ_USER_AGENT` (app name + contact) in
+production as MusicBrainz asks. The full artwork apply (upload + attach) was not
+seen end-to-end in the browser because the matches had no art; its pieces were
+(browser fetch/decode here, cover upload in Stage 2, attach in the dry run).
+Cover previews load from the Cover Art Archive, which sees the viewer's IP.

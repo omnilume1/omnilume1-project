@@ -122,6 +122,7 @@ export function TrackMenu({ track, playlistId }: { track: MusicTrack; playlistId
         {owned ? <Link role="menuitem" href="/music/library/playlists" onClick={() => menu.current?.hidePopover()}>New Playlist…</Link> : null}
         {playlistId ? <button type="button" role="menuitem" onClick={() => run(() => library.removeFromPlaylist(playlistId, track.id))}>Remove from Playlist</button> : null}
         {owned && live ? <button type="button" role="menuitem" onClick={() => run(() => library.openShare(track))}>Share to a Room or Group…</button> : null}
+        {owned && live ? <button type="button" role="menuitem" onClick={() => run(() => library.openFixTags(track))}>Fix Tags…</button> : null}
         {track.albumId && live && !track.sharedFrom ? <Link role="menuitem" href={`/music/album/${track.albumId}`} onClick={() => menu.current?.hidePopover()}>Go to Album</Link> : null}
         {owned ? (
           <button type="button" role="menuitem" className="is-destructive" onClick={() => run(async () => {

@@ -3,7 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { parseLyrics } from '@/lib/music-lrc';
 import type { MusicAlbum, MusicPlaylist, MusicTrack } from '@/lib/music-model';
-import { readMusicFile } from '@/lib/music-tags';
+import { coverArtUrl, type TagCandidate } from '@/lib/music-metadata';
+import { readMusicFile, toCover } from '@/lib/music-tags';
 import {
   MUSIC_AUDIO_TYPES, MUSIC_BUCKET, MUSIC_MAX_ACTIVE_FILES, MUSIC_MAX_FILE_BYTES, MUSIC_MAX_TOTAL_BYTES,
   musicCoverPath, musicObjectPath,
@@ -88,6 +89,11 @@ type MusicLibrary = {
   unshare: (shareId: string) => Promise<void>;
   shareTrack: MusicTrack | null;
   openShare: (track: MusicTrack | null) => void;
+  lookupTags: (uploadId: string) => Promise<TagCandidate[]>;
+  /** Resolves `artworkFailed: true` when tags were saved but the artwork could not be fetched. */
+  applyTags: (track: MusicTrack, candidate: TagCandidate, withArtwork: boolean) => Promise<{ artworkFailed: boolean }>;
+  fixTrack: MusicTrack | null;
+  openFixTags: (track: MusicTrack | null) => void;
 };
 
 const MusicLibraryContext = createContext<MusicLibrary | null>(null);
@@ -104,6 +110,7 @@ export function MusicLibraryProvider({ children }: { children: ReactNode }) {
   const [historyRows, setHistoryRows] = useState<HistoryRow[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const [shareTrack, setShareTrack] = useState<MusicTrack | null>(null);
+  const [fixTrack, setFixTrack] = useState<MusicTrack | null>(null);
 
   const reload = useCallback(async () => {
     const supabase = createClient();
@@ -284,12 +291,52 @@ export function MusicLibraryProvider({ children }: { children: ReactNode }) {
     fail(error, 'Could not stop sharing.');
   }, []);
 
+  const lookupTags = useCallback(async (uploadId: string) => {
+    const response = await fetch(`/api/music/metadata?upload=${uploadId}`);
+    const body = (await response.json().catch(() => ({}))) as { candidates?: TagCandidate[]; error?: string };
+    if (!response.ok) throw new Error(body.error ?? 'Could not look up tags.');
+    return body.candidates ?? [];
+  }, []);
+
+  const applyTags = useCallback<MusicLibrary['applyTags']>(async (track, candidate, withArtwork) => {
+    const supabase = createClient();
+    let addCover = false;
+    let artworkFailed = false;
+    const art = withArtwork && !track.artwork && candidate.releaseId ? coverArtUrl(candidate.releaseId, 500) : null;
+    if (art) {
+      try {
+        // Browser fetch from the fixed Cover Art Archive host, re-encoded like embedded art (≤ 1200 px JPEG, no EXIF).
+        const response = await fetch(art, { credentials: 'omit', referrerPolicy: 'no-referrer' });
+        if (!response.ok) throw new Error('artwork');
+        const cover = await toCover(await response.blob(), track.hue);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!cover?.blob || !user) throw new Error('artwork');
+        await startUploadFileWithProgress(supabase, MUSIC_BUCKET, musicCoverPath(user.id, track.id), cover.blob, undefined, 'image/jpeg').promise
+          .catch((error: unknown) => {
+            // A cover left by an earlier attempt is reused; anything else is a real failure.
+            if (!/exist|duplicate/i.test(error instanceof Error ? error.message : '')) throw error;
+          });
+        addCover = true;
+      } catch {
+        artworkFailed = true;
+      }
+    }
+    const { error } = await supabase.rpc('update_music_upload_tags', {
+      p_upload_id: track.id, p_title: candidate.title, p_artist: candidate.artist || null, p_album: candidate.album || null,
+      p_album_artist: null, p_track_no: candidate.trackNo, p_year: candidate.year, p_add_cover: addCover,
+    });
+    fail(error, 'Could not save the tags.');
+    await reload();
+    return { artworkFailed };
+  }, [reload]);
+
   const value = useMemo<MusicLibrary>(() => ({
     status, uploads, songs, usage, playlists, shared, history, albums, artists, reload, uploadFile, deleteUpload,
     createPlaylist, deletePlaylist, addToPlaylist, removeFromPlaylist, clearHistory, shareTargets, listShares, share,
-    unshare, shareTrack, openShare: setShareTrack,
+    unshare, shareTrack, openShare: setShareTrack, lookupTags, applyTags, fixTrack, openFixTags: setFixTrack,
   }), [status, uploads, songs, usage, playlists, shared, history, albums, artists, reload, uploadFile, deleteUpload,
-    createPlaylist, deletePlaylist, addToPlaylist, removeFromPlaylist, clearHistory, shareTargets, listShares, share, unshare, shareTrack]);
+    createPlaylist, deletePlaylist, addToPlaylist, removeFromPlaylist, clearHistory, shareTargets, listShares, share, unshare, shareTrack,
+    lookupTags, applyTags, fixTrack]);
 
   return <MusicLibraryContext.Provider value={value}>{children}</MusicLibraryContext.Provider>;
 }

@@ -313,6 +313,20 @@ async function main() {
     const sweep = await service.storage.from(BUCKET).list(A.id, { limit: 1000 });
     record('account-deletion sweep sees music objects at <uid>/', (sweep.data ?? []).some((entry) => entry.id && `${A.id}/${entry.name}` === orphan));
 
+    // 16.13 (part): Fix tags is one owner-only RPC (clients still have no UPDATE on uploads).
+    const T = randomUUID();
+    objects.push(`${A.id}/${T}.mp3`);
+    await A.client.storage.from(BUCKET).upload(`${A.id}/${T}.mp3`, mp3(), { contentType: 'audio/mpeg' });
+    const tReg = await register(A, T);
+    const fixed = await A.client.rpc('update_music_upload_tags', { p_upload_id: T, p_title: 'Fixed Title', p_year: 1999 });
+    record('owner fixes tags through the RPC', !tReg.error && fixed.data?.title === 'Fixed Title' && fixed.data?.year === 1999, codeOf(fixed));
+    const mFix = await M.client.rpc('update_music_upload_tags', { p_upload_id: T, p_title: 'Hijack' });
+    record('other users cannot fix my tags', codeOf(mFix) === '42501', codeOf(mFix));
+    const anonFix = await anon.rpc('update_music_upload_tags', { p_upload_id: T, p_title: 'Hijack' });
+    record('anon cannot fix tags', Boolean(anonFix.error), codeOf(anonFix));
+    const coverless = await A.client.rpc('update_music_upload_tags', { p_upload_id: T, p_add_cover: true });
+    record('artwork flag needs an uploaded cover object', codeOf(coverless) === '22023', codeOf(coverless));
+
     // Stage 4: custom sources (owner-only rows; the server never calls a source).
     const source = { manifest_url: 'https://qa16-source.example/omnilume.json', name: 'QA source', search_url: 'https://qa16-source.example/search?q={query}', health_url: null, responsibility_accepted: true };
     const added = await A.client.from('music_custom_sources').insert(source).select('id').single();

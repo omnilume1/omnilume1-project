@@ -407,6 +407,9 @@
 .music-app .mu-source-main strong, .music-app .mu-source-main .mu-fine { overflow-wrap: anywhere; }
 .music-app .mu-source-actions { display: flex; align-items: center; gap: 6px; }
 .music-app .mu-check.is-inline { margin: 0; font-weight: 400; }
+.music-app .mu-candidates li { padding: 0; }
+.music-app .mu-candidate { display: grid; grid-template-columns: auto 40px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 54px; cursor: pointer; }
+.music-app .mu-candidate img, .music-app .mu-candidate-blank { width: 40px; height: 40px; border-radius: 5px; background: var(--mu-q4); object-fit: cover; }
 
 /* ---------- Keyframes ---------- */
 @keyframes mu-shimmer { to { background-position: -200% 0; } }

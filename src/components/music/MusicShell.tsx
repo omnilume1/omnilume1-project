@@ -8,7 +8,7 @@ import { MusicLibraryProvider, useMusicLibrary } from '@/hooks/useMusicLibrary';
 import { useMusicPlayer } from '@/hooks/useMusicPlayer';
 import { musicShortcutFor } from '@/lib/music-shortcuts';
 import { MusicIcon, type MusicIconName } from './MusicIcon';
-import { ShareDialog } from './MusicLibraryParts';
+import { FixTagsDialog, ShareDialog } from './MusicLibraryParts';
 import { FullScreenPlayer, PlayerPill, SidePanel, type SidePanelKind } from './MusicPlayerChrome';
 
 const LIBRARY: [string, string, MusicIconName][] = [
@@ -135,6 +135,7 @@ function Shell({ fontClass, children }: { fontClass: string; children: ReactNode
       <SidePanel kind={panel} open={panelOpen} />
       {fullScreen ? <FullScreenPlayer onClose={() => setFullScreen(false)} /> : null}
       <ShareDialog />
+      <FixTagsDialog />
     </div>
   );
 }

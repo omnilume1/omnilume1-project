@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMusicLibrary, type ShareTarget, type UploadShare } from '@/hooks/useMusicLibrary';
+import { coverArtUrl, type TagCandidate } from '@/lib/music-metadata';
+import { formatMusicTime } from '@/lib/music-model';
 import { audioExtension, MUSIC_MAX_ACTIVE_FILES, MUSIC_MAX_TOTAL_BYTES } from '@/lib/music-upload-validation';
 import { MusicIcon } from './MusicIcon';
 
@@ -177,6 +179,113 @@ export function ShareDialog() {
           })}
         </ul>
       )}
+    </dialog>
+  );
+}
+
+/** "Fix Tags": MusicBrainz matches for one upload; nothing changes until the owner picks one and presses Apply. */
+export function FixTagsDialog() {
+  const { fixTrack: track, openFixTags, lookupTags, applyTags } = useMusicLibrary();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [candidates, setCandidates] = useState<TagCandidate[] | null>(null);
+  const [picked, setPicked] = useState<string | null>(null);
+  const [withArtwork, setWithArtwork] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const reset = useCallback(() => {
+    openFixTags(null);
+    setCandidates(null);
+    setPicked(null);
+    setWithArtwork(true);
+    setError(null);
+    setNote(null);
+  }, [openFixTags]);
+
+  useEffect(() => {
+    const element = dialog.current;
+    if (!element || !track?.uploadId) return;
+    if (!element.open) element.showModal();
+    element.addEventListener('close', reset);
+    let alive = true;
+    lookupTags(track.uploadId)
+      .then((found) => {
+        if (!alive) return;
+        setCandidates(found);
+        setPicked(found[0]?.recordingId ?? null);
+      })
+      .catch((lookupError: unknown) => alive && setError(lookupError instanceof Error ? lookupError.message : 'Could not look up tags.'));
+    return () => {
+      alive = false;
+      element.removeEventListener('close', reset);
+    };
+  }, [track, lookupTags, reset]);
+
+  if (!track?.uploadId) return null;
+  const choice = candidates?.find((candidate) => candidate.recordingId === picked) ?? null;
+  const close = () => {
+    dialog.current?.close();
+    reset();
+  };
+  const apply = async () => {
+    if (!choice) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { artworkFailed } = await applyTags(track, choice, withArtwork);
+      if (artworkFailed) setNote('Tags saved. The artwork couldn’t be fetched, so the song keeps its current look.');
+      else close();
+    } catch (applyError) {
+      setError(applyError instanceof Error ? applyError.message : 'Could not save the tags.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <dialog ref={dialog} className="mu-modal" aria-labelledby="mu-fix-title">
+      <header className="mu-modal-header">
+        <h2 id="mu-fix-title">Fix tags for “{track.title}”</h2>
+        <button type="button" className="mu-icon-button" aria-label="Close" onClick={close}><MusicIcon name="close" size={16} /></button>
+      </header>
+      <p className="mu-muted">Pick the matching recording from MusicBrainz. Title, artist, album, year and track number are replaced only when you press Apply.</p>
+      {error ? <p className="mu-error" role="alert">{error}</p> : null}
+      {note ? <p className="mu-muted" role="status">{note}</p> : null}
+      {candidates === null && !error ? <p className="mu-muted" role="status">Looking up “{track.title}”…</p> : null}
+      {candidates?.length === 0 ? <p className="mu-muted">No matches found. Check the title and artist, or keep the current tags.</p> : null}
+      {candidates?.length ? (
+        <ul className="mu-targets mu-candidates" role="radiogroup" aria-label="Matches">
+          {candidates.map((candidate) => {
+            const art = candidate.releaseId ? coverArtUrl(candidate.releaseId, 250) : null;
+            return (
+              <li key={candidate.recordingId}>
+                <label className="mu-candidate">
+                  <input type="radio" name="mu-candidate" checked={picked === candidate.recordingId} onChange={() => setPicked(candidate.recordingId)} />
+                  {/* eslint-disable-next-line @next/next/no-img-element -- third-party preview; hidden if the release has no front cover */}
+                  {art ? <img src={art} alt="" width={40} height={40} loading="lazy" referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.visibility = 'hidden'; }} /> : <span className="mu-candidate-blank" />}
+                  <span className="mu-track-main">
+                    <span className="mu-track-title">{candidate.title}</span>
+                    <span className="mu-track-artist">{[candidate.artist, candidate.album, candidate.year].filter(Boolean).join(' · ')}</span>
+                  </span>
+                  <span className="mu-fine">{candidate.durationMs ? formatMusicTime(candidate.durationMs) : ''}</span>
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {candidates?.length && !track.artwork ? (
+        <label className="mu-check">
+          <input type="checkbox" checked={withArtwork} onChange={(event) => setWithArtwork(event.target.checked)} />
+          <span>Also use the album artwork (from the Cover Art Archive)</span>
+        </label>
+      ) : null}
+      <div className="mu-detail-actions">
+        <button type="button" className="mu-pill-button is-key" disabled={!choice || busy} onClick={() => void apply()}>{busy ? 'Saving…' : 'Apply'}</button>
+        <button type="button" className="mu-text-button" onClick={close}>Cancel</button>
+      </div>
+      <p className="mu-fine">Data from MusicBrainz (CC0). Artwork from the Cover Art Archive.</p>
     </dialog>
   );
 }
