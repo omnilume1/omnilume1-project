@@ -15,14 +15,11 @@ import { convertRoomToGroup } from '@/actions/rooms';
 import {
   getPermanentRoomRequests,
   getRecoveryRequestStatus,
-  getRoomRecoveryRequests,
   requestPermanentRoom,
   requestRoomRecovery,
   reviewPermanentRoomRequest,
-  reviewRoomRecovery,
   type PermanentRoomRequest,
   type RecoveryRequestStatus,
-  type RecoveryRequestWithRequester,
 } from '@/actions/recovery';
 import RoomRealtimeProvider from '@/components/room/RoomRealtimeProvider';
 import RoomNotifications from '@/components/room/RoomNotifications';
@@ -54,6 +51,7 @@ type RoomData = {
   reopened_until?: string | null;
   scheduled_for?: string | null;
   is_group?: boolean;
+  deletion_scheduled_at?: string | null;
 };
 
 type RoomFeature = 'chat' | 'watch' | 'files' | 'study' | 'announcements';
@@ -87,7 +85,6 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryRequestStatus | 'none'>('none');
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
-  const [recoveryRequests, setRecoveryRequests] = useState<RecoveryRequestWithRequester[]>([]);
   const [permanentRequests, setPermanentRequests] = useState<PermanentRoomRequest[]>([]);
   const [permanentSubmitting, setPermanentSubmitting] = useState(false);
   const [lifecycleActionError, setLifecycleActionError] = useState<string | null>(null);
@@ -251,16 +248,6 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   }, [accessStatus, isExpired, roomData]);
 
   useEffect(() => {
-    if (!roomData || !['owner', 'admin'].includes(userRole ?? '') || (!isExpired && accessStatus !== 'expired')) return;
-
-    let cancelled = false;
-    void getRoomRecoveryRequests(roomData.id).then((result) => {
-      if (!cancelled && result.success) setRecoveryRequests(result.requests ?? []);
-    });
-    return () => { cancelled = true; };
-  }, [accessStatus, isExpired, roomData, userRole]);
-
-  useEffect(() => {
     if (!roomData?.reopened_until || isExpired || accessStatus === 'expired') return;
 
     let cancelled = false;
@@ -278,27 +265,12 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     const result = await requestRoomRecovery(roomData.id);
     if (result.success) {
       setRecoveryStatus(result.request?.status ?? 'pending');
-      // Owners and admins review requests on this same screen: show the new
-      // request (with its Approve/Reject actions) without a reload.
-      if (['owner', 'admin'].includes(userRole ?? '')) {
-        const refreshed = await getRoomRecoveryRequests(roomData.id);
-        if (refreshed.success) setRecoveryRequests(refreshed.requests ?? []);
-      }
     } else {
       setRecoveryError(result.error ?? 'Unable to submit recovery request.');
     }
     setRecoverySubmitting(false);
   };
 
-  const handleRecoveryReview = async (requestId: string, decision: 'approved' | 'rejected') => {
-    setLifecycleActionError(null);
-    const result = await reviewRoomRecovery(requestId, decision);
-    if (!result.success) {
-      setLifecycleActionError(result.error ?? 'Unable to review recovery request.');
-      return;
-    }
-    window.location.reload();
-  };
 
   const handlePermanentRequest = async () => {
     if (!roomData || permanentSubmitting) return;
@@ -475,26 +447,23 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
 
   if ((accessStatus === 'expired' || accessStatus === 'recovery_window' || isExpired) && roomData) {
     const isIrreversible = roomData.expiration_type === 'irreversible';
+    // Each member sees only the status of their own request; site owners
+    // review requests at /admin/recovery.
     const recoveryCopy = recoveryStatus === 'pending'
-      ? 'Recovery request pending review.'
+      ? 'Your recovery request is waiting for a site owner to review it.'
       : recoveryStatus === 'approved'
-        ? 'Recovery request approved.'
+        ? 'Your recovery request was approved. Reload the page to enter the room.'
         : recoveryStatus === 'rejected'
-          ? 'Recovery request was rejected.'
+          ? 'Your recovery request was rejected.'
           : null;
+    const canRequestRecovery = ['owner', 'admin', 'member'].includes(userRole ?? '');
     return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center">
         <div className="max-w-md w-full border border-neutral-800 bg-neutral-950 p-8 rounded-2xl shadow-2xl flex flex-col items-center">
           <div className="w-16 h-16 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center text-2xl mb-4">{isIrreversible ? '🔥' : '🔒'}</div>
           <h1 className={`text-xl font-bold mb-2 ${isIrreversible ? 'text-red-500' : 'text-amber-500'}`}>{isIrreversible ? 'Space Access Ended' : 'Space Quarantined'}</h1>
           <p className="text-sm text-neutral-400 mb-6">The timer hit zero. {isIrreversible ? 'Access has been cut off and the server cleanup process will permanently destroy this room.' : 'Data is preserved but inaccessible for 7 days. If no recovery is requested in that time, the room and all of its chats and files are permanently deleted.'}</p>
-          {!isIrreversible && (recoveryCopy ? <div className="w-full py-3 bg-emerald-950/40 border border-emerald-800 text-emerald-400 text-xs rounded-lg mb-4">{recoveryCopy}</div> : (userRole === 'owner' || userRole === 'admin') ? <button onClick={handleRecoveryRequest} disabled={recoverySubmitting} className="w-full py-2.5 bg-neutral-100 text-black font-semibold text-sm rounded-lg hover:bg-white disabled:cursor-wait disabled:opacity-60 mb-4">{recoverySubmitting ? 'Submitting...' : 'Request Admin Recovery'}</button> : <p className="w-full rounded-lg border border-neutral-800 bg-neutral-900/50 px-3 py-3 text-xs text-neutral-400">Only the current owner or admin can request recovery during this 7-day window.</p>)}
-          {!isIrreversible && recoveryRequests.filter((request) => request.status === 'pending').map((request) => (
-            <div key={request.id} className="mb-4 w-full rounded-lg border border-indigo-900/50 bg-indigo-950/20 p-3 text-left text-xs text-indigo-200">
-              <p>Recovery requested by {request.requester_label}.</p>
-              {(userRole === 'owner' || userRole === 'admin') && <div className="mt-2 flex gap-2"><button type="button" onClick={() => void handleRecoveryReview(request.id, 'approved')} className="rounded bg-emerald-700/70 px-3 py-1.5 font-bold">Approve and reopen for 7 days</button><button type="button" onClick={() => void handleRecoveryReview(request.id, 'rejected')} className="rounded bg-red-700/70 px-3 py-1.5 font-bold">Reject</button></div>}
-            </div>
-          ))}
+          {!isIrreversible && (recoveryCopy ? <div className="w-full py-3 bg-emerald-950/40 border border-emerald-800 text-emerald-400 text-xs rounded-lg mb-4">{recoveryCopy}</div> : canRequestRecovery ? <><button onClick={handleRecoveryRequest} disabled={recoverySubmitting} className="w-full py-2.5 bg-neutral-100 text-black font-semibold text-sm rounded-lg hover:bg-white disabled:cursor-wait disabled:opacity-60 mb-2">{recoverySubmitting ? 'Submitting...' : 'Request recovery'}</button><p className="mb-4 text-xs text-neutral-500">Any member can ask during this 7-day window. A site owner reviews each request.</p></> : <p className="w-full rounded-lg border border-neutral-800 bg-neutral-900/50 px-3 py-3 text-xs text-neutral-400">Room members can request recovery during this 7-day window.</p>)}
           {recoveryError && <p className="mb-4 w-full rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-300">{recoveryError}</p>}
           <Link href="/explore" className="text-xs text-neutral-500 hover:text-white underline">Return to Explore</Link>
         </div>
@@ -542,6 +511,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         </div>
       )}
       {lifecycleActionError && <p className="border-b border-red-900/50 bg-red-950/30 px-6 py-2 text-xs text-red-300" role="alert">{lifecycleActionError}</p>}
+      {roomData.expiration_type === 'permanent' && roomData.deletion_scheduled_at && <p className="border-b border-red-900/50 bg-red-950/30 px-6 py-2 text-xs text-red-200" role="status">This room is scheduled for permanent deletion on {new Date(roomData.deletion_scheduled_at).toLocaleString([], { dateStyle: 'full', timeStyle: 'short' })}. Chats and files will be deleted unless the owner cancels.</p>}
 
       <div className="room-content flex-1 overflow-hidden">
         <nav className="workspace-rail z-10">
@@ -654,6 +624,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         onStateChange={handleControlStateChange}
         requestedTab={controlCenterTab}
         selectedMemberId={controlCenterMemberId}
+        roomLifecycle={{ expirationType: roomData.expiration_type, deletionScheduledAt: roomData.deletion_scheduled_at ?? null }}
+        onRoomLifecycleChange={(deletionScheduledAt) => setRoomData((current) => current ? { ...current, deletion_scheduled_at: deletionScheduledAt } : current)}
       />
       {showLeaveConfirmation && <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="leave-room-title"><section className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111217] p-6 shadow-2xl"><p className="text-[10px] font-bold uppercase tracking-[.16em] text-amber-200">Membership</p>{userRole === 'owner' && ownerLeaveStep === 'choice' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Do you want to transfer ownership before leaving?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Choose No to leave the active workspace while retaining your room membership and ownership for later.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => { setShowLeaveConfirmation(false); minimizeActiveRoom(); }} className="omni-button omni-button-ghost">No</button><button type="button" disabled={leaving} onClick={() => void openOwnerTransfer()} className="omni-button omni-button-primary">Yes</button></div></> : userRole === 'owner' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Choose a new owner</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Only an approved permanent member can receive ownership.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<select value={ownerTransferTarget} onChange={(event) => setOwnerTransferTarget(event.target.value)} className="omni-input mt-4">{ownerTransferCandidates.map((member) => <option key={member.user_id} value={member.user_id}>User {member.user_id.slice(0, 8)}</option>)}</select><div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setOwnerLeaveStep('choice')} className="omni-button omni-button-ghost">Back</button><button type="button" disabled={leaving || !ownerTransferTarget} onClick={() => void completeOwnerTransferAndLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Transfer and leave'}</button></div></> : <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Leave this room?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">You can rejoin later when the room is open and you are not restricted.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => void handleLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Leave room'}</button></div></>}</section></div>}
       <FloatingDock />

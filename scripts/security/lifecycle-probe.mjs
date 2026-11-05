@@ -80,6 +80,22 @@ COMMIT;
   if (result.status !== 0) throw new Error(`Backdating fixture failed (exit ${result.status}).`);
 }
 
+function runSql(sql) {
+  const dir = mkdtempSync(join(tmpdir(), 'omnilume-lifecycle-'));
+  const file = join(dir, 'probe.sql');
+  writeFileSync(file, sql);
+  const result = spawnSync(`npx supabase db query --linked -f "${file}"`, { cwd: projectRoot, shell: true, encoding: 'utf8' });
+  rmSync(dir, { recursive: true, force: true });
+  return `${result.stdout ?? ''}${result.stderr ?? ''}`;
+}
+
+// Site-owner decisions on fixtures without the real owners: a rejection is
+// written by the service role with audit fields (allowed by the request
+// tamper trigger); approvals run in a rolled-back transaction instead.
+async function serviceReject(requestId, reviewerId) {
+  return service.from('recovery_requests').update({ status: 'rejected', reviewed_at: new Date().toISOString(), reviewed_by: reviewerId }).eq('id', requestId).eq('status', 'pending');
+}
+
 async function createRoom(owner, tag, suffix, expiresInMs) {
   const roomId = randomUUID();
   const room = await owner.client.from('rooms').insert({
@@ -191,12 +207,28 @@ async function main() {
   record('A06', 'owner requests recovery inside the window', !request.error && request.data?.status === 'pending', codeOf(request));
   const outsiderReview = request.data?.id ? await B.client.rpc('review_recovery_request', { p_request_id: request.data.id, p_decision: 'approved' }) : { error: { code: 'no_request' } };
   record('A06', 'a non-member cannot approve the request', Boolean(outsiderReview.error), codeOf(outsiderReview));
-  const approve = request.data?.id ? await A.client.rpc('review_recovery_request', { p_request_id: request.data.id, p_decision: 'approved' }) : { error: { code: 'no_request' } };
-  const reopened = await service.from('rooms').select('reopened_until').eq('id', W).single();
-  const reopenDays = reopened.data?.reopened_until ? (Date.parse(reopened.data.reopened_until) - Date.now()) / 86_400_000 : 0;
-  record('A06', 'approval reopens the room for 7 days', !approve.error && reopenDays > 6.99 && reopenDays <= 7.01, `${codeOf(approve)} days=${reopenDays.toFixed(3)}`);
-  const restored = await A.client.from('messages').select('id').eq('room_id', W);
-  record('A06', 'content is back after reopening', !restored.error && (restored.data ?? []).length >= 1, `${codeOf(restored)} rows=${(restored.data ?? []).length}`);
+  const ownerApprove = request.data?.id ? await A.client.rpc('review_recovery_request', { p_request_id: request.data.id, p_decision: 'approved' }) : { error: { code: 'no_request' } };
+  record('A06', 'the room owner can no longer approve (site owners only)', Boolean(ownerApprove.error) && ownerApprove.error.code === '42501', codeOf(ownerApprove));
+  // Site-owner approval in a rolled-back transaction (QA account A is made a
+  // site owner only inside it): 7-day reopen and restored content access.
+  if (!/^[0-9a-f-]{36}$/i.test(request.data?.id ?? '') || !/^[0-9a-f-]{36}$/i.test(A.id) || !/^[0-9a-f-]{36}$/i.test(W)) throw new Error('bad id');
+  const txnOutput = runSql(`DO $t$
+DECLARE r text := ''; v text; n integer;
+BEGIN
+  INSERT INTO public.site_owners (user_id) VALUES ('${A.id}');
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', '${A.id}', 'role', 'authenticated')::text, true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  SELECT status INTO v FROM public.review_recovery_request('${request.data.id}', 'approved'); r := r || 'approve=' || v || ';';
+  SELECT round(extract(epoch FROM (reopened_until - now())) / 86400.0, 3)::text INTO v FROM public.rooms WHERE id = '${W}'; r := r || 'days=' || COALESCE(v, 'none') || ';';
+  SELECT count(*) INTO n FROM public.messages WHERE room_id = '${W}'; r := r || 'messages=' || n || ';';
+  RAISE EXCEPTION 'TXN_RESULT %', r;
+END
+$t$;
+`).replace(/\\+"/g, '"');
+  const txn = Object.fromEntries((txnOutput.match(/TXN_RESULT ([^"\\]*)/)?.[1] ?? '').split(';').filter(Boolean).map((pair) => pair.split('=')));
+  const reopenDays = Number(txn.days);
+  record('A06', 'site-owner approval reopens the room for 7 days', txn.approve === 'approved' && reopenDays > 6.99 && reopenDays <= 7.01, `approve=${txn.approve} days=${txn.days}`);
+  record('A06', 'content is back after reopening', Number(txn.messages) >= 1, `messages=${txn.messages}`);
 
   const pendingRequest = await A.client.from('recovery_requests').insert({ room_id: P, requester_id: A.id }).select('id, status').single();
   record('A06', 'owner requests recovery for P', !pendingRequest.error, codeOf(pendingRequest));
@@ -220,15 +252,17 @@ async function main() {
   record('A06', 'cleanup deletes the room with every row and stored file', !destroyed.error && destroyed.data === true && allGone, `${codeOf(destroyed)} before=${JSON.stringify(before)} after=${JSON.stringify(after)}`);
 
   // Rejecting P's request ends the hold; the room is then destroyed too.
-  const reject = pendingRequest.data?.id ? await A.client.rpc('review_recovery_request', { p_request_id: pendingRequest.data.id, p_decision: 'rejected' }) : { error: { code: 'no_request' } };
+  const reject = pendingRequest.data?.id ? await serviceReject(pendingRequest.data.id, A.id) : { error: { code: 'no_request' } };
   const dueAfterReject = (await listDue()).includes(P);
   record('A06', 'after the request is rejected the held room becomes due', !reject.error && dueAfterReject, codeOf(reject));
   const destroyedP = await destroyLikeCron(P);
   const afterP = await roomFootprint(P);
   record('A06', 'the rejected room is deleted with all of its data', !destroyedP.error && destroyedP.data === true && Object.values(afterP).every((value) => value === 0), `${codeOf(destroyedP)} after=${JSON.stringify(afterP)}`);
 
-  // Leave nothing behind: end W's reopen period and destroy it the same way.
-  backdateFixture(W, 8, { reopened: true });
+  // Leave nothing behind: W is still held by its (rolled-back, so pending)
+  // request; answer it, end its window and destroy it the same way.
+  if (request.data?.id) await serviceReject(request.data.id, A.id);
+  backdateFixture(W, 8);
   const destroyedW = await destroyLikeCron(W);
   const afterW = await roomFootprint(W);
   record('A06', 'fixture W cleaned up', !destroyedW.error && destroyedW.data === true && Object.values(afterW).every((value) => value === 0), codeOf(destroyedW));

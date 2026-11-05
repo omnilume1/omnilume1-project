@@ -1,7 +1,6 @@
 'use server';
 
 import { createClient } from '@/utils/supabase/server';
-import { isRoomExpired } from '@/lib/room-lifecycle';
 
 export type RecoveryRequestStatus = 'pending' | 'approved' | 'rejected';
 
@@ -82,31 +81,14 @@ export async function getRoomRecoveryRequests(roomId: string) {
   }
 }
 
+// Any approved (non-guest) member of an expired recoverable room may ask for
+// recovery inside its 7-day window, once per room while a request is pending.
+// The database policy (can_request_room_recovery) is the authority; the
+// checks here only turn its refusals into clear messages.
 export async function requestRoomRecovery(roomId: string) {
   try {
     if (!roomId) throw new Error('Room is required.');
     const { supabase, user } = await requireUser();
-
-    const { data: room, error: roomError } = await supabase
-      .from('rooms')
-      .select('id, expiration_type, expires_at, reopened_until')
-      .eq('id', roomId)
-      .maybeSingle();
-    if (roomError) throw new Error(roomError.message);
-    if (!room || room.expiration_type !== 'recoverable' || !isRoomExpired(room) || room.reopened_until) {
-      throw new Error('This room is not eligible for recovery.');
-    }
-
-    const { data: member, error: memberError } = await supabase
-      .from('room_members')
-      .select('role, join_status')
-      .eq('room_id', roomId)
-      .eq('user_id', user.id)
-      .maybeSingle();
-    if (memberError) throw new Error(memberError.message);
-    if (!member || member.join_status !== 'approved' || !['owner', 'admin'].includes(member.role)) {
-      throw new Error('Only the current room owner or admin can request recovery.');
-    }
 
     const { data: existing, error: existingError } = await supabase
       .from('recovery_requests')
@@ -123,7 +105,15 @@ export async function requestRoomRecovery(roomId: string) {
       .insert({ room_id: roomId, requester_id: user.id })
       .select(recoveryRequestColumns)
       .single();
-    if (error) throw new Error(error.message);
+    if (error) {
+      if (error.code === '42501') {
+        throw new Error('Recovery can be requested only by members of this room, during its 7-day recovery window.');
+      }
+      if (error.code === '23505') {
+        throw new Error('You already have a pending recovery request for this room.');
+      }
+      throw new Error(error.message);
+    }
 
     return { success: true, request: data as RecoveryRequest };
   } catch (error: unknown) {
@@ -197,5 +187,68 @@ export async function reviewPermanentRoomRequest(requestId: string, decision: Ex
     return { success: true, request: data as PermanentRoomRequest };
   } catch (error: unknown) {
     return { success: false, error: error instanceof Error ? error.message : 'Unable to review permanence request.' };
+  }
+}
+
+export type RecoveryReviewItem = {
+  request_id: string;
+  room_id: string;
+  room_name: string;
+  room_expired_at: string | null;
+  window_ends_at: string | null;
+  requester_id: string;
+  requester_label: string;
+  requested_at: string;
+  other_pending: number;
+};
+
+// True only for the signed-in user's own site-owner row (is_site_owner never
+// answers for another user id).
+export async function amISiteOwner() {
+  try {
+    const { supabase, user } = await requireUser();
+    const { data, error } = await supabase.rpc('is_site_owner', { p_user_id: user.id });
+    if (error) throw new Error(error.message);
+    return { success: true, isSiteOwner: data === true };
+  } catch (error: unknown) {
+    return { success: false, isSiteOwner: false, error: error instanceof Error ? error.message : 'Unable to check access.' };
+  }
+}
+
+export async function getRecoveryReviewQueue() {
+  try {
+    const { supabase } = await requireUser();
+    const { data, error } = await supabase.rpc('list_recovery_review_queue');
+    if (error) throw new Error(error.code === '42501' ? 'Only a site owner can review recovery requests.' : error.message);
+    return { success: true, requests: (data ?? []) as RecoveryReviewItem[] };
+  } catch (error: unknown) {
+    return { success: false, requests: [] as RecoveryReviewItem[], error: error instanceof Error ? error.message : 'Unable to load recovery requests.' };
+  }
+}
+
+// §9 permanent rooms: the owner schedules deletion (7–14 day grace period) and
+// may cancel it before the grace period ends. Enforced by the RPCs.
+export async function scheduleRoomDeletion(roomId: string, graceDays: number) {
+  try {
+    if (!roomId) throw new Error('Room is required.');
+    if (!Number.isInteger(graceDays) || graceDays < 7 || graceDays > 14) throw new Error('Choose a grace period of 7 to 14 days.');
+    const { supabase } = await requireUser();
+    const { data, error } = await supabase.rpc('schedule_room_deletion', { p_room_id: roomId, p_grace_days: graceDays });
+    if (error) throw new Error(error.message);
+    return { success: true, deletionScheduledAt: data as string };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to schedule deletion.' };
+  }
+}
+
+export async function cancelRoomDeletion(roomId: string) {
+  try {
+    if (!roomId) throw new Error('Room is required.');
+    const { supabase } = await requireUser();
+    const { error } = await supabase.rpc('cancel_room_deletion', { p_room_id: roomId });
+    if (error) throw new Error(error.message);
+    return { success: true };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to cancel deletion.' };
   }
 }

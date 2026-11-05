@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getMyJoinedRooms, getPublicRooms, processRoomJoin } from '@/actions/rooms';
-import { getMyRoomJoinEligibility, joinRoomWithInvite, validateRoomInvite } from '@/actions/room-controls';
+import { getMyRoomJoinEligibility, joinRoomWithInvite, previewRoomInvite } from '@/actions/room-controls';
+import { roomDeletionPolicy } from '@/lib/room-deletion-policy';
 import { getLoginPath } from '@/lib/auth';
 import { createClient } from '@/utils/supabase/client';
 import FloatingDock from '@/components/ui/FloatingDock';
@@ -18,8 +19,11 @@ interface PublicRoom {
   name: string;
   description: string | null;
   username: string | null;
+  expiration_type: string | null;
+  deletion_scheduled_at: string | null;
   room_members: Array<{ count: number }>;
 }
+type InvitePreview = Awaited<ReturnType<typeof previewRoomInvite>> extends { ok: true; data: infer T } | { ok: false; error: string } ? T : never;
 type JoinedRoom = { role: string; rooms: { id: string; name: string; username: string | null } | { id: string; name: string; username: string | null }[] };
 
 function safeJoinMessage(error: unknown) {
@@ -52,6 +56,8 @@ export default function ExploreRoomsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [status, setStatus] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  // An invite shows the room and its deletion policy before joining (§9).
+  const [invitePreview, setInvitePreview] = useState<{ token: string; room: InvitePreview } | null>(null);
   const [minimizedRoomIds] = useState<string[]>(() => getMinimizedRoomIds());
   const router = useRouter();
   const supabase = createClient();
@@ -114,9 +120,13 @@ export default function ExploreRoomsPage() {
       const token = identifier.trim().split('?')[0].split('#')[0].split('/').filter(Boolean).pop() ?? '';
       const isInvite = /^[a-f0-9]{48}$/i.test(token);
       if (isInvite) {
-        const invite = await validateRoomInvite(token).then(unwrapAction);
-        if (!invite) throw new Error('Invite is invalid or expired.');
+        if (invitePreview?.token !== token) {
+          const room = await previewRoomInvite(token).then(unwrapAction);
+          setInvitePreview({ token, room });
+          return;
+        }
         const result = await joinRoomWithInvite(token).then(unwrapAction);
+        setInvitePreview(null);
         setStatus({ type: 'success', message: result.role === 'guest' ? 'Temporary guest access granted.' : 'Invite accepted. Opening the room…' });
         router.push(`/room/${result.room_id}`);
         return;
@@ -183,14 +193,30 @@ export default function ExploreRoomsPage() {
           </div>
         </section>
 
+        {invitePreview && (() => {
+          const policy = roomDeletionPolicy({ expiration_type: invitePreview.room.expiration_type, deletion_scheduled_at: invitePreview.room.deletion_scheduled_at });
+          return <section className="glass-card-ambient mb-5 p-5" aria-labelledby="invite-preview-heading">
+            <p className="section-kicker !mb-0">Invite</p>
+            <h2 id="invite-preview-heading" className="mt-2 text-lg font-semibold text-white">{invitePreview.room.room_name}</h2>
+            <p className="mt-1 text-xs text-neutral-400">{invitePreview.room.is_private ? 'Private room' : 'Public room'}{invitePreview.room.guest_lifetime_minutes ? ` · guest access for ${invitePreview.room.guest_lifetime_minutes} minutes` : ''}</p>
+            <p className="mt-3"><span className="room-chip text-amber-100">{policy.label}</span></p>
+            <p className="mt-2 text-sm text-neutral-400">{policy.description}</p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button type="button" onClick={() => void handleJoin(invitePreview.token)} disabled={processingId === invitePreview.token} className="omni-button omni-button-primary">{processingId === invitePreview.token ? 'Joining...' : 'Join room'}</button>
+              <button type="button" onClick={() => setInvitePreview(null)} className="omni-button omni-button-ghost">Cancel</button>
+            </div>
+          </section>;
+        })()}
         {status && <p className={status.type === 'success' ? 'form-success explore-status' : 'form-error explore-status'} role={status.type === 'error' ? 'alert' : 'status'}>{status.message}</p>}
 
         <section className="explore-list-section">
           <div className="explore-list-heading"><div><p className="section-kicker !mb-0">Rooms open to everyone</p><p className="mt-2 text-sm text-neutral-500">Showing real public rooms currently available to join.</p></div><span className="text-xs text-neutral-500">{filteredRooms.length} found</span></div>
           {loading ? <div className="glass-card-ambient empty-state">Loading public spaces...</div> : loadError ? <div className="form-error">{loadError}</div> : filteredRooms.length === 0 ? <div className="glass-card-ambient empty-state">No public rooms match your search.</div> : <div className="explore-room-grid">{filteredRooms.map((room) => {
             const memberCount = room.room_members[0]?.count ?? 0;
+            const policy = roomDeletionPolicy(room);
             return <article key={room.id} className="glass-card-ambient explore-room-card">
               <div className="explore-room-card-top"><span className="room-chip text-violet-200">Public</span><span className="explore-room-members"><OmniIcon name="users" size={14} /> {memberCount} joined</span></div>
+              <p className="text-xs text-neutral-400" title={policy.description}><span className="font-semibold text-amber-100">{policy.label}</span><span className="sr-only">: {policy.description}</span></p>
               <div className="min-w-0"><h3 className="truncate text-lg font-semibold text-neutral-100">{room.name}</h3>{room.username && <p className="mt-1 text-xs text-violet-300">@{room.username}</p>}{room.description && <p className="explore-room-description">{room.description}</p>}</div>
               <button onClick={() => void handleJoin(room.id)} disabled={processingId === room.id} className="omni-button omni-button-ghost mt-auto w-full">{processingId === room.id ? 'Joining...' : 'Join room'} <OmniIcon name="arrow" size={14} /></button>
             </article>;

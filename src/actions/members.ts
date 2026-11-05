@@ -45,14 +45,14 @@ async function getRoomAccessImpl(identifier: string) {
     return { status: 'scheduled', role: member.role, room };
   }
 
-  // Recovery-window rooms are intentionally resolvable only for the existing
-  // owner/admin recovery audience. Do not let stale approved membership fall
-  // through to the normal room shell.
+  // Recovery-window rooms resolve for every approved non-guest member (any of
+  // them may request recovery; only site owners review). Do not let stale
+  // approved membership fall through to the normal room shell.
   if (
     member.join_status === 'approved'
     && room.expiration_type === 'recoverable'
     && isRoomExpired(room)
-    && ['owner', 'admin'].includes(member.role ?? '')
+    && ['owner', 'admin', 'member'].includes(member.role ?? '')
   ) {
     return { status: 'recovery_window', role: member.role, room };
   }

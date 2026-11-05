@@ -17,6 +17,7 @@ import {
   updateRoomSpecificProfile,
 } from "@/actions/room-controls";
 import { useRoomRealtime } from "@/components/room/RoomRealtimeProvider";
+import RoomDeletionControls from '@/components/room/RoomDeletionControls';
 import { OmniIcon } from "@/components/ui/OmniIcon";
 
 type Feature = "chat" | "watch" | "files" | "study" | "announcements";
@@ -152,6 +153,8 @@ export default function RoomControlCenter({
   onStateChange,
   requestedTab,
   selectedMemberId,
+  roomLifecycle,
+  onRoomLifecycleChange,
 }: {
   open: boolean;
   roomId: string;
@@ -165,6 +168,9 @@ export default function RoomControlCenter({
   }) => void;
   requestedTab?: Tab | null;
   selectedMemberId?: string | null;
+  // Lifecycle facts the owner's deletion controls need (master plan §9).
+  roomLifecycle?: { expirationType: string; deletionScheduledAt: string | null };
+  onRoomLifecycleChange?: (deletionScheduledAt: string | null) => void;
 }) {
   const { roomControlVersion } = useRoomRealtime();
   const [tab, setTab] = useState<Tab>("overview");
@@ -459,6 +465,15 @@ export default function RoomControlCenter({
               <>
                 {tab === "overview" && (
                   <div className="space-y-5">
+                    {roomLifecycle && (
+                      <RoomDeletionControls
+                        roomId={roomId}
+                        expirationType={roomLifecycle.expirationType}
+                        deletionScheduledAt={roomLifecycle.deletionScheduledAt}
+                        isOwner={isOwner}
+                        onChanged={(value) => onRoomLifecycleChange?.(value)}
+                      />
+                    )}
                     <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>

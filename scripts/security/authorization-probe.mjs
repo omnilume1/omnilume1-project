@@ -210,7 +210,7 @@ async function createRoom(owner, { tag, suffix, type = 'irreversible', expiresIn
     description: 'Disposable authorization probe. Expires automatically.',
     is_private: true,
     expiration_type: type,
-    expires_at: new Date(Date.now() + expiresInMs).toISOString(),
+    expires_at: type === 'permanent' ? null : new Date(Date.now() + expiresInMs).toISOString(),
     created_by: owner.id,
     username: null,
   });
@@ -864,8 +864,14 @@ async function fullPhase() {
         const outsiderReview = await B.client.rpc('review_recovery_request', { p_request_id: request.data.id, p_decision: 'approved' });
         record('T5', 'unrelated B review_recovery_request denied', Boolean(outsiderReview.error), codeOf(outsiderReview));
         const decision = await A.client.rpc('review_recovery_request', { p_request_id: request.data.id, p_decision: 'rejected' });
-        record('T4', 'owner rejects own recovery request (creates notification)', !decision.error, decision.error ? `${codeOf(decision)} ${decision.error.message}` : 'ok');
-        const mine = await A.client.from('room_notifications').select('id, recipient_id, read_at').eq('room_id', R3).eq('recipient_id', A.id);
+        record('T4', 'room owner cannot review recovery (site owners only)', Boolean(decision.error) && decision.error.code === '42501', codeOf(decision));
+        // A notification for A without the service role: scheduling deletion
+        // of a permanent fixture notifies its members (owner included). The
+        // fixture is destroyed by the normal cleanup after the 7-day grace.
+        const R4 = await createRoom(A, { tag, suffix: 'r4-permanent', type: 'permanent' });
+        const scheduledDeletion = await A.client.rpc('schedule_room_deletion', { p_room_id: R4, p_grace_days: 7 });
+        record('T4', 'owner schedules deletion of a permanent room (creates notification)', !scheduledDeletion.error, codeOf(scheduledDeletion));
+        const mine = await A.client.from('room_notifications').select('id, recipient_id, read_at').eq('room_id', R4).eq('recipient_id', A.id);
         const notification = (mine.data ?? [])[0];
         record('T4', 'recipient A reads the notification', Boolean(notification), `${codeOf(mine)} rows=${rowsOf(mine)}`);
         if (notification) {

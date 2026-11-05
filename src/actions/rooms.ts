@@ -99,6 +99,8 @@ async function getPublicRoomsImpl() {
       description,
       username,
       created_at,
+      expiration_type,
+      deletion_scheduled_at,
       room_members(count)
     `)
     .eq('is_private', false)

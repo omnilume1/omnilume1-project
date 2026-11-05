@@ -70,6 +70,30 @@ export async function validateRoomInvite(token: string) {
   return actionResult(() => validateRoomInviteImpl(token));
 }
 
+// Room name and deletion policy for a valid invite, shown before joining
+// (master plan §9). Same validity rules as get_room_invite.
+async function previewRoomInviteImpl(token: string) {
+  const normalizedToken = normalizeInviteToken(token);
+  const supabase = await authenticatedClient();
+  const { data, error } = await supabase.rpc('get_room_invite_preview', { p_token: normalizedToken });
+  if (error) throw new Error(error.message);
+  const row = data?.[0];
+  if (!row) throw new Error('Invite is invalid or expired.');
+  return row as {
+    room_id: string;
+    room_name: string;
+    is_private: boolean;
+    expiration_type: string;
+    room_expires_at: string | null;
+    reopened_until: string | null;
+    deletion_scheduled_at: string | null;
+    guest_lifetime_minutes: number | null;
+  };
+}
+export async function previewRoomInvite(token: string) {
+  return actionResult(() => previewRoomInviteImpl(token));
+}
+
 async function joinRoomWithInviteImpl(token: string) {
   const normalizedToken = normalizeInviteToken(token);
   const supabase = await authenticatedClient();
