@@ -111,7 +111,7 @@ const WINDOW_META: Record<WinId, { title: string; icon: OmniIconName; label: str
   collab: { title: 'Collaborate', icon: 'poll', label: 'Collaborate' },
   files: { title: 'Files', icon: 'file', label: 'Files' },
 };
-const ROOM_CHROME_KEY = 'omni-room-chrome';
+const ROOM_RAIL_PIN_KEY = 'omni-room-rail-pin';
 const isWinId = (value: unknown): value is WinId => typeof value === 'string' && (WINDOW_IDS as string[]).includes(value);
 
 export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
@@ -159,13 +159,13 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [openWindows, setOpenWindows] = useState<WinId[]>(DEFAULT_WINDOWS);
   const deskRef = useRef<DeskHandle>(null);
   const windowsPreferenceLoadedKeyRef = useRef<string | null>(null);
-  // Minimised chrome: the rail and the bottom dock tuck away and slide back while the pointer is at the
-  // left or bottom edge (or over them). Saved on this device. The room shell only renders client-side,
-  // after access is checked, so reading storage here never mismatches the server markup.
-  const [chromeHidden, setChromeHidden] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem(ROOM_CHROME_KEY) === 'auto');
-  const toggleChrome = () => setChromeHidden((hidden) => {
-    try { window.localStorage.setItem(ROOM_CHROME_KEY, hidden ? 'shown' : 'auto'); } catch { /* storage off: still toggles for this visit */ }
-    return !hidden;
+  // The rail tucks itself away and slides back while the pointer is at the left edge (or over it), unless
+  // pinned. The pin is saved on this device. The room shell only renders client-side, after access is
+  // checked, so reading storage here never mismatches the server markup.
+  const [railPinned, setRailPinned] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem(ROOM_RAIL_PIN_KEY) === 'pinned');
+  const toggleRailPin = () => setRailPinned((pinned) => {
+    try { window.localStorage.setItem(ROOM_RAIL_PIN_KEY, pinned ? 'auto' : 'pinned'); } catch { /* storage off: still toggles for this visit */ }
+    return !pinned;
   });
 
   useEffect(() => {
@@ -502,8 +502,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   return (
     <RoomRealtimeProvider sync={roomSync} presence={roomPresence}>
     <VoiceRoomProvider roomId={roomData.id}>
-      <div className="room-shell" data-room-theme={theme} data-chrome={chromeHidden ? 'auto' : undefined}>
-      {chromeHidden && <><div className="room-edge room-edge-left" aria-hidden="true" /><div className="room-edge room-edge-bottom" aria-hidden="true" /></>}
+      <div className="room-shell" data-room-theme={theme} data-chrome={railPinned ? undefined : 'auto'}>
+      {!railPinned && <div className="room-edge room-edge-left" aria-hidden="true" />}
       <header className="room-header">
         <button type="button" onClick={minimizeActiveRoom} className="icon-button room-back" aria-label="Minimize room" title="Return to Rooms without leaving"><OmniIcon name="back" size={16} /></button>
         <div className="room-header-title">
@@ -607,7 +607,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             </div>
           ))}
           <div className="room-rail-group room-rail-chrome">
-            <button type="button" aria-label="Minimize the rail and dock" title={chromeHidden ? 'Keep the rail and dock on screen' : 'Minimize the rail and dock. They come back when you point at the left or bottom edge'} aria-pressed={chromeHidden} onClick={toggleChrome} className="room-rail-btn">
+            <button type="button" aria-label="Keep the rail on screen" title={railPinned ? 'Let the rail hide again. It comes back when you point at the left edge' : 'Keep the rail on screen'} aria-pressed={railPinned} onClick={toggleRailPin} className="room-rail-btn">
               <OmniIcon name="sidebar" size={17} />
             </button>
           </div>
