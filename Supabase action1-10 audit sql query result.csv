@@ -1,0 +1,14 @@
+schema_name,function_name,identity_arguments,function_kind
+extensions,_array_to_sorted_string,"name[], text",f
+extensions,_db_privs,,f
+extensions,_get_func_privs,"text, text",f
+extensions,_get_rel_owner,"character, name",f
+extensions,_get_rel_owner,"character, name, name",f
+extensions,_get_rel_owner,"character[], name",f
+extensions,_get_rel_owner,"character[], name, name",f
+extensions,_get_rel_owner,name,f
+extensions,_get_rel_owner,"name, name",f
+extensions,_query,text,f
+extensions,ok,boolean,f
+extensions,ok,"boolean, text",f
+extensions,plan,integer,f
