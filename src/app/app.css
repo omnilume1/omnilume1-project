@@ -66,6 +66,7 @@
 .explore-main { display: grid; gap: 16px; }
 .explore-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
 .explore-intro .section-copy { margin-top: 4px; }
+.explore-intro.glass-card-ambient { padding: 22px 24px; }
 .explore-room-count { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; color: var(--omni-muted); font-size: 13px; }
 .explore-controls { display: grid; grid-template-columns: minmax(0,1fr) 380px; gap: 16px; }
 .explore-search, .explore-code-form { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 18px; border-radius: 16px; color: var(--omni-muted); transition: border-color 160ms ease; }
@@ -959,3 +960,25 @@ select.omni-select option { background: #241d36; color: var(--omni-text); }
 .room-dashboard-kicker, .room-chat-divider, .room-chat-pinned-label, .room-layout-legend, .relationship-label, .collab-badge { text-transform: none; letter-spacing: 0; }
 .room-dashboard-kicker, .room-chat-pinned-label, .room-layout-legend { font-size: 12px; font-weight: 500; }
 .room-entry-kicker { margin: 0; color: var(--omni-accent); font-size: 12px; font-weight: 500; }
+
+/* Room, desktop: the desk fills the stage and the rail floats over its left edge.
+   Minimised (data-chrome="auto"), the rail and the bottom dock slide away and return while the pointer
+   is at the left or bottom edge, over them, or keyboard focus is inside them (not mouse focus: a click
+   on the minimize button must not pin the rail open). They wait a moment
+   before hiding, so the pointer can cross from the edge to the rail. */
+.room-edge { display: none; }
+@media (min-width: 768px) {
+  .room-stage { position: relative; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); padding: 8px 16px 16px; }
+  /* Centred on the left edge, clear of the window title bars (and their close dots) along the top. */
+  .room-rail { position: absolute; left: 28px; top: 50%; transform: translateY(-50%); z-index: 56; max-height: calc(100% - 40px); overflow-y: auto; scrollbar-width: none; box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 18px 44px rgba(6,4,14,.4);
+    transition: transform 360ms cubic-bezier(.22, 1, .36, 1), opacity 260ms ease; }
+  .room-shell[data-chrome="auto"] .room-rail { transform: translate(calc(-100% - 40px), -50%); opacity: 0; transition-delay: 350ms; }
+  .room-shell[data-chrome="auto"]:has(.room-edge-left:hover, .room-rail:hover, .room-rail :focus-visible) .room-rail { transform: translateY(-50%); opacity: 1; transition-delay: 0ms; }
+  .floating-dock-wrap { transition: transform 360ms cubic-bezier(.22, 1, .36, 1), opacity 260ms ease; }
+  body:has(.room-shell[data-chrome="auto"]) .floating-dock-wrap { transform: translateY(calc(100% + 32px)); opacity: 0; transition-delay: 350ms; }
+  body:has(.room-shell[data-chrome="auto"]):has(.room-edge-left:hover, .room-edge-bottom:hover, .room-rail:hover, .floating-dock:hover, .floating-dock-wrap :focus-visible) .floating-dock-wrap { transform: none; opacity: 1; transition-delay: 0ms; }
+  .room-edge { display: block; position: fixed; z-index: 57; }
+  .room-edge-left { left: 0; top: 0; bottom: 0; width: 14px; }
+  .room-edge-bottom { left: 0; right: 0; bottom: 0; height: 14px; }
+}
+@media (max-width: 767px) { .room-rail-chrome { display: none; } }

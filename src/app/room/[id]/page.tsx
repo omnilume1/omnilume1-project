@@ -111,6 +111,7 @@ const WINDOW_META: Record<WinId, { title: string; icon: OmniIconName; label: str
   collab: { title: 'Collaborate', icon: 'poll', label: 'Collaborate' },
   files: { title: 'Files', icon: 'file', label: 'Files' },
 };
+const ROOM_CHROME_KEY = 'omni-room-chrome';
 const isWinId = (value: unknown): value is WinId => typeof value === 'string' && (WINDOW_IDS as string[]).includes(value);
 
 export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
@@ -158,6 +159,14 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [openWindows, setOpenWindows] = useState<WinId[]>(DEFAULT_WINDOWS);
   const deskRef = useRef<DeskHandle>(null);
   const windowsPreferenceLoadedKeyRef = useRef<string | null>(null);
+  // Minimised chrome: the rail and the bottom dock tuck away and slide back while the pointer is at the
+  // left or bottom edge (or over them). Saved on this device. The room shell only renders client-side,
+  // after access is checked, so reading storage here never mismatches the server markup.
+  const [chromeHidden, setChromeHidden] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem(ROOM_CHROME_KEY) === 'auto');
+  const toggleChrome = () => setChromeHidden((hidden) => {
+    try { window.localStorage.setItem(ROOM_CHROME_KEY, hidden ? 'shown' : 'auto'); } catch { /* storage off: still toggles for this visit */ }
+    return !hidden;
+  });
 
   useEffect(() => {
     async function checkAccess() {
@@ -493,7 +502,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   return (
     <RoomRealtimeProvider sync={roomSync} presence={roomPresence}>
     <VoiceRoomProvider roomId={roomData.id}>
-      <div className="room-shell" data-room-theme={theme}>
+      <div className="room-shell" data-room-theme={theme} data-chrome={chromeHidden ? 'auto' : undefined}>
+      {chromeHidden && <><div className="room-edge room-edge-left" aria-hidden="true" /><div className="room-edge room-edge-bottom" aria-hidden="true" /></>}
       <header className="room-header">
         <button type="button" onClick={minimizeActiveRoom} className="icon-button room-back" aria-label="Minimize room" title="Return to Rooms without leaving"><OmniIcon name="back" size={16} /></button>
         <div className="room-header-title">
@@ -540,6 +550,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           <BookmarkToggle roomId={roomData.id} kind="room" entityId={roomData.id} className="room-action" labels={['☆ Save', '★ Saved']} subject="room" />
           <NotificationBell roomId={roomData.id} />
           <button type="button" onClick={() => setShowControlCenter(true)} className="room-action"><OmniIcon name="settings" size={15} /><span>Controls</span></button>
+          <button type="button" onClick={minimizeActiveRoom} className="room-action" title="Return to Rooms without leaving"><span aria-hidden="true">—</span><span>Minimize room</span></button>
           <button type="button" onClick={() => { setLeaveError(null); setShowLeaveConfirmation(true); }} data-room-leave className="room-action room-action-leave">Leave</button>
         </div>
       </header>
@@ -595,6 +606,11 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
               })}
             </div>
           ))}
+          <div className="room-rail-group room-rail-chrome">
+            <button type="button" aria-label="Minimize the rail and dock" title={chromeHidden ? 'Keep the rail and dock on screen' : 'Minimize the rail and dock. They come back when you point at the left or bottom edge'} aria-pressed={chromeHidden} onClick={toggleChrome} className="room-rail-btn">
+              <OmniIcon name="sidebar" size={17} />
+            </button>
+          </div>
         </nav>
 
         <div className="room-desk-wrap">

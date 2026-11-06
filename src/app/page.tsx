@@ -9,6 +9,7 @@ import { ACCOUNT_HINT_SCRIPT } from '@/lib/session-hint';
 import HeroDesk, { AlbumArt } from '@/components/landing/HeroDesk';
 import FeatureCards from '@/components/landing/FeatureCards';
 import WhatElse from '@/components/landing/WhatElse';
+import SketchPad from '@/components/landing/SketchPad';
 import LandingMotion from '@/components/landing/LandingMotion';
 import Stripes from '@/components/landing/Stripes';
 import styles from './landing.module.css';
@@ -46,7 +47,7 @@ export default function Home() {
       <div className={styles.intro} aria-hidden="true"><OmniIntro /></div>
       <LandingMotion />
 
-      <Stripes count={10} seed={7} className={styles.stripesTop} />
+      <Stripes count={14} seed={7} className={styles.stripesTop} />
 
       <div className={styles.wrap}>
         <header className={styles.nav}>
@@ -226,11 +227,11 @@ export default function Home() {
             </p>
           </div>
           <div className={styles.stage2} data-reveal style={d(0.2)} aria-hidden="true">
-            <div className={styles.corner}><Stripes count={6} seed={3} scale={0.5} className={styles.stripesCorner} /></div>
+            <div className={styles.corner}><Stripes count={8} seed={3} scale={0.5} className={styles.stripesCorner} /></div>
             <div className={styles.nw}>
               <div className={styles.nwTitle}><span className={styles.v0}>Focus timer</span><span className={styles.v1}>Whiteboard</span><span className={styles.v2}>Shared notes</span></div>
               <div className={`${styles.nwV} ${styles.v0}`}><h4>Physics revision</h4><p>Round 2 of 4. Break starts for everyone at 9:46 pm.</p><hr /><div className={`${styles.nwTimer} mono`} data-clock="1122">18:42</div><div className={styles.track} style={{ marginTop: 20 }}><b style={{ width: '62%', background: '#8f7be8' }} /></div><div className={styles.tl} style={{ marginTop: 18 }}><span className={styles.av}>RS</span><span className={styles.av} style={{ marginLeft: -8 }}>DV</span><span className={styles.av} style={{ marginLeft: -8 }}>NP</span>4 studying</div></div>
-              <div className={`${styles.nwV} ${styles.v1}`}><h4>Whiteboard</h4><p>Riya and Dev are drawing.</p><hr /><svg width="384" height="230" viewBox="0 0 384 230" fill="none" strokeLinecap="round"><circle cx="110" cy="110" r="70" stroke="#ffd08a" strokeWidth="3" /><path d="M110 110 L172 78" stroke="#ffd08a" strokeWidth="3" /><path d="M220 60 C 270 40 330 60 340 110 C 350 150 300 180 260 176" stroke="#b9a8ff" strokeWidth="3" /><text x="230" y="214" fill="#fff" fillOpacity=".8" fontFamily="inherit" fontSize="16">ω = v / R</text></svg></div>
+              <div className={`${styles.nwV} ${styles.v1}`}><h4>Whiteboard</h4><p>Riya and Dev are drawing.</p><hr /><div className={styles.board}><svg width="384" height="230" viewBox="0 0 384 230" fill="none" strokeLinecap="round"><circle cx="110" cy="110" r="70" stroke="#ffd08a" strokeWidth="3" /><path d="M110 110 L172 78" stroke="#ffd08a" strokeWidth="3" /><path d="M220 60 C 270 40 330 60 340 110 C 350 150 300 180 260 176" stroke="#b9a8ff" strokeWidth="3" /><text x="230" y="214" fill="#fff" fillOpacity=".8" fontFamily="inherit" fontSize="16">ω = v / R</text></svg><SketchPad /></div></div>
               <div className={`${styles.nwV} ${styles.v2}`}><h4>Shared notes</h4><p>Go through <span className={styles.link}>chapter 7</span> before the quiz on Friday and add anything unclear to the board.</p><hr /><h4 style={{ fontSize: 20 }}>Task list</h4><div className={`${styles.tl} ${styles.done}`}><span className={styles.box} />Read rotational motion</div><div className={styles.tl}><span className={styles.box} />Past paper 2023, Q4 to Q9</div><div className={styles.tl}><span className={styles.box} />Flashcards: moments of inertia</div><div className={`${styles.tl} ${styles.fade}`}><span className={styles.box} />Ask Riya about Q6</div></div>
             </div>
           </div>
@@ -262,7 +263,7 @@ export default function Home() {
 
       <Suspense>
       <div className={styles.footArea}>
-        <Stripes count={10} seed={19} className={styles.stripesBottom} />
+        <Stripes count={14} seed={19} className={styles.stripesBottom} />
         <footer className={styles.footer}>
           <div className={styles.wrap}>
             <div className={styles.foot} data-reveal>

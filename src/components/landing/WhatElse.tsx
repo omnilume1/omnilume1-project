@@ -20,7 +20,8 @@ export default function WhatElse({ children }: { children: ReactNode }) {
     let timer = 0;
     const observer = new IntersectionObserver(([entry]) => {
       window.clearInterval(timer);
-      if (entry.isIntersecting) timer = window.setInterval(() => { if (!pausedRef.current) setState((s) => (s + 1) % STATES); }, 3600);
+      // The concept video's pace: a new sentence lights every 2.2 s.
+      if (entry.isIntersecting) timer = window.setInterval(() => { if (!pausedRef.current) setState((s) => (s + 1) % STATES); }, 2200);
     }, { threshold: 0.35 });
     observer.observe(root);
     return () => { observer.disconnect(); window.clearInterval(timer); };
@@ -31,7 +32,8 @@ export default function WhatElse({ children }: { children: ReactNode }) {
       ref={rootRef}
       className={styles.moreGrid}
       data-state={state}
-      onPointerEnter={() => { pausedRef.current = true; }}
+      // It keeps cycling under the pointer, as in the video; only the whiteboard holds it, so a drawing is not cut off.
+      onPointerOver={(event) => { pausedRef.current = Boolean((event.target as Element).closest('[data-sketch]')); }}
       onPointerLeave={() => { pausedRef.current = false; }}
       onFocus={() => { pausedRef.current = true; }}
       onBlur={() => { pausedRef.current = false; }}
