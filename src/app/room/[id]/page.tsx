@@ -31,7 +31,9 @@ import RoomAnnouncementBanner from '@/components/room/RoomAnnouncementBanner';
 import RoomRoleChangeNotification from '@/components/room/RoomRoleChangeNotification';
 import FloatingDock from '@/components/ui/FloatingDock';
 import NotificationBell from '@/components/ui/NotificationBell';
-import { OmniIcon } from '@/components/ui/OmniIcon';
+import { OmniIcon, type OmniIconName } from '@/components/ui/OmniIcon';
+import OmniIntro from '@/components/ui/OmniIntro';
+import RoomDesk, { type DeskHandle } from '@/components/room/RoomDesk';
 import { leaveRoom, transferRoomOwnership } from '@/actions/room-controls';
 import { getRoomMembersList } from '@/actions/members';
 import { clearRoomRealtimeCache, useRoomSync } from '@/hooks/useRoomSync';
@@ -48,19 +50,16 @@ import { BookmarkToggle } from '@/components/room/BookmarkButton';
 import { getRoomGroup } from '@/lib/management-data';
 import {
   DEFAULT_ROOM_APPEARANCE,
-  HOME_CHAT_WIDTH,
   ROOM_LAYOUTS,
   ROOM_LAYOUT_DETAILS,
   ROOM_THEMES,
   ROOM_THEME_LABELS,
-  clampHomeChatWidth,
   effectiveActivity,
   effectiveLayout,
   effectiveTheme,
   effectiveTool,
   isRoomLayout,
   isRoomTheme,
-  sidePanelState,
   type RoomActivity,
   type RoomAppearance,
   type RoomLayout,
@@ -94,12 +93,25 @@ const DEFAULT_FEATURE_FLAGS: Record<RoomFeature, boolean> = {
   announcements: true,
 };
 
-const MIN_SIDEBAR_WIDTH = 280;
-const MAX_SIDEBAR_WIDTH = 600;
-
-function clampSidebarWidth(width: number) {
-  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
-}
+// The room desk: every room feature is a window. Watch, Study and Chat stay
+// mounted while closed so playback, the timer and the chat keep running.
+type WinId = RoomActivity | RoomTool;
+const RAIL_STAGE: WinId[] = ['home', 'watch', 'study', 'whiteboard'];
+const RAIL_TOOLS: WinId[] = ['chat', 'members', 'voice', 'collab', 'files'];
+const WINDOW_IDS: WinId[] = [...RAIL_STAGE, ...RAIL_TOOLS];
+const DEFAULT_WINDOWS: WinId[] = ['home', 'chat'];
+const WINDOW_META: Record<WinId, { title: string; icon: OmniIconName; label: string }> = {
+  home: { title: 'Room home', icon: 'home', label: 'Room home' },
+  watch: { title: 'Watch together', icon: 'tv', label: 'Watch' },
+  study: { title: 'Study', icon: 'timer', label: 'Study' },
+  whiteboard: { title: 'Whiteboard', icon: 'pen', label: 'Whiteboard' },
+  chat: { title: 'Room chat', icon: 'message', label: 'Chat' },
+  members: { title: 'Members', icon: 'users', label: 'Members' },
+  voice: { title: 'Voice', icon: 'mic', label: 'Voice' },
+  collab: { title: 'Collaborate', icon: 'poll', label: 'Collaborate' },
+  files: { title: 'Files', icon: 'file', label: 'Files' },
+};
+const isWinId = (value: unknown): value is WinId => typeof value === 'string' && (WINDOW_IDS as string[]).includes(value);
 
 export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -135,55 +147,17 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [controlCenterTab, setControlCenterTab] = useState<'user-control' | 'profile' | null>(null);
   const [controlCenterMemberId, setControlCenterMemberId] = useState<string | null>(null);
   // Action 09: owner-controlled appearance plus this member's own preset,
-  // theme and panel sizes (browser storage keyed by room and user).
+  // theme and desk (browser storage keyed by room and user).
   const [appearance, setAppearance] = useState<RoomAppearance>(DEFAULT_ROOM_APPEARANCE);
   const [personalLayout, setPersonalLayout] = useState<RoomLayout | null>(null);
   const [personalTheme, setPersonalTheme] = useState<RoomTheme | null>(null);
-  const [homeChatWidth, setHomeChatWidth] = useState<number>(HOME_CHAT_WIDTH.initial);
-  // The panel a member opened on demand belongs to the layout it was opened
-  // in, so choosing Stage focus always starts with the stage filling the room.
-  const [stageChatOpenLayout, setStageChatOpenLayout] = useState<RoomLayout | null>(null);
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
   const workspacePreferencesLoadedRef = useRef<string | null>(null);
-  const workspaceModeRef = useRef<'home' | 'stage'>('home');
-  const sideInnerRef = useRef<HTMLDivElement>(null);
   const layoutMenuRef = useRef<HTMLDivElement>(null);
-
-  // ==========================================
-  // DRAGGABLE SIDEBAR STATE
-  // ==========================================
-  const [sidebarWidth, setSidebarWidth] = useState(320); // Default 320px
-  const [isDragging, setIsDragging] = useState(false);
-  const sidebarPreferenceLoadedKeyRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
-      if (workspaceModeRef.current === 'home') {
-        // The home chat is centred, so its edge moves half as far as its width.
-        const area = sideInnerRef.current?.parentElement?.getBoundingClientRect();
-        if (area) setHomeChatWidth(clampHomeChatWidth(Math.abs(e.clientX - (area.left + area.width / 2)) * 2));
-        return;
-      }
-      const newWidth = document.body.clientWidth - e.clientX;
-      setSidebarWidth(clampSidebarWidth(newWidth));
-    };
-
-    const handleMouseUp = () => setIsDragging(false);
-
-    if (isDragging) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-      document.body.style.userSelect = 'none'; 
-    } else {
-      document.body.style.userSelect = 'auto';
-    }
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging]);
+  // Open desk windows, oldest first; the desk handle tiles, resets, focuses and raises.
+  const [openWindows, setOpenWindows] = useState<WinId[]>(DEFAULT_WINDOWS);
+  const deskRef = useRef<DeskHandle>(null);
+  const windowsPreferenceLoadedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     async function checkAccess() {
@@ -302,49 +276,45 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     window.location.reload();
   };
 
-  const [mainActivity, setMainActivity] = useState<RoomActivity>('home');
-  const [activeTool, setActiveTool] = useState<RoomTool>('chat');
   const [timerNavigationRequest, setTimerNavigationRequest] = useState(0);
   const roomIsExpired = accessStatus === 'expired' || isExpired;
   const realtimeRoomId = accessStatus === 'approved' && !roomIsExpired ? (roomData?.id ?? '') : '';
   const roomSync = useRoomSync(realtimeRoomId, userRole === 'owner' || canControlMedia);
   const roomPresence = useRoomPresence(realtimeRoomId, presenceRefreshVersion);
-  const sidebarPreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'sidebar-width');
+  const deskPreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'desk');
+  const windowsPreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'desk-windows');
   useEffect(() => {
-    sidebarPreferenceLoadedKeyRef.current = null;
+    windowsPreferenceLoadedKeyRef.current = null;
     const timer = window.setTimeout(() => {
-      if (!sidebarPreferenceKey) {
-        setSidebarWidth(320);
-        return;
+      if (!windowsPreferenceKey) return;
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(windowsPreferenceKey) ?? 'null') as unknown;
+        if (Array.isArray(saved)) setOpenWindows([...new Set(saved.filter(isWinId))]);
+      } catch {
+        // A damaged value falls back to the default windows.
       }
-      const saved = window.localStorage.getItem(sidebarPreferenceKey);
-      const parsed = saved ? Number(saved) : NaN;
-      setSidebarWidth(Number.isFinite(parsed) ? clampSidebarWidth(parsed) : 320);
-      sidebarPreferenceLoadedKeyRef.current = sidebarPreferenceKey;
+      windowsPreferenceLoadedKeyRef.current = windowsPreferenceKey;
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [sidebarPreferenceKey]);
+  }, [windowsPreferenceKey]);
   useEffect(() => {
-    if (!sidebarPreferenceKey || sidebarPreferenceLoadedKeyRef.current !== sidebarPreferenceKey) return;
-    window.localStorage.setItem(sidebarPreferenceKey, String(sidebarWidth));
-  }, [sidebarPreferenceKey, sidebarWidth]);
+    if (!windowsPreferenceKey || windowsPreferenceLoadedKeyRef.current !== windowsPreferenceKey) return;
+    window.localStorage.setItem(windowsPreferenceKey, JSON.stringify(openWindows));
+  }, [openWindows, windowsPreferenceKey]);
   const layoutPreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'layout');
   const themePreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'theme');
-  const homeChatPreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'home-chat-width');
   useEffect(() => {
     workspacePreferencesLoadedRef.current = null;
     const timer = window.setTimeout(() => {
       const readValue = (key: string | null) => (key ? window.localStorage.getItem(key) : null);
       const savedLayout = readValue(layoutPreferenceKey);
       const savedTheme = readValue(themePreferenceKey);
-      const savedWidth = Number(readValue(homeChatPreferenceKey));
       setPersonalLayout(isRoomLayout(savedLayout) ? savedLayout : null);
       setPersonalTheme(isRoomTheme(savedTheme) ? savedTheme : null);
-      setHomeChatWidth(Number.isFinite(savedWidth) && savedWidth > 0 ? clampHomeChatWidth(savedWidth) : HOME_CHAT_WIDTH.initial);
       workspacePreferencesLoadedRef.current = layoutPreferenceKey;
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [homeChatPreferenceKey, layoutPreferenceKey, themePreferenceKey]);
+  }, [layoutPreferenceKey, themePreferenceKey]);
   useEffect(() => {
     if (!layoutPreferenceKey || workspacePreferencesLoadedRef.current !== layoutPreferenceKey) return;
     const write = (key: string | null, value: string | null) => {
@@ -354,8 +324,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     };
     write(layoutPreferenceKey, personalLayout);
     write(themePreferenceKey, personalTheme);
-    write(homeChatPreferenceKey, String(homeChatWidth));
-  }, [homeChatPreferenceKey, homeChatWidth, layoutPreferenceKey, personalLayout, personalTheme, themePreferenceKey]);
+  }, [layoutPreferenceKey, personalLayout, personalTheme, themePreferenceKey]);
   useEffect(() => {
     if (!showLayoutMenu) return;
     const onPointerDown = (event: PointerEvent) => {
@@ -388,19 +357,20 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   }, [roomData?.id, roomSync.currentUserId, roomSync.roomControlEvents, router]);
   const focusRoomPath = `/room/${encodeURIComponent(identifier)}`;
   const featureEnabled = (feature: RoomFeature) => featureFlags[feature] !== false;
-  // A disabled feature never leaves an empty stage or panel.
-  const activity = effectiveActivity(mainActivity, featureFlags);
-  const tool = effectiveTool(activeTool, featureFlags);
+  // A disabled feature never opens an empty window: its rail button is off and
+  // an open window for it closes (effectiveActivity/effectiveTool fall back).
+  const windowEnabled = (id: WinId) => (RAIL_STAGE.includes(id) ? effectiveActivity(id as RoomActivity, featureFlags) === id : effectiveTool(id as RoomTool, featureFlags) === id);
+  const visibleWindows = openWindows.filter(windowEnabled);
+  const isOpen = (id: WinId) => visibleWindows.includes(id);
+  const openWindow = (id: WinId) => {
+    if (!windowEnabled(id)) return;
+    setOpenWindows((current) => (current.includes(id) ? current : [...current, id]));
+    deskRef.current?.raise(id);
+  };
+  const closeWindow = (id: string) => setOpenWindows((current) => current.filter((open) => open !== id));
+  const toggleWindow = (id: WinId) => (isOpen(id) ? closeWindow(id) : openWindow(id));
   const layout = effectiveLayout(appearance, personalLayout);
   const theme = effectiveTheme(appearance, personalTheme);
-  const sidePanel = sidePanelState(activity, layout, stageChatOpenLayout === layout);
-  useEffect(() => { workspaceModeRef.current = sidePanel.mode; }, [sidePanel.mode]);
-  const openTool = (next: RoomTool) => {
-    setActiveTool(next);
-    setStageChatOpenLayout(layout);
-  };
-  const isHomeMode = sidePanel.mode === 'home';
-  const resizeBounds = isHomeMode ? { min: HOME_CHAT_WIDTH.min, max: HOME_CHAT_WIDTH.max, value: homeChatWidth } : { min: MIN_SIDEBAR_WIDTH, max: MAX_SIDEBAR_WIDTH, value: sidebarWidth };
   const handleControlStateChange = useCallback(({ featureFlags: nextFlags, canManageMembers: nextCanManageMembers, canControlMedia: nextCanControlMedia, appearance: nextAppearance }: { featureFlags: Partial<Record<RoomFeature, boolean>>; canManageMembers: boolean; canControlMedia: boolean; isGhostMode: boolean; appearance: RoomAppearance }) => {
     setFeatureFlags({ ...DEFAULT_FEATURE_FLAGS, ...nextFlags });
     setAppearance(nextAppearance);
@@ -483,16 +453,16 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     return () => { active = false; };
   }, [roomIdForGroup, isGroupRoom, convertedEvents, applyConversion]);
 
-  if (accessStatus === 'loading') return <div className="omni-state-screen text-sm text-neutral-500">Verifying secure access...</div>;
-  if (accessStatus === 'not_found') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl">❌ Space Not Found</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Explore</Link></div>;
-  if (accessStatus === 'pending') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-amber-500">⏳ Waiting for Approval</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
-  if (accessStatus === 'scheduled') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-violet-300">⏰ This room is scheduled</h2><p className="mt-2 text-sm text-neutral-500">The room will open at {roomData?.scheduled_for ? new Date(roomData.scheduled_for).toLocaleString() : 'its scheduled time'}.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
-  if (accessStatus === 'guest_expired') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-amber-400">Guest access has expired</h2><p className="mt-2 text-sm text-neutral-500">Ask a room manager for a new invitation if you need access again.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
-  if (accessStatus === 'kicked') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-red-400">You were kicked from this room.</h2><p className="mt-2 text-sm text-neutral-500">Your active room session has ended.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Rooms</Link></div>;
-  if (accessStatus === 'blocked' || accessStatus === 'banned') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-red-400">You have been blocked from this room.</h2><p className="mt-2 text-sm text-neutral-500">Room access is not available for this account.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Rooms</Link></div>;
-  if (accessStatus === 'unauthorized' || accessStatus === 'public_not_joined' || accessStatus === 'private_not_joined') return <div className="h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"><h2 className="text-xl text-red-500">🔒 Access Restricted</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Go to Explore to Join</Link></div>;
+  if (accessStatus === 'loading') return <main className="omni-loading-screen"><div className="grid justify-items-center gap-5"><OmniIntro tagline={false} /><p className="text-sm text-neutral-500">Verifying secure access...</p></div></main>;
+  if (accessStatus === 'not_found') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl">❌ Space Not Found</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Explore</Link></div>;
+  if (accessStatus === 'pending') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl text-amber-500">⏳ Waiting for Approval</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
+  if (accessStatus === 'scheduled') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl text-violet-300">⏰ This room is scheduled</h2><p className="mt-2 text-sm text-neutral-500">The room will open at {roomData?.scheduled_for ? new Date(roomData.scheduled_for).toLocaleString() : 'its scheduled time'}.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
+  if (accessStatus === 'guest_expired') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl text-amber-400">Guest access has expired</h2><p className="mt-2 text-sm text-neutral-500">Ask a room manager for a new invitation if you need access again.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
+  if (accessStatus === 'kicked') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl text-red-400">You were kicked from this room.</h2><p className="mt-2 text-sm text-neutral-500">Your active room session has ended.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Rooms</Link></div>;
+  if (accessStatus === 'blocked' || accessStatus === 'banned') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl text-red-400">You have been blocked from this room.</h2><p className="mt-2 text-sm text-neutral-500">Room access is not available for this account.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Rooms</Link></div>;
+  if (accessStatus === 'unauthorized' || accessStatus === 'public_not_joined' || accessStatus === 'private_not_joined') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl text-red-500">🔒 Access Restricted</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Go to Explore to Join</Link></div>;
 
-  if (!roomData) return <div className="omni-state-screen text-sm text-neutral-500">Loading room...</div>;
+  if (!roomData) return <main className="omni-loading-screen"><div className="grid justify-items-center gap-5"><OmniIntro tagline={false} /><p className="text-sm text-neutral-500">Loading room...</p></div></main>;
 
   if ((accessStatus === 'expired' || accessStatus === 'recovery_window' || isExpired) && roomData) {
     const isIrreversible = roomData.expiration_type === 'irreversible';
@@ -507,8 +477,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           : null;
     const canRequestRecovery = ['owner', 'admin', 'member'].includes(userRole ?? '');
     return (
-      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center">
-        <div className="max-w-md w-full border border-neutral-800 bg-neutral-950 p-8 rounded-2xl shadow-2xl flex flex-col items-center">
+      <div className="omni-state-screen flex-col text-center text-white">
+        <div className="glass-strong max-w-md w-full p-8 rounded-2xl flex flex-col items-center">
           <div className="w-16 h-16 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center text-2xl mb-4">{isIrreversible ? '🔥' : '🔒'}</div>
           <h1 className={`text-xl font-bold mb-2 ${isIrreversible ? 'text-red-500' : 'text-amber-500'}`}>{isIrreversible ? 'Space Access Ended' : 'Space Quarantined'}</h1>
           <p className="text-sm text-neutral-400 mb-6">The timer hit zero. {isIrreversible ? 'Access has been cut off and the server cleanup process will permanently destroy this room.' : 'Data is preserved but inaccessible for 7 days. If no recovery is requested in that time, the room and all of its chats and files are permanently deleted.'}</p>
@@ -523,21 +493,27 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   return (
     <RoomRealtimeProvider sync={roomSync} presence={roomPresence}>
     <VoiceRoomProvider roomId={roomData.id}>
-      <div className="room-shell flex h-screen flex-col overflow-hidden font-sans selection:bg-neutral-800" data-room-theme={theme}>
-      <header className="room-header shrink-0">
-        <div className="room-header-title flex items-center gap-4">
-          <span className="font-semibold text-white tracking-wide text-sm uppercase">{roomData?.is_group ? 'GROUP' : 'ROOM'} / {roomData?.name || identifier}</span>
-          <div className={`px-2.5 py-1 text-[10px] font-bold rounded-md tracking-wider flex items-center gap-2 border ${roomData?.expiration_type === 'permanent' ? 'bg-neutral-900/50 text-neutral-400 border-neutral-800' : 'bg-amber-950/20 text-amber-500 border-amber-900/30'}`}>
-            {roomData?.expiration_type === 'permanent' ? 'PERMANENT' : `TEMP / ${timeLeft}`}
-          </div>
+      <div className="room-shell" data-room-theme={theme}>
+      <header className="room-header">
+        <button type="button" onClick={minimizeActiveRoom} className="icon-button room-back" aria-label="Minimize room" title="Return to Rooms without leaving"><OmniIcon name="back" size={16} /></button>
+        <div className="room-header-title">
+          <h1>{roomData?.name || identifier}</h1>
+          {roomData?.is_group && <span className="room-chip">Group</span>}
+          <span className={`room-chip ${roomData?.expiration_type === 'permanent' ? '' : 'is-temp mono'}`}>{roomData?.expiration_type === 'permanent' ? 'Permanent' : `Temp · ${timeLeft}`}</span>
+          <span className="room-here"><span className="status-dot" aria-hidden="true" />{roomPresence.onlineUserIds.length} here</span>
         </div>
-        <div className="room-actions flex items-center gap-4">
-          {userRole === 'owner' && roomData && !roomData.is_group && roomData.expiration_type !== 'irreversible' && !roomData.deletion_scheduled_at && <button type="button" onClick={() => setShowConvertModal(true)} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition">Convert to group</button>}
-          {roomData.reopened_until && <button onClick={handlePermanentRequest} disabled={permanentSubmitting || permanentRequests.some((request) => request.status === 'pending')} className="px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-xs font-semibold transition disabled:cursor-wait disabled:opacity-50">{permanentSubmitting ? 'Requesting...' : 'Request Permanent Room'}</button>}
+        <div className="room-actions">
+          {userRole === 'owner' && roomData && !roomData.is_group && roomData.expiration_type !== 'irreversible' && !roomData.deletion_scheduled_at && <button type="button" onClick={() => setShowConvertModal(true)} className="room-action">Convert to group</button>}
+          {roomData.reopened_until && <button onClick={handlePermanentRequest} disabled={permanentSubmitting || permanentRequests.some((request) => request.status === 'pending')} className="room-action disabled:cursor-wait disabled:opacity-50">{permanentSubmitting ? 'Requesting...' : 'Request Permanent Room'}</button>}
           <div className="room-layout-menu" ref={layoutMenuRef}>
-            <button type="button" className="room-action" aria-haspopup="dialog" aria-expanded={showLayoutMenu} onClick={() => setShowLayoutMenu((open) => !open)} title="Layout and theme"><OmniIcon name="rooms" size={14} /><span>Layout</span></button>
+            <button type="button" className="room-action" aria-haspopup="dialog" aria-expanded={showLayoutMenu} onClick={() => setShowLayoutMenu((open) => !open)} title="Layout and theme"><OmniIcon name="layout" size={15} /><span>Layout</span><OmniIcon name="chevron" size={14} /></button>
             {showLayoutMenu && (
-              <div role="dialog" aria-label="Layout and theme" className="room-layout-popover">
+              <div role="dialog" aria-label="Layout and theme" className="room-layout-popover" onKeyDown={(event) => { if (event.key.toLowerCase() === 't' && !(event.target instanceof HTMLSelectElement)) { event.preventDefault(); deskRef.current?.tile(); setShowLayoutMenu(false); } }}>
+                <div className="room-layout-commands">
+                  <button type="button" className="room-layout-command" onClick={() => { deskRef.current?.tile(); setShowLayoutMenu(false); }}><OmniIcon name="layout" size={15} />Tile all windows<span className="room-key mono">T</span></button>
+                  <button type="button" className="room-layout-command" onClick={() => { deskRef.current?.focus(); setShowLayoutMenu(false); }}><OmniIcon name="maximize" size={15} />Focus one window</button>
+                  <button type="button" className="room-layout-command" onClick={() => { deskRef.current?.reset(); setShowLayoutMenu(false); }}><OmniIcon name="history" size={15} />Reset layout</button>
+                </div>
                 <fieldset disabled={appearance.layoutLocked}>
                   <legend className="room-layout-legend">Layout</legend>
                   {appearance.layoutLocked && <p className="room-layout-hint">Locked by the room: {ROOM_LAYOUT_DETAILS[appearance.defaultLayout].label}.</p>}
@@ -557,191 +533,103 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
                   <option value="">Room theme ({ROOM_THEME_LABELS[appearance.theme]})</option>
                   {ROOM_THEMES.map((option) => <option key={option} value={option}>{ROOM_THEME_LABELS[option]}</option>)}
                 </select>
-                <button type="button" className="omni-button omni-button-ghost mt-3 w-full" onClick={() => { setSidebarWidth(320); setHomeChatWidth(HOME_CHAT_WIDTH.initial); }}>Reset panel sizes</button>
                 <p className="room-layout-hint mt-2">Your layout, theme and panel sizes are saved on this device for you only.</p>
               </div>
             )}
           </div>
           <BookmarkToggle roomId={roomData.id} kind="room" entityId={roomData.id} className="room-action" labels={['☆ Save', '★ Saved']} subject="room" />
           <NotificationBell roomId={roomData.id} />
-          <button type="button" onClick={() => setShowControlCenter(true)} className="room-action room-action-controls"><OmniIcon name="settings" size={14} /><span>Controls</span></button>
-          <button type="button" onClick={minimizeActiveRoom} className="room-action" title="Return to Rooms without leaving"><span aria-hidden="true">—</span><span>Minimize room</span></button>
+          <button type="button" onClick={() => setShowControlCenter(true)} className="room-action"><OmniIcon name="settings" size={15} /><span>Controls</span></button>
           <button type="button" onClick={() => { setLeaveError(null); setShowLeaveConfirmation(true); }} data-room-leave className="room-action room-action-leave">Leave</button>
         </div>
       </header>
 
-      <RoomNotifications roomId={roomData.id} />
-      <RoomRoleChangeNotification events={roomSync.roomControlEvents} currentUserId={roomSync.currentUserId} />
-      {roomData.is_group && <p className="group-banner" role="status">This room is now a group{groupInfo ? `: “${groupInfo.name}”` : ''}. Members and history are kept; new joins are closed.</p>}
-      <RoomPulseBar roomId={roomData.id} />
-      <RoomAnnouncementBanner roomId={roomData.id} />
-      <RoomEntryPrompts roomId={roomData.id} onOpenRoomProfile={() => { setControlCenterTab('profile'); setShowControlCenter(true); }} />
+      <div className="room-notices">
+        <RoomNotifications roomId={roomData.id} />
+        <RoomRoleChangeNotification events={roomSync.roomControlEvents} currentUserId={roomSync.currentUserId} />
+        {roomData.is_group && <p className="group-banner" role="status">This room is now a group{groupInfo ? `: “${groupInfo.name}”` : ''}. Members and history are kept; new joins are closed.</p>}
+        <RoomPulseBar roomId={roomData.id} />
+        <RoomAnnouncementBanner roomId={roomData.id} />
+        <RoomEntryPrompts roomId={roomData.id} onOpenRoomProfile={() => { setControlCenterTab('profile'); setShowControlCenter(true); }} />
 
-      {roomData.reopened_until && permanentRequests.length > 0 && (
-        <div className="room-state-bar rounded-none border-x-0 border-t-0">
-          {permanentRequests.map((request) => (
-            <div key={request.id} className="flex flex-wrap items-center justify-between gap-2">
-              <span>Permanent-room request from User {request.requester_id}: {request.status}.</span>
-              {request.status === 'pending' && (userRole === 'owner' || userRole === 'admin') && (
-                <span className="flex gap-2">
-                  <button type="button" onClick={() => void handlePermanentReview(request.id, 'approved')} className="rounded bg-emerald-700/70 px-2 py-1 text-[10px] font-bold">Approve</button>
-                  <button type="button" onClick={() => void handlePermanentReview(request.id, 'rejected')} className="rounded bg-red-700/70 px-2 py-1 text-[10px] font-bold">Reject</button>
-                </span>
-              )}
+        {roomData.reopened_until && permanentRequests.length > 0 && (
+          <div className="room-state-bar">
+            {permanentRequests.map((request) => (
+              <div key={request.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span>Permanent-room request from User {request.requester_id}: {request.status}.</span>
+                {request.status === 'pending' && (userRole === 'owner' || userRole === 'admin') && (
+                  <span className="flex gap-2">
+                    <button type="button" onClick={() => void handlePermanentReview(request.id, 'approved')} className="rounded bg-emerald-700/70 px-2 py-1 text-[10px] font-bold">Approve</button>
+                    <button type="button" onClick={() => void handlePermanentReview(request.id, 'rejected')} className="rounded bg-red-700/70 px-2 py-1 text-[10px] font-bold">Reject</button>
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {lifecycleActionError && <p className="room-alert" role="alert">{lifecycleActionError}</p>}
+        {roomData.expiration_type === 'permanent' && roomData.deletion_scheduled_at && <p className="room-alert" role="status">This room is scheduled for permanent deletion on {new Date(roomData.deletion_scheduled_at).toLocaleString([], { dateStyle: 'full', timeStyle: 'short' })}. Chats and files will be deleted unless the owner cancels.</p>}
+      </div>
+
+      <div className="room-stage">
+        <nav className="room-rail glass" aria-label="Room windows">
+          {[RAIL_STAGE, RAIL_TOOLS].map((group, groupIndex) => (
+            <div key={groupIndex} className="room-rail-group">
+              {group.map((id) => {
+                const enabled = windowEnabled(id);
+                const offTitle: Partial<Record<WinId, string>> = {
+                  watch: 'Watch is turned off by this room',
+                  study: 'Study is turned off by this room',
+                  whiteboard: 'The whiteboard is part of Study, which this room has turned off',
+                  chat: 'Chat is turned off by this room',
+                  voice: 'Voice needs room chat, which this room has turned off',
+                  collab: 'Collaborate needs room chat, which this room has turned off',
+                  files: 'Files are turned off by this room',
+                };
+                const onTitle: Partial<Record<WinId, string>> = { voice: 'Voice, screen share and raise hand', collab: 'Polls, countdowns, events and search' };
+                return (
+                  <button key={id} type="button" aria-label={WINDOW_META[id].label} title={enabled ? (onTitle[id] ?? WINDOW_META[id].label) : offTitle[id]} aria-pressed={isOpen(id)} disabled={!enabled} onClick={() => toggleWindow(id)} className="room-rail-btn">
+                    <OmniIcon name={WINDOW_META[id].icon} size={17} />
+                  </button>
+                );
+              })}
             </div>
           ))}
-        </div>
-      )}
-      {lifecycleActionError && <p className="border-b border-red-900/50 bg-red-950/30 px-6 py-2 text-xs text-red-300" role="alert">{lifecycleActionError}</p>}
-      {roomData.expiration_type === 'permanent' && roomData.deletion_scheduled_at && <p className="border-b border-red-900/50 bg-red-950/30 px-6 py-2 text-xs text-red-200" role="status">This room is scheduled for permanent deletion on {new Date(roomData.deletion_scheduled_at).toLocaleString([], { dateStyle: 'full', timeStyle: 'short' })}. Chats and files will be deleted unless the owner cancels.</p>}
-
-      <div className="room-content flex-1 overflow-hidden" data-workspace-mode={sidePanel.mode} data-layout={layout}>
-        <nav className="workspace-rail z-10">
-          <div className="workspace-rail-group w-full">
-            <button type="button" aria-label="Room home" title="Room home" aria-pressed={activity === 'home'} onClick={() => setMainActivity('home')} className={`workspace-tool ${activity === 'home' ? 'is-active' : ''}`}><OmniIcon name="home" size={17} /></button>
-            <button type="button" aria-label="Watch" title={featureEnabled('watch') ? 'Watch' : 'Watch is turned off by this room'} aria-pressed={activity === 'watch'} disabled={!featureEnabled('watch')} onClick={() => setMainActivity('watch')} className={`workspace-tool ${activity === 'watch' ? 'is-active' : ''} ${!featureEnabled('watch') ? 'opacity-40' : ''}`}><OmniIcon name="play" size={17} /></button>
-            <button type="button" aria-label="Study" title={featureEnabled('study') ? 'Study' : 'Study is turned off by this room'} aria-pressed={activity === 'study'} disabled={!featureEnabled('study')} onClick={() => setMainActivity('study')} className={`workspace-tool ${activity === 'study' ? 'is-active' : ''} ${!featureEnabled('study') ? 'opacity-40' : ''}`}><OmniIcon name="study" size={18} /></button>
-            <button type="button" aria-label="Whiteboard" title={featureEnabled('study') ? 'Whiteboard' : 'The whiteboard is part of Study, which this room has turned off'} aria-pressed={activity === 'whiteboard'} disabled={!featureEnabled('study')} onClick={() => setMainActivity('whiteboard')} className={`workspace-tool ${activity === 'whiteboard' ? 'is-active' : ''} ${!featureEnabled('study') ? 'opacity-40' : ''}`}><OmniIcon name="pen" size={17} /></button>
-          </div>
-          <div className="my-2 h-px w-8 bg-neutral-800" />
-          <div className="workspace-rail-group w-full">
-            <button type="button" aria-label="Chat" title={featureEnabled('chat') ? 'Chat' : 'Chat is turned off by this room'} aria-pressed={tool === 'chat' && sidePanel.visible} disabled={!featureEnabled('chat')} onClick={() => openTool('chat')} className={`workspace-tool ${tool === 'chat' && sidePanel.visible ? 'is-active' : ''} ${!featureEnabled('chat') ? 'opacity-40' : ''}`}><OmniIcon name="message" size={17} /></button>
-            <button type="button" aria-label="Members" title="Members" aria-pressed={tool === 'members' && sidePanel.visible} onClick={() => openTool('members')} className={`workspace-tool ${tool === 'members' && sidePanel.visible ? 'is-active' : ''}`}><OmniIcon name="users" size={17} /></button>
-            <button type="button" aria-label="Voice" title={featureEnabled('chat') ? 'Voice, screen share and raise hand' : 'Voice needs room chat, which this room has turned off'} aria-pressed={tool === 'voice' && sidePanel.visible} disabled={!featureEnabled('chat')} onClick={() => openTool('voice')} className={`workspace-tool ${tool === 'voice' && sidePanel.visible ? 'is-active' : ''} ${!featureEnabled('chat') ? 'opacity-40' : ''}`}><OmniIcon name="mic" size={17} /></button>
-            <button type="button" aria-label="Collaborate" title={featureEnabled('chat') ? 'Polls, countdowns, events and search' : 'Collaborate needs room chat, which this room has turned off'} aria-pressed={tool === 'collab' && sidePanel.visible} disabled={!featureEnabled('chat')} onClick={() => openTool('collab')} className={`workspace-tool ${tool === 'collab' && sidePanel.visible ? 'is-active' : ''} ${!featureEnabled('chat') ? 'opacity-40' : ''}`}><OmniIcon name="poll" size={17} /></button>
-            <button type="button" aria-label="Files" title={featureEnabled('files') ? 'Files' : 'Files are turned off by this room'} aria-pressed={tool === 'files' && sidePanel.visible} disabled={!featureEnabled('files')} onClick={() => openTool('files')} className={`workspace-tool ${tool === 'files' && sidePanel.visible ? 'is-active' : ''} ${!featureEnabled('files') ? 'opacity-40' : ''}`}><OmniIcon name="file" size={17} /></button>
-          </div>
         </nav>
 
-        <main className="workspace-main relative flex min-w-0 flex-1 flex-col p-0">
-          {/* Keep the media element mounted while another room section is open.
-              Hiding this layer visually preserves playback and audio position. */}
-          <div
-            data-stage-layer
-            aria-hidden={activity !== 'watch'}
-            className={`absolute inset-0 flex min-h-0 ${activity === 'watch' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
-          >
-            {featureEnabled('watch') ? <MediaStage roomId={roomData.id} canControlMedia={userRole === 'owner' || canControlMedia} /> : <RoomFeatureUnavailable label="Watch" />}
-          </div>
-
-          {/* Keep the study timer mounted too, so it continues through room
-              navigation and can finish/log a session outside the Study view. */}
-          <div
-            data-stage-layer
-            aria-hidden={activity !== 'study'}
-            data-now-playing-pad
-            className={`absolute inset-0 flex min-h-0 ${activity === 'study' ? 'z-10' : 'invisible pointer-events-none z-0'}`}
-          >
-            {featureEnabled('study') ? <StudyStage
-              roomId={roomData.id}
-              focusRoomPath={focusRoomPath}
-              timerNavigationRequest={timerNavigationRequest}
-              onOpenWatch={featureEnabled('watch') ? () => setMainActivity('watch') : undefined}
-            /> : <RoomFeatureUnavailable label="Study" />}
-          </div>
-
-          {activity === 'home' && (
-            <div data-now-playing-pad className="room-dashboard-layer relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto">
-              <RoomDashboard
+        <div className="room-desk-wrap">
+          <RoomDesk
+            ref={deskRef}
+            preset={layout}
+            storageKey={deskPreferenceKey}
+            onClose={closeWindow}
+            emptyHint={<><OmniIcon name="layout" size={22} /><p>Every window is closed. Open one from the rail.</p></>}
+            windows={[
+              { id: 'home', open: isOpen('home'), children: <div className="room-dashboard-layer flex min-h-0 flex-1 flex-col overflow-y-auto"><RoomDashboard roomId={roomData.id} room={roomData} timeLeft={timeLeft} featureFlags={featureFlags} onOpenActivity={openWindow} onOpenTool={openWindow} /></div> },
+              { id: 'watch', open: isOpen('watch'), keepMounted: featureEnabled('watch'), children: <MediaStage roomId={roomData.id} canControlMedia={userRole === 'owner' || canControlMedia} /> },
+              { id: 'study', open: isOpen('study'), keepMounted: featureEnabled('study'), children: <StudyStage roomId={roomData.id} focusRoomPath={focusRoomPath} timerNavigationRequest={timerNavigationRequest} onOpenWatch={featureEnabled('watch') ? () => openWindow('watch') : undefined} /> },
+              { id: 'whiteboard', open: isOpen('whiteboard'), children: <div className="flex min-h-0 flex-1 flex-col p-3"><StudyWhiteboardPanel roomId={roomData.id} /></div> },
+              { id: 'chat', open: isOpen('chat'), keepMounted: featureEnabled('chat'), children: <RoomChat roomId={roomData.id} /> },
+              { id: 'members', open: isOpen('members'), children: <MembersTab roomId={roomData.id} currentUserRole={userRole} canManageMembers={canManageMembers} onChangeRole={(memberId) => { setControlCenterMemberId(memberId); setControlCenterTab('user-control'); setShowControlCenter(true); }} /> },
+              { id: 'voice', open: isOpen('voice'), children: <VoicePanel /> },
+              { id: 'collab', open: isOpen('collab'), children: <CollabPanel roomId={roomData.id} /> },
+              { id: 'files', open: isOpen('files'), children: <FilesTab roomId={roomData.id} currentUserRole={userRole} canControlMedia={userRole === 'owner' || canControlMedia} /> },
+            ].map((w) => ({ ...w, title: WINDOW_META[w.id as WinId].title, icon: WINDOW_META[w.id as WinId].icon }))}
+          />
+          <div className="room-desk-float">
+            {!isOpen('watch') && featureEnabled('watch') && roomSync.mediaState && <div className="now-playing-slot"><NowPlayingBar roomId={roomData.id} onOpen={() => openWindow('watch')} /></div>}
+            {!isOpen('study') && featureEnabled('study') && roomSync.timerState.isRunning && (
+              <StudyMiniTimer
                 roomId={roomData.id}
-                room={roomData}
-                timeLeft={timeLeft}
-                featureFlags={featureFlags}
-                onOpenActivity={setMainActivity}
-                onOpenTool={openTool}
+                timerState={roomSync.timerState}
+                onOpen={() => {
+                  openWindow('study');
+                  setTimerNavigationRequest((request) => request + 1);
+                }}
               />
-            </div>
-          )}
-
-          {activity !== 'watch' && featureEnabled('watch') && roomSync.mediaState && (
-            <div className="now-playing-slot">
-              <NowPlayingBar roomId={roomData.id} onOpen={() => setMainActivity('watch')} />
-            </div>
-          )}
-
-          {activity !== 'study' && activity !== 'home' && roomSync.timerState.isRunning && (
-            <StudyMiniTimer
-              roomId={roomData.id}
-              timerState={roomSync.timerState}
-              onOpen={() => {
-                setMainActivity('study');
-                setTimerNavigationRequest((request) => request + 1);
-              }}
-            />
-          )}
-
-          {activity === 'whiteboard' && (
-            <div data-now-playing-pad className="relative z-10 flex min-h-0 flex-1 flex-col p-3">
-              {featureEnabled('study')
-                ? <StudyWhiteboardPanel roomId={roomData.id} />
-                : <div className="flex flex-1 items-center justify-center rounded-xl border border-neutral-800 bg-[#0a0a0a] p-6 text-center text-sm text-neutral-500">The whiteboard is part of Study, which this room has disabled.</div>}
-            </div>
-          )}
-        </main>
-
-        {/* DYNAMIC WIDTH SIDEBAR */}
-        {/* One panel element in every mode: CSS places it in the centre at
-            room home and beside the stage when a feature is open, so chat,
-            members and files never remount when the layout changes. */}
-        <aside
-          style={{ ['--sidebar-width' as string]: `${sidebarWidth}px`, ['--home-chat-width' as string]: `${homeChatWidth}px` }}
-          className="workspace-side z-10 shrink-0"
-          data-placement={sidePanel.placement}
-          data-collapsed={sidePanel.visible ? undefined : 'true'}
-        >
-          <div ref={sideInnerRef} className="workspace-side-inner">
-            {/* The handle stays on the panel edge while its width changes. */}
-            <div
-              role="separator"
-              tabIndex={0}
-              aria-label={isHomeMode ? 'Resize the centred chat panel' : 'Resize chat panel'}
-              aria-orientation="vertical"
-              aria-valuemin={resizeBounds.min}
-              aria-valuemax={resizeBounds.max}
-              aria-valuenow={resizeBounds.value}
-              onMouseDown={() => setIsDragging(true)}
-              onDoubleClick={() => (isHomeMode ? setHomeChatWidth(HOME_CHAT_WIDTH.initial) : setSidebarWidth(320))}
-              onKeyDown={(event) => {
-                const grow = isHomeMode ? event.key === 'ArrowRight' : event.key === 'ArrowLeft';
-                const shrink = isHomeMode ? event.key === 'ArrowLeft' : event.key === 'ArrowRight';
-                const apply = (next: (width: number) => number) => (isHomeMode
-                  ? setHomeChatWidth((width) => clampHomeChatWidth(next(width)))
-                  : setSidebarWidth((width) => clampSidebarWidth(next(width))));
-                if (grow) {
-                  event.preventDefault();
-                  apply((width) => width + 40);
-                } else if (shrink) {
-                  event.preventDefault();
-                  apply((width) => width - 40);
-                } else if (event.key === 'Home') {
-                  event.preventDefault();
-                  apply(() => resizeBounds.min);
-                } else if (event.key === 'End') {
-                  event.preventDefault();
-                  apply(() => resizeBounds.max);
-                }
-              }}
-              className={`workspace-resizer z-20 ${isDragging ? 'is-resizing bg-indigo-500' : ''}`}
-              title="Drag to resize chat panel"
-            />
-            <div className="chat-topbar shrink-0">
-              <h3 className="font-medium text-sm text-white uppercase tracking-wider">{tool === 'collab' ? 'collaborate' : tool}</h3>
-              {layout === 'stage' && !isHomeMode && (
-                <button type="button" onClick={() => setStageChatOpenLayout(null)} className="room-panel-close" aria-label="Hide panel" title="Hide panel"><OmniIcon name="close" size={13} /></button>
-              )}
-            </div>
-            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-              {tool === 'chat' && roomData && (featureEnabled('chat') ? <RoomChat roomId={roomData.id} /> : <RoomFeatureUnavailable label="Room chat" compact />)}
-              {tool === 'members' && roomData && <MembersTab roomId={roomData.id} currentUserRole={userRole} canManageMembers={canManageMembers} onChangeRole={(memberId) => { setControlCenterMemberId(memberId); setControlCenterTab('user-control'); setShowControlCenter(true); }} />}
-              {tool === 'voice' && roomData && <VoicePanel />}
-              {tool === 'collab' && roomData && <CollabPanel roomId={roomData.id} />}
-              {tool === 'files' && roomData && (featureEnabled('files') ? <FilesTab roomId={roomData.id} currentUserRole={userRole} canControlMedia={userRole === 'owner' || canControlMedia} /> : <RoomFeatureUnavailable label="Files" compact />)}
-            </div>
+            )}
           </div>
-        </aside>
-        {layout === 'stage' && !isHomeMode && !sidePanel.visible && (
-          <button type="button" className="room-panel-reopen" onClick={() => setStageChatOpenLayout(layout)} aria-label={`Show ${tool}`}><OmniIcon name={tool === 'files' ? 'file' : tool === 'members' ? 'users' : tool === 'voice' ? 'mic' : tool === 'collab' ? 'poll' : 'message'} size={16} /><span>Show {tool === 'collab' ? 'collaborate' : tool}</span></button>
-        )}
+        </div>
       </div>
       </div>
       {showConvertModal && <RoomConversionDialog roomId={roomData.id} roomName={roomData.name} onClose={() => setShowConvertModal(false)} onConverted={(result: ConversionResult) => { applyConversion(result.name); setGroupInfo({ name: result.name, member_count: result.memberCount }); }} />}
@@ -756,14 +644,10 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         roomLifecycle={{ expirationType: roomData.expiration_type, deletionScheduledAt: roomData.deletion_scheduled_at ?? null }}
         onRoomLifecycleChange={(deletionScheduledAt) => setRoomData((current) => current ? { ...current, deletion_scheduled_at: deletionScheduledAt } : current)}
       />
-      {showLeaveConfirmation && <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="leave-room-title"><section className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111217] p-6 shadow-2xl"><p className="text-[10px] font-bold uppercase tracking-[.16em] text-amber-200">Membership</p>{userRole === 'owner' && ownerLeaveStep === 'choice' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Do you want to transfer ownership before leaving?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Choose No to leave the active workspace while retaining your room membership and ownership for later.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => { setShowLeaveConfirmation(false); minimizeActiveRoom(); }} className="omni-button omni-button-ghost">No</button><button type="button" disabled={leaving} onClick={() => void openOwnerTransfer()} className="omni-button omni-button-primary">Yes</button></div></> : userRole === 'owner' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Choose a new owner</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Only an approved permanent member can receive ownership.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<select value={ownerTransferTarget} onChange={(event) => setOwnerTransferTarget(event.target.value)} className="omni-input mt-4">{ownerTransferCandidates.map((member) => <option key={member.user_id} value={member.user_id}>User {member.user_id.slice(0, 8)}</option>)}</select><div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setOwnerLeaveStep('choice')} className="omni-button omni-button-ghost">Back</button><button type="button" disabled={leaving || !ownerTransferTarget} onClick={() => void completeOwnerTransferAndLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Transfer and leave'}</button></div></> : <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Leave this room?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">You can rejoin later when the room is open and you are not restricted.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => void handleLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Leave room'}</button></div></>}</section></div>}
-      {featureEnabled('chat') && <VoiceDock panelOpen={tool === 'voice' && sidePanel.visible} onOpen={() => openTool('voice')} />}
+      {showLeaveConfirmation && <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="leave-room-title"><section className="glass-strong w-full max-w-md rounded-2xl p-6"><p className="text-[10px] font-bold uppercase tracking-[.16em] text-amber-200">Membership</p>{userRole === 'owner' && ownerLeaveStep === 'choice' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Do you want to transfer ownership before leaving?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Choose No to leave the active workspace while retaining your room membership and ownership for later.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => { setShowLeaveConfirmation(false); minimizeActiveRoom(); }} className="omni-button omni-button-ghost">No</button><button type="button" disabled={leaving} onClick={() => void openOwnerTransfer()} className="omni-button omni-button-primary">Yes</button></div></> : userRole === 'owner' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Choose a new owner</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Only an approved permanent member can receive ownership.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<select value={ownerTransferTarget} onChange={(event) => setOwnerTransferTarget(event.target.value)} className="omni-input mt-4">{ownerTransferCandidates.map((member) => <option key={member.user_id} value={member.user_id}>User {member.user_id.slice(0, 8)}</option>)}</select><div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setOwnerLeaveStep('choice')} className="omni-button omni-button-ghost">Back</button><button type="button" disabled={leaving || !ownerTransferTarget} onClick={() => void completeOwnerTransferAndLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Transfer and leave'}</button></div></> : <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Leave this room?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">You can rejoin later when the room is open and you are not restricted.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => void handleLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Leave room'}</button></div></>}</section></div>}
+      {featureEnabled('chat') && <VoiceDock panelOpen={isOpen('voice')} onOpen={() => openWindow('voice')} />}
       <FloatingDock />
     </VoiceRoomProvider>
     </RoomRealtimeProvider>
   );
-}
-
-function RoomFeatureUnavailable({ label, compact = false }: { label: string; compact?: boolean }) {
-  return <div className={`flex flex-1 flex-col items-center justify-center p-6 text-center ${compact ? 'chat-panel' : ''}`}><span className="rounded-full border border-white/10 bg-white/5 p-3 text-neutral-400"><OmniIcon name="lock" size={20} /></span><h2 className="mt-4 text-lg font-semibold text-white">{label} is unavailable</h2><p className="mt-2 max-w-sm text-sm leading-6 text-neutral-500">This feature has been disabled by the room&apos;s controls. It will become available when an authorized manager enables it.</p></div>;
 }

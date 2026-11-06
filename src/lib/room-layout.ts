@@ -31,8 +31,6 @@ export type RoomTool = 'chat' | 'members' | 'files' | 'voice' | 'collab';
 export type RoomAppearance = { defaultLayout: RoomLayout; layoutLocked: boolean; theme: RoomTheme };
 export const DEFAULT_ROOM_APPEARANCE: RoomAppearance = { defaultLayout: 'balanced', layoutLocked: false, theme: 'violet' };
 
-export const HOME_CHAT_WIDTH = { min: 420, max: 980, initial: 720 } as const;
-
 export function isRoomLayout(value: unknown): value is RoomLayout {
   return typeof value === 'string' && (ROOM_LAYOUTS as readonly string[]).includes(value);
 }
@@ -84,19 +82,4 @@ export function effectiveTool(requested: RoomTool, flags: RoomFeatureFlags): Roo
   // Voice and Collaborate ride on the chat feature (chat capability server-side).
   if ((requested === 'voice' || requested === 'collab') && !isFeatureEnabled(flags, 'chat')) return 'members';
   return requested;
-}
-
-export type WorkspaceMode = 'home' | 'stage';
-
-// How the side panel behaves for the current activity and preset.
-export function sidePanelState(activity: RoomActivity, layout: RoomLayout, chatOpenInStageFocus: boolean) {
-  const mode: WorkspaceMode = activity === 'home' ? 'home' : 'stage';
-  if (mode === 'home') return { mode, visible: true, placement: 'center' as const };
-  if (layout === 'stage') return { mode, visible: chatOpenInStageFocus, placement: 'side' as const };
-  return { mode, visible: true, placement: layout === 'chat' ? 'wide' as const : 'side' as const };
-}
-
-export function clampHomeChatWidth(width: number) {
-  if (!Number.isFinite(width)) return HOME_CHAT_WIDTH.initial;
-  return Math.min(HOME_CHAT_WIDTH.max, Math.max(HOME_CHAT_WIDTH.min, Math.round(width)));
 }
