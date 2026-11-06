@@ -18,12 +18,16 @@ function makeBars(count: number, seed: number, scale: number) {
     const p = rnd() * 6.28;
     const x = (rnd() - 0.5) * 700 * scale;
     const half = Math.PI / s; // half a sine period, in seconds
+    // The bar's own offset and brightness are static on the outer span; the inner
+    // span animates with fixed keyframes, which the compositor can run (keyframes
+    // that read custom properties fall back to the main thread every frame).
     return {
-      style: {
-        top: `${top.toFixed(0)}px`, height: `${height.toFixed(0)}px`, filter: `blur(${blur.toFixed(1)}px)`,
+      outer: { top: `${top.toFixed(0)}px`, height: `${height.toFixed(0)}px`, opacity: +o.toFixed(3), transform: `translateX(${x.toFixed(0)}px)` } as CSSProperties,
+      inner: {
+        filter: `blur(${blur.toFixed(1)}px)`,
         background: `linear-gradient(90deg, transparent 18%, ${c1} 38%, ${c2} 52%, transparent 70%)`,
-        ['--x' as string]: `${x.toFixed(0)}px`, ['--o' as string]: o.toFixed(3),
-        ['--drift' as string]: `${half.toFixed(2)}s`, ['--pulse' as string]: `${(half / 1.7).toFixed(2)}s`, ['--delay' as string]: `${(-(p / s)).toFixed(2)}s`,
+        animationDuration: `${half.toFixed(2)}s, ${(half / 1.7).toFixed(2)}s`,
+        animationDelay: `${(-(p / s)).toFixed(2)}s`,
       } as CSSProperties,
     };
   });
@@ -35,7 +39,7 @@ export default function Stripes({ count, seed, scale = 1, className }: { count: 
   return (
     <div className={`${styles.stripes} ${className}`} data-anim aria-hidden="true">
       <div className={styles.stripesRot}>
-        {makeBars(count, seed, scale).map((bar, index) => <span key={index} className={styles.stripe} style={bar.style} />)}
+        {makeBars(count, seed, scale).map((bar, index) => <span key={index} className={styles.stripe} style={bar.outer}><span style={bar.inner} /></span>)}
       </div>
     </div>
   );

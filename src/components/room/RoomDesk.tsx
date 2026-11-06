@@ -320,6 +320,8 @@ export default function RoomDesk({ ref, windows, preset, storageKey, onClose, em
 
   return (
     <div className="room-desk" ref={deskRef} data-ready={area ? '' : undefined}>
+      {/* Title buttons are named by their visible title; how to move them is the description. */}
+      <span id="desk-move-hint" className="sr-only">Arrow keys move this window; hold Shift to move it further.</span>
       {openIds.length === 0 && <div className="room-desk-empty">{emptyHint}</div>}
       {windows.filter((w) => w.open || w.keepMounted).map((w) => {
         // A kept-mounted window that was never opened still gets a real size,
@@ -344,7 +346,7 @@ export default function RoomDesk({ ref, windows, preset, storageKey, onClose, em
                 <i aria-hidden="true" />
                 <button type="button" className="desk-dot" aria-label={`Fill the desk with the ${w.title} window`} aria-pressed={maxId === w.id} title={maxId === w.id ? 'Restore' : 'Focus'} onPointerDown={(event) => event.stopPropagation()} onClick={() => setMaxId((current) => (current === w.id ? null : w.id))}><OmniIcon name="maximize" size={8} strokeWidth={2.4} /></button>
               </span>
-              <button type="button" className="desk-title" aria-label={`Move the ${w.title} window. Arrow keys move it, Shift moves further.`} aria-roledescription="movable window title" onKeyDown={keyNudge(w.id, false)}>
+              <button type="button" className="desk-title" aria-describedby="desk-move-hint" aria-roledescription="movable window title" onKeyDown={keyNudge(w.id, false)}>
                 <OmniIcon name={w.icon} size={14} />{w.title}
               </button>
               <span className="desk-extra">{w.extra}</span>

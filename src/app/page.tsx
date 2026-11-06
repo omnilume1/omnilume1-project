@@ -53,7 +53,7 @@ export default async function Home() {
       <div className={styles.intro} aria-hidden="true"><OmniIntro /></div>
       <LandingMotion />
 
-      <Stripes count={14} seed={7} className={styles.stripesTop} />
+      <Stripes count={10} seed={7} className={styles.stripesTop} />
 
       <div className={styles.wrap}>
         <header className={styles.nav}>
@@ -231,7 +231,7 @@ export default async function Home() {
             </p>
           </div>
           <div className={styles.stage2} data-reveal style={d(0.2)} aria-hidden="true">
-            <div className={styles.corner}><Stripes count={8} seed={3} scale={0.5} className={styles.stripesCorner} /></div>
+            <div className={styles.corner}><Stripes count={6} seed={3} scale={0.5} className={styles.stripesCorner} /></div>
             <div className={styles.nw}>
               <div className={styles.nwTitle}><span className={styles.v0}>Focus timer</span><span className={styles.v1}>Whiteboard</span><span className={styles.v2}>Shared notes</span></div>
               <div className={`${styles.nwV} ${styles.v0}`}><h4>Physics revision</h4><p>Round 2 of 4. Break starts for everyone at 9:46 pm.</p><hr /><div className={`${styles.nwTimer} mono`} data-clock="1122">18:42</div><div className={styles.track} style={{ marginTop: 20 }}><b style={{ width: '62%', background: '#8f7be8' }} /></div><div className={styles.tl} style={{ marginTop: 18 }}><span className={styles.av}>RS</span><span className={styles.av} style={{ marginLeft: -8 }}>DV</span><span className={styles.av} style={{ marginLeft: -8 }}>NP</span>4 studying</div></div>
@@ -263,15 +263,15 @@ export default async function Home() {
       </section>
 
       <div className={styles.footArea}>
-        <Stripes count={14} seed={19} className={styles.stripesBottom} />
+        <Stripes count={10} seed={19} className={styles.stripesBottom} />
         <footer className={styles.footer}>
           <div className={styles.wrap}>
             <div className={styles.foot} data-reveal>
-              <div><h4>Product</h4><Link href="/explore">Rooms</Link><Link href="/explore">Explore</Link><Link href="/music">Music</Link><Link href="/messages">Messages</Link></div>
-              <div><h4>Core features</h4><a href="#cards">Watch together</a><a href="#cards">Study workspace</a><a href="#cards">Whiteboard</a><a href="#cards">Listen together</a><a href="#cards">Voice</a></div>
-              <div><h4>Coming soon</h4><a href="#ai">OmniLume AI</a><a href="#ai">Room flashcards</a><a href="#ai">Session planner</a></div>
-              <div><h4>Account</h4><Link href="/login">Sign in</Link><Link href="/login">Create account</Link><Link href="/forgot-password">Forgot password</Link></div>
-              <div><h4>OmniLume</h4><a href="#more">About</a><span>Privacy</span><span>Terms</span></div>
+              <div><h3>Product</h3><Link href="/explore">Rooms</Link><Link href="/explore">Explore</Link><Link href="/music">Music</Link><Link href="/messages">Messages</Link></div>
+              <div><h3>Core features</h3><a href="#cards">Watch together</a><a href="#cards">Study workspace</a><a href="#cards">Whiteboard</a><a href="#cards">Listen together</a><a href="#cards">Voice</a></div>
+              <div><h3>Coming soon</h3><a href="#ai">OmniLume AI</a><a href="#ai">Room flashcards</a><a href="#ai">Session planner</a></div>
+              <div><h3>Account</h3><Link href="/login">Sign in</Link><Link href="/login">Create account</Link><Link href="/forgot-password">Forgot password</Link></div>
+              <div><h3>OmniLume</h3><a href="#more">About</a><span>Privacy</span><span>Terms</span></div>
             </div>
             <div className={styles.footBottom} data-reveal style={d(0.2)}><span className={styles.logo}><OmniMark size={22} />OmniLume</span><span>© {new Date().getFullYear()} OmniLume</span></div>
           </div>

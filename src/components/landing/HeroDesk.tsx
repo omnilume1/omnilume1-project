@@ -12,7 +12,6 @@ type Point = { x: number; y: number };
 // The demo desk is laid out on a fixed 1200×680 stage and scaled to fit.
 const STAGE = { w: 1200, h: 680 };
 const START: Record<WinKey, Point> = { main: { x: 32, y: 40 }, music: { x: 904, y: 372 }, chat: { x: 868, y: 72 } };
-const LABELS: Record<WinKey, string> = { main: 'room', music: 'Listening together', chat: 'Messages' };
 const ROOMS: Array<{ icon: OmniIconName; name: string; meta: string; title: string; src: string; alt: string }> = [
   { icon: 'message', name: 'gg sh', meta: 'Room chat', title: 'gg sh · Room', src: '/landing/room.jpg', alt: 'A room with a synced film, a focus timer and the room chat' },
   { icon: 'book', name: 'Study workspace', meta: 'Timer · notes · whiteboard', title: 'gg sh · Study workspace', src: '/landing/study.jpg', alt: 'A study room with the whiteboard, shared notes and focus timer tiled' },
@@ -28,7 +27,7 @@ export default function HeroDesk() {
   const deskRef = useRef<HTMLDivElement>(null);
   const winRefs = useRef<Partial<Record<WinKey, HTMLDivElement | null>>>({});
   const scaleRef = useRef(1);
-  const dragRef = useRef<{ key: WinKey; id: number; sx: number; sy: number; ox: number; oy: number; x: number; y: number; frame: number } | null>(null);
+  const dragRef = useRef<{ key: WinKey; id: number; sx: number; sy: number; ox: number; oy: number; x: number; y: number; frame: number; size: { w: number; h: number } } | null>(null);
 
   useEffect(() => {
     const desk = deskRef.current;
@@ -53,14 +52,17 @@ export default function HeroDesk() {
     if (event.button !== 0 || window.matchMedia('(max-width: 767px)').matches) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     const { x, y } = pos[key];
-    dragRef.current = { key, id: event.pointerId, sx: event.clientX, sy: event.clientY, ox: x, oy: y, x, y, frame: 0 };
+    // Measure once: a window's size never changes mid-drag, and reading it per move forces layout.
+    dragRef.current = { key, id: event.pointerId, sx: event.clientX, sy: event.clientY, ox: x, oy: y, x, y, frame: 0, size: sizeOf(key) };
+    // The light stripes hold still while a window moves: their animated layers make every frame's commit costly.
+    deskRef.current?.closest<HTMLElement>('[data-landing]')?.setAttribute('data-dragging', '');
     setLifted(key);
   };
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.id !== event.pointerId) return;
     const s = scaleRef.current;
-    const next = place(drag.key, { x: drag.ox + (event.clientX - drag.sx) / s, y: drag.oy + (event.clientY - drag.sy) / s });
+    const next = clampPoint({ x: drag.ox + (event.clientX - drag.sx) / s, y: drag.oy + (event.clientY - drag.sy) / s }, drag.size, STAGE, 8);
     drag.x = next.x;
     drag.y = next.y;
     // Write the transform once per frame; React state only changes on release.
@@ -75,6 +77,7 @@ export default function HeroDesk() {
     if (!drag || drag.id !== event.pointerId) return;
     cancelAnimationFrame(drag.frame);
     dragRef.current = null;
+    deskRef.current?.closest<HTMLElement>('[data-landing]')?.removeAttribute('data-dragging');
     setLifted(null);
     setPos((current) => ({ ...current, [drag.key]: { x: drag.x, y: drag.y } }));
   };
@@ -91,15 +94,16 @@ export default function HeroDesk() {
 
   const winClass = (key: WinKey, extra: string) => `${styles.win} ${extra} glow ${lifted === key ? styles.lifted : ''}`;
   const winStyle = (key: WinKey) => ({ transform: `translate3d(${pos[key].x}px, ${pos[key].y}px, 0)`, zIndex: order.indexOf(key) + 2 });
-  const barLabel = (key: WinKey) => `Move the ${LABELS[key]} window. Use the arrow keys.`;
-  const bar = { className: styles.bar, tabIndex: 0, role: 'button', 'aria-roledescription': 'movable window', onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp, onKeyDown };
+  // The bar is named by its visible title (label in name); how to move it is the description.
+  const bar = { className: styles.bar, tabIndex: 0, role: 'button', 'aria-roledescription': 'movable window', 'aria-describedby': 'hero-move-hint', onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp, onKeyDown };
 
   return (
     <div className={styles.desk} ref={deskRef} data-hero-desk>
       <DuskScene className={styles.scene} />
+      <span id="hero-move-hint" className="sr-only">Arrow keys move this window; hold Shift to move it further.</span>
       <div className={styles.stage}>
         <div ref={registerWin} data-win="main" className={winClass('main', styles.winMain)} style={winStyle('main')} onPointerDownCapture={onRaise}>
-          <div {...bar} aria-label={barLabel('main')}><Dots /><span className={styles.barTitle}>{ROOMS[screen.cur].title}</span><span className={`${styles.here} mono`}>1 online</span></div>
+          <div {...bar}><Dots /><span className={styles.barTitle}>{ROOMS[screen.cur].title}</span><span className={`${styles.here} mono`}>1 online</span></div>
           <div className={styles.mainBody}>
             <nav className={styles.side} aria-label="Preview pages">
               {ROOMS.map((room, index) => (
@@ -134,7 +138,7 @@ export default function HeroDesk() {
         </div>
 
         <div ref={registerWin} data-win="music" className={winClass('music', styles.winMusic)} style={winStyle('music')} onPointerDownCapture={onRaise}>
-          <div {...bar} aria-label={barLabel('music')}><Dots /><span className={styles.barTitle}>Listening together</span></div>
+          <div {...bar}><Dots /><span className={styles.barTitle}>Listening together</span></div>
           <div className={styles.musicBody}>
             <div className={styles.np}><span className={styles.art}><AlbumArt /></span><div><strong>Slow Tide</strong><span>Hana Mori</span></div></div>
             <div>
@@ -147,7 +151,7 @@ export default function HeroDesk() {
         </div>
 
         <div ref={registerWin} data-win="chat" className={winClass('chat', styles.winChat)} style={winStyle('chat')} onPointerDownCapture={onRaise}>
-          <div {...bar} aria-label={barLabel('chat')}><Dots /><span className={styles.barTitle}>Aditya Gupta</span></div>
+          <div {...bar}><Dots /><span className={styles.barTitle}>Aditya Gupta</span></div>
           <div className={styles.msgBody}>
             <span className={styles.e2e}><OmniIcon name="lock" size={12} />End-to-end encrypted</span>
             <div className={`${styles.bubble} ${styles.them}`}>Saved you a seat in gg sh</div>

@@ -10,7 +10,7 @@ import OmniMarkSprite from "@/components/ui/OmniMarkSprite";
 import GlobalMiniPlayer from "@/components/music/GlobalMiniPlayer";
 import { ListenTogetherProvider } from "@/hooks/useListenTogether";
 import { MusicPlayerProvider } from "@/hooks/useMusicPlayer";
-import { Agentation } from "agentation";
+import DevAgentation from "@/components/DevAgentation";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -53,9 +53,7 @@ export default function RootLayout({
         </MusicPlayerProvider>
 
         {/* Agentation - development only */}
-        {process.env.NODE_ENV === "development" && (
-          <Agentation endpoint="http://localhost:4747" />
-        )}
+        {process.env.NODE_ENV === "development" && <DevAgentation />}
       </body>
     </html>
   );

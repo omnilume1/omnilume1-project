@@ -35,7 +35,7 @@
 .page[data-motion="on"] [data-reveal]:not([data-revealed]) { opacity: 0; translate: 0 22px; }
 
 /* Loops pause while offscreen. */
-.stripes:not([data-playing]) .stripe,
+.stripes:not([data-playing]) .stripe > span, .page[data-dragging] .stripe > span,
 .row:not([data-playing]) *, .row:not([data-playing]) *::before,
 .thumbs:not([data-playing]), .track:not([data-playing]) b { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) {
@@ -45,14 +45,14 @@
 /* Light stripes */
 .stripes { position: absolute; left: 0; width: 100%; overflow: hidden; pointer-events: none; z-index: 0; }
 .stripesRot { position: absolute; left: 50%; top: 50%; width: 2600px; height: 2600px; margin: -1300px 0 0 -1300px; transform: rotate(40deg); }
-.stripe { position: absolute; left: 0; width: 2600px; border-radius: 999px; opacity: var(--o);
-  animation: stripeDrift var(--drift) ease-in-out var(--delay) infinite alternate, stripePulse var(--pulse) ease-in-out var(--delay) infinite alternate; }
-@keyframes stripeDrift { from { transform: translateX(calc(var(--x) - 160px)); } to { transform: translateX(calc(var(--x) + 160px)); } }
-@keyframes stripePulse { from { opacity: calc(var(--o) * .4); } to { opacity: var(--o); } }
+.stripe { position: absolute; left: 0; width: 2600px; }
+.stripe > span { position: absolute; inset: 0; border-radius: 999px; animation-name: stripeDrift, stripePulse; animation-timing-function: ease-in-out; animation-iteration-count: infinite; animation-direction: alternate; }
+@keyframes stripeDrift { from { transform: translateX(-160px); } to { transform: translateX(160px); } }
+@keyframes stripePulse { from { opacity: .4; } to { opacity: 1; } }
 .stripesTop { top: 0; height: 1000px; mask-image: linear-gradient(#000 30%, transparent 92%); }
 .stripesBottom { bottom: 0; height: 100%; mask-image: linear-gradient(transparent, #000 30%); }
 .stripesCorner { inset: 0; height: 100%; }
-@media (max-width: 767px) { .stripe { animation: none; transform: translateX(var(--x)); } }
+@media (max-width: 767px) { .stripe > span { animation: none; } }
 
 /* Nav */
 .nav { display: flex; align-items: center; gap: 32px; height: 64px; }
@@ -84,7 +84,8 @@
 .caption { display: flex; justify-content: space-between; gap: 16px; padding: 16px 4px 0; color: var(--omni-muted); font-size: 13px; }
 
 .win { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; border-radius: 16px; overflow: hidden; background: var(--omni-frost-strong); border: 1px solid rgba(255,255,255,.14); backdrop-filter: blur(30px) saturate(170%); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 28px 64px rgba(8,5,18,.42); transition: scale 200ms var(--quint); }
-.lifted { scale: 1.015; box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 40px 90px rgba(8,5,18,.55); }
+/* will-change only while held: the moving window keeps its layer, so each frame skips re-layerizing. */
+.lifted { scale: 1.015; box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 40px 90px rgba(8,5,18,.55); will-change: transform; }
 .bar { position: relative; z-index: 4; display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 14px; border-bottom: 1px solid var(--line); flex: none; cursor: grab; touch-action: none; user-select: none; }
 .lifted .bar { cursor: grabbing; }
 .bar:focus-visible { outline: 2px solid var(--omni-accent); outline-offset: -2px; border-radius: 16px 16px 0 0; }
@@ -321,7 +322,7 @@
 .footArea { position: relative; margin-top: -620px; padding-top: 620px; }
 .footer { position: relative; z-index: 2; border-top: 1px solid rgba(255,255,255,.14); background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.015) 50%), rgba(40,31,66,.3); backdrop-filter: blur(30px) saturate(170%); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); padding: 64px 0 48px; }
 .foot { display: grid; grid-template-columns: repeat(5, 1fr); gap: 32px; }
-.foot h4 { margin: 0 0 20px; font-size: 14px; font-weight: 500; color: var(--omni-text); }
+.foot h3 { margin: 0 0 20px; font-size: 14px; font-weight: 500; color: var(--omni-text); }
 .foot a, .foot span { display: block; width: max-content; color: var(--omni-text-2); font-size: 14px; padding: 6px 8px; margin-left: -8px; border-radius: 8px; text-decoration: none; transition: background-color 150ms ease, color 150ms ease; }
 .foot a:hover { background: rgba(255,255,255,.06); color: var(--omni-text); }
 .footBottom { display: flex; justify-content: space-between; margin-top: 56px; color: var(--omni-muted); font-size: 13px; }

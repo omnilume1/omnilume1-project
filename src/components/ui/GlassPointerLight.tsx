@@ -21,14 +21,18 @@ export default function GlassPointerLight() {
       for (const el of lit) if (!next.includes(el)) { el.style.removeProperty('--mx'); el.style.removeProperty('--my'); }
       for (const el of next) {
         const rect = el.getBoundingClientRect();
-        el.style.setProperty('--mx', `${Math.round(x - rect.left)}px`);
-        el.style.setProperty('--my', `${Math.round(y - rect.top)}px`);
+        const mx = `${Math.round(x - rect.left)}px`;
+        const my = `${Math.round(y - rect.top)}px`;
+        // Custom properties inherit, so every write restyles the whole subtree; skip no-ops.
+        if (el.style.getPropertyValue('--mx') !== mx) el.style.setProperty('--mx', mx);
+        if (el.style.getPropertyValue('--my') !== my) el.style.setProperty('--my', my);
       }
       lit = next;
     };
     const schedule = () => { if (!frame) frame = requestAnimationFrame(paint); };
     const onMove = (event: PointerEvent) => {
-      if (event.pointerType !== 'mouse') return;
+      // While a button is held (dragging a window) the light stays put.
+      if (event.pointerType !== 'mouse' || event.buttons !== 0) return;
       x = event.clientX;
       y = event.clientY;
       target = event.target instanceof Element ? event.target : null;
