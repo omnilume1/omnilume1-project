@@ -77,7 +77,7 @@ test('motion: spring-like enter, quicker exit, short stagger; reduced motion fad
   assert.equal(itemStaggerDelay(3, false), 72);
   assert.equal(itemStaggerDelay(30, false), 192);
   assert.equal(itemStaggerDelay(3, true), 0);
-  const css = read('src/app/globals.css');
+  const css = read('src/app/app.css');
   assert.match(css, /\.notification-popover \{[^}]*transform-origin: top right;[^}]*opacity: 0; transform: translateY\(-8px\) scale\(0\.96\);/);
   assert.match(css, /\.notification-popover\[data-state="open"\] \{ opacity: 1; transform: translateY\(0\) scale\(1\); transition: opacity 180ms/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\n  \.notification-popover, \.notification-popover\[data-state="open"\] \{ transform: none !important; transition: opacity 120ms linear !important; \}/);
@@ -127,6 +127,6 @@ test('walkthrough regressions: the bell is not queued behind server actions and 
   assert.doesNotMatch(data, /'use server'/);
   assert.match(data, /rpc\('mark_room_notifications_read', \{ p_ids: ids \}\)/);
   assert.match(data, /rpc\('set_notification_preference'/);
-  const css = read('src/app/globals.css');
+  const css = read('src/app/app.css');
   assert.match(css, /\.room-header \{ position: relative; z-index: 60;/, 'header popovers paint above the workspace (modals use z-70+)');
 });

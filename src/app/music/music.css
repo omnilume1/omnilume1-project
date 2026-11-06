@@ -4,29 +4,30 @@
  * dark only, OmniLume purple accent. Tokens: --mu-*.
  */
 .music-app {
-  --mu-bg: #1f1f1f;
-  --mu-text: #ffffffeb;
-  --mu-text-2: #ffffffa3;
-  --mu-text-3: #ffffff66;
+  /* Redesign: frosted purple glass over the app's ambient light (concept video). */
+  --mu-bg: radial-gradient(800px 600px at 30% 10%, #8b6cff33, transparent 70%), radial-gradient(700px 500px at 85% 80%, #3a239955, transparent 70%), transparent;
+  --mu-text: #f3f0fa;
+  --mu-text-2: #bdb5d0;
+  --mu-text-3: #a39cb8;
   --mu-q4: #ffffff1a;
   --mu-q5: #ffffff0d;
   --mu-key: #b9a8ff;
-  --mu-key-bg: #8d7bff;
+  --mu-key-bg: #8b6cff;
   --mu-focus: #b9a8ff99;
-  --mu-glass: #26262899;
+  --mu-glass: #30264e57;
   --mu-glass-filter: saturate(2.2) blur(16px);
-  --mu-thin: #28282880;
-  --mu-thin-filter: saturate(180%) blur(60px);
-  --mu-thick: #282828b3;
-  --mu-sticky: #1e1e1ecc;
-  --mu-glass-shadow: 0 10px 40px #00000033;
-  --mu-stroke: inset 0 0 0 0.5px #ffffff40;
-  --mu-divider: #ffffff1a;
+  --mu-thin: #30264e57;
+  --mu-thin-filter: saturate(170%) blur(30px);
+  --mu-thick: #281f42b8;
+  --mu-sticky: #1e182ed1;
+  --mu-glass-shadow: 0 12px 32px #06040e38;
+  --mu-stroke: inset 0 0 0 1px #ffffff1f;
+  --mu-divider: #ffffff12;
   --mu-hover: #ffffff0f;
-  --mu-nav-selected: #ffffff0d;
-  --mu-scrim: #00000073;
-  --mu-alt-bg: #2b2b2b;
-  --mu-search-border: #ffffff26;
+  --mu-nav-selected: #ffffff1a;
+  --mu-scrim: #0e0b1673;
+  --mu-alt-bg: #ffffff0f;
+  --mu-search-border: #ffffff1f;
   --mu-sidebar: 260px;
   --mu-panel: 300px;
   --mu-gutter: 25px;
@@ -466,7 +467,7 @@
   .music-app .mu-main { grid-column: 1; grid-row: 2; padding-bottom: calc(var(--mu-pill-h) + 32px); }
   .music-app .mu-title { padding-top: 20px; font-size: 28px; line-height: 34px; }
   .music-app .mu-sidebar {
-    position: fixed; inset: 0 auto 0 0; z-index: 9951; width: min(300px, 86vw); background: #262628f2; transform: translateX(-100%);
+    position: fixed; inset: 0 auto 0 0; z-index: 9951; width: min(300px, 86vw); background: #241d36f2; transform: translateX(-100%);
     transition: transform .3s var(--mu-ease), visibility .3s; visibility: hidden;
   }
   .music-app[data-drawer-open='true'] .mu-sidebar { transform: none; visibility: visible; }
@@ -485,6 +486,12 @@
   .music-app .mu-shelf-scroller.is-tracks { grid-auto-columns: 85%; }
   .music-app .mu-fs-grid { padding: 60px 20px 32px; }
 }
+/* Wide screens: sidebar, side panel and player float as frosted glass cards. */
+@media (min-width: 767.32px) {
+  .music-app .mu-sidebar { margin: 24px 0 24px 24px; border-radius: 18px; background: linear-gradient(180deg, #ffffff13, #ffffff05 60%), var(--mu-thin); backdrop-filter: var(--mu-thin-filter); box-shadow: var(--mu-stroke), var(--mu-glass-shadow); }
+  .music-app .mu-side { top: 24px; right: 24px; bottom: 24px; border-radius: 18px; background: linear-gradient(180deg, #ffffff13, #ffffff05 60%), var(--mu-thin); backdrop-filter: var(--mu-thin-filter); box-shadow: var(--mu-stroke), var(--mu-glass-shadow); }
+  .music-app .mu-pill { border-radius: 18px; background: linear-gradient(180deg, #ffffff13, #ffffff05 60%), var(--mu-glass); }
+}
 @media (hover: none) {
   .music-app .mu-art-play, .music-app .mu-upnext-remove { opacity: 1; }
 }
@@ -494,5 +501,5 @@
   }
 }
 @media (prefers-contrast: more) {
-  .music-app { --mu-glass: #262628; --mu-thin: #282828; --mu-thick: #282828; --mu-text-2: #ffffffcc; }
+  .music-app { --mu-glass: #2a2340; --mu-thin: #2a2340; --mu-thick: #2a2340; --mu-text-2: #ffffffcc; }
 }

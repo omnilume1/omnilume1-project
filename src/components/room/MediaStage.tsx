@@ -710,17 +710,17 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
               </div>
             )}
 
-            <button type="button" onClick={() => { setShowQueue((visible) => !visible); setShowHistory(false); }} aria-expanded={showQueue} className="rounded-md border border-neutral-700 bg-neutral-800/80 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-neutral-200 transition hover:bg-neutral-700" aria-label="Open queue and clips">
+            <button type="button" onClick={() => { setShowQueue((visible) => !visible); setShowHistory(false); }} aria-expanded={showQueue} className="omni-button omni-button-ghost omni-button-sm" aria-label="Open queue and clips">
               Queue
             </button>
 
-            <button type="button" onClick={() => { setShowHistory((visible) => !visible); setShowQueue(false); if (!showHistory) void loadHistory(); }} className="rounded-md border border-neutral-700 bg-neutral-800/80 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-neutral-200 transition hover:bg-neutral-700" aria-label="Open cast history">
+            <button type="button" onClick={() => { setShowHistory((visible) => !visible); setShowQueue(false); if (!showHistory) void loadHistory(); }} className="omni-button omni-button-ghost omni-button-sm" aria-label="Open cast history">
               History
             </button>
 
             {playbackUrl && (
               <div className="relative">
-                <button type="button" onClick={() => setShowSettings((visible) => !visible)} className="rounded-md border border-neutral-600 bg-neutral-800/80 p-1.5 text-white transition hover:bg-neutral-700" aria-label="Player settings">
+                <button type="button" onClick={() => setShowSettings((visible) => !visible)} className="omni-button omni-button-ghost omni-button-sm" aria-label="Player settings">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1.51 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06A2 2 0 1 1 7.04 4.3l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10.6 3.09V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 16.1 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82A1.65 1.65 0 0 0 20.31 11H21a2 2 0 0 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15Z" /></svg>
                 </button>
                 {showSettings && (
@@ -746,8 +746,8 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
               </div>
             )}
 
-            {playbackUrl && canCast && <button type="button" onClick={stopCasting} className="rounded border border-red-500/30 bg-red-500/20 px-3 py-1 text-xs font-bold text-red-400 transition hover:bg-red-500/30">Stop</button>}
-            {playbackUrl && <button type="button" onClick={canCast ? forceSyncToRoom : () => broadcastEvent('request_sync')} className="hidden rounded border border-violet-500/30 bg-violet-500/20 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-violet-300 transition hover:bg-violet-500/30 sm:block">{canCast ? 'Force sync' : 'Sync to host'}</button>}
+            {playbackUrl && canCast && <button type="button" onClick={stopCasting} className="omni-button omni-button-sm danger-button">Stop</button>}
+            {playbackUrl && <button type="button" onClick={canCast ? forceSyncToRoom : () => broadcastEvent('request_sync')} className="omni-button omni-button-ghost omni-button-sm media-sync-button">{canCast ? 'Force sync' : 'Sync to host'}</button>}
           </div>
         </div>
 

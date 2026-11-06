@@ -12,6 +12,10 @@ import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
 import HomeOverview from '@/components/home/HomeOverview';
 import { OmniIcon } from '@/components/ui/OmniIcon';
+import RoomArt, { roomArtFor } from '@/components/ui/RoomArt';
+
+// Children rise in one after another (concept video: 45ms apart).
+const stagger = (index: number) => ({ ['--i' as string]: index });
 
 interface Friend {
   user_id: string;
@@ -106,7 +110,7 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
 
       {isProfileOpen && <div className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm" onClick={() => setIsProfileOpen(false)} />}
 
-      <aside className={`fixed top-0 right-0 z-40 flex h-full w-80 flex-col justify-between border-l border-white/10 bg-[#0e1122]/95 p-6 backdrop-blur-xl transition-transform duration-300 ${isProfileOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+      <aside className={`fixed top-0 right-0 z-40 flex h-full w-80 flex-col justify-between glass-strong rounded-none border-y-0 border-r-0 p-6 transition-transform duration-300 ${isProfileOpen ? 'translate-x-0' : 'translate-x-full'}`}>
         <div>
           <div className="mb-8 flex items-center justify-between">
             <h2 className="text-lg font-bold text-white">Profile menu</h2>
@@ -128,44 +132,59 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
       </aside>
 
       <main className="omni-main-content">
-        <section className="dashboard-grid fade-up">
-          <div className="dashboard-stack">
-            <div className="glass-panel dashboard-hero">
-              <p className="section-kicker">Good to see you</p>
-              <h2>Welcome back, {shortName}.</h2>
-              <p>Keep your momentum close. Find a room, start a focus session or pick up where you left off.</p>
-              <div className="dashboard-actions">
-                <Link href="/explore" className="omni-button omni-button-primary">Find a room <OmniIcon name="arrow" size={15} /></Link>
-                <Link href="/create-room" className="omni-button omni-button-ghost"><OmniIcon name="plus" size={15} /> Create room</Link>
+        <section className="home-grid">
+          <div className="home-main">
+            <div className="home-greet rise" style={stagger(0)}>
+              <div>
+                <p className="section-kicker">Good to see you</p>
+                <h2>Welcome back, {shortName}.</h2>
+                <p>Keep your momentum close. Find a room, start a focus session or pick up where you left off.</p>
+              </div>
+              <div className="home-greet-actions">
+                <Link href="/explore" className="omni-button omni-button-primary">Find a room <OmniIcon name="arrow" size={16} /></Link>
+                <Link href="/create-room" className="omni-button omni-button-ghost"><OmniIcon name="plus" size={16} /> Create room</Link>
               </div>
             </div>
 
-            <div className="dashboard-stat-grid" aria-label="Your OmniLume overview">
-              <div className="glass-card-ambient dashboard-stat"><OmniIcon name="users" size={17} /><strong>{dashboardLoading ? '—' : friends.length}</strong><span>Friends</span></div>
-              <div className="glass-card-ambient dashboard-stat"><OmniIcon name="rooms" size={17} /><strong>{dashboardLoading ? '—' : publicRooms.length}</strong><span>Public rooms</span></div>
-              <div className="glass-card-ambient dashboard-stat"><OmniIcon name="user" size={17} /><strong>{account.profileDetailsCompleted ? 'Ready' : 'Set up'}</strong><span>Profile</span></div>
-            </div>
-
-            <HomeOverview />
-
-            <section className="glass-panel glass-card-ambient">
-              <div className="section-header"><div><p className="section-kicker">Discover</p><h2 className="section-title">Public rooms to explore</h2></div><Link href="/explore" className="text-xs text-violet-300 hover:text-violet-200">View all</Link></div>
-              {dashboardLoading ? <p className="text-sm text-neutral-500">Loading public rooms...</p> : publicRooms.length === 0 ? <p className="text-sm text-neutral-500">There are no public rooms to show right now.</p> : <div className="grid gap-3 md:grid-cols-3">{publicRooms.slice(0, 3).map((room) => {
+            <section className="rise" style={stagger(1)} aria-labelledby="home-discover">
+              <div className="home-label"><h2 id="home-discover">Public rooms to explore <span className="section-kicker">Discover</span></h2><Link href="/explore">View all</Link></div>
+              {dashboardLoading ? <div className="home-rcards">{[0, 1, 2].map((index) => <div key={index} className="glass-card home-rcard home-rcard-skeleton" aria-hidden="true" />)}</div> : publicRooms.length === 0 ? <p className="glass-card home-empty">There are no public rooms to show right now.</p> : <div className="home-rcards">{publicRooms.slice(0, 3).map((room) => {
                 const memberCount = room.room_members[0]?.count ?? 0;
-                return <article key={room.id} className="glass-card-ambient dashboard-room-card"><div><span className="room-chip">Public</span><h3 className="mt-3 truncate font-semibold text-white">{room.name}</h3>{room.username && <p className="mt-1 text-xs text-violet-300">@{room.username}</p>}</div><div className="mt-5 flex items-center justify-between"><span className="inline-flex items-center gap-1 text-xs text-neutral-500"><OmniIcon name="users" size={13} /> {memberCount} joined</span><Link href="/explore" className="text-xs text-violet-300 hover:text-violet-200">Explore</Link></div></article>;
+                return (
+                  <article key={room.id} className="glass-card home-rcard lift glow">
+                    <div className="home-rprev"><RoomArt kind={roomArtFor(room.id)} /><span className="home-live">Public</span></div>
+                    <div className="home-rbody">
+                      <h3>{room.name}</h3>
+                      {room.username ? <p className="home-rmeta">@{room.username}</p> : <p className="home-rmeta">Public room</p>}
+                      <div className="home-rfoot"><span><OmniIcon name="users" size={14} /> {memberCount} joined</span><Link href="/explore">Explore</Link></div>
+                    </div>
+                  </article>
+                );
               })}</div>}
             </section>
 
+            <div className="home-stats rise" style={stagger(2)} aria-label="Your OmniLume overview">
+              <div className="glass-card home-stat"><span className="section-kicker">Friends</span><strong className="mono">{dashboardLoading ? '—' : friends.length}</strong></div>
+              <div className="glass-card home-stat"><span className="section-kicker">Public rooms</span><strong className="mono">{dashboardLoading ? '—' : publicRooms.length}</strong></div>
+              <div className="glass-card home-stat"><span className="section-kicker">Profile</span><strong>{account.profileDetailsCompleted ? 'Ready' : 'Set up'}</strong></div>
+            </div>
+
+            <div className="home-overview rise" style={stagger(3)}><HomeOverview /></div>
           </div>
 
-          <aside className="glass-card-ambient dashboard-profile-card">
-            <button onClick={() => setIsProfileOpen(true)} className="dashboard-profile-menu-button icon-button" aria-label="Open profile menu"><OmniIcon name="more" size={17} /></button>
-            <DashboardAvatar name={account.displayName} src={account.avatarUrl} />
-            <h3>{account.displayName}</h3><p>{account.username ? `@${account.username}` : account.email}</p>
-            <div className="mt-8 grid grid-cols-3 gap-2 border-y border-white/10 py-4 text-center"><div><strong className="block text-white">{dashboardLoading ? '—' : friends.length}</strong><span className="text-[10px] text-neutral-500">Friends</span></div><div><strong className="block text-white">{dashboardLoading ? '—' : publicRooms.length}</strong><span className="text-[10px] text-neutral-500">Public rooms</span></div><div><strong className="block text-white">{account.profileDetailsCompleted ? '✓' : '—'}</strong><span className="text-[10px] text-neutral-500">Profile</span></div></div>
-            <h4 className="mt-7 text-xs font-semibold uppercase tracking-[.18em] text-neutral-500">Friends</h4>
-            {dashboardLoading ? <p className="mt-4 text-sm text-neutral-500">Loading friends...</p> : friends.length === 0 ? <p className="mt-4 text-sm text-neutral-500">No friends yet. Connect from a profile when you are ready.</p> : <div className="mt-4 grid gap-3">{friends.slice(0, 5).map((friend) => <Link key={friend.user_id} href={`/profile/${friend.user_id}`} className="dashboard-friend-row"><DashboardAvatar name={friend.display_name || friend.username || 'OmniLume member'} src={friend.avatar_url} compact /><div className="min-w-0"><p className="truncate text-sm font-medium text-white">{friend.display_name || friend.username || 'OmniLume member'}</p><p className="truncate text-xs text-neutral-500">{friend.username ? `@${friend.username}` : 'Friend'}</p></div></Link>)}</div>}
-            {dashboardUnavailable && <p className="mt-5 text-xs text-neutral-500">Some dashboard information is temporarily unavailable. You can still explore rooms.</p>}
+          <aside className="home-aside">
+            <section className="glass-card home-friends rise" style={stagger(1)} aria-labelledby="home-friends">
+              <div className="home-label"><h2 id="home-friends">Friends</h2><span>{dashboardLoading ? '' : friends.length}</span></div>
+              {dashboardLoading ? <p className="home-muted">Loading friends...</p> : friends.length === 0 ? <p className="home-muted">No friends yet. Connect from a profile when you are ready.</p> : <div className="home-friend-list">{friends.slice(0, 5).map((friend) => <Link key={friend.user_id} href={`/profile/${friend.user_id}`} className="home-fr"><DashboardAvatar name={friend.display_name || friend.username || 'OmniLume member'} src={friend.avatar_url} compact /><span className="min-w-0"><strong>{friend.display_name || friend.username || 'OmniLume member'}</strong><small>{friend.username ? `@${friend.username}` : 'Friend'}</small></span><OmniIcon name="chevronRight" size={16} className="home-go" /></Link>)}</div>}
+            </section>
+
+            <section className="glass-card home-profile rise" style={stagger(2)} aria-label="Your profile">
+              <button onClick={() => setIsProfileOpen(true)} className="dashboard-profile-menu-button icon-button" aria-label="Open profile menu"><OmniIcon name="more" size={17} /></button>
+              <DashboardAvatar name={account.displayName} src={account.avatarUrl} />
+              <h3>{account.displayName}</h3><p>{account.username ? `@${account.username}` : account.email}</p>
+              <div className="home-profile-stats"><div><strong className="mono">{dashboardLoading ? '—' : friends.length}</strong><span>Friends</span></div><div><strong className="mono">{dashboardLoading ? '—' : publicRooms.length}</strong><span>Public rooms</span></div><div><strong>{account.profileDetailsCompleted ? '✓' : '—'}</strong><span>Profile</span></div></div>
+              {dashboardUnavailable && <p className="home-muted">Some dashboard information is temporarily unavailable. You can still explore rooms.</p>}
+            </section>
           </aside>
         </section>
       </main>

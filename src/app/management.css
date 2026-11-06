@@ -12,14 +12,20 @@
 .activity-text { min-width: 0; color: #e4e4e7; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .activity-time { flex: none; color: var(--omni-muted); font-size: 10px; }
 
-.discover-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 14px; margin-bottom: 18px; }
-.discover-scope { display: flex; gap: 8px; }
-.discover-field { display: grid; gap: 4px; min-width: 140px; flex: 1 1 140px; font-size: 11px; color: var(--omni-muted); }
+.discover-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 8px; }
+.discover-scope { display: flex; flex-wrap: wrap; gap: 8px; }
+.discover-sep { width: 1px; height: 22px; margin: 0 4px; background: var(--omni-line); }
+.discover-selects { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.discover-field { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--omni-muted); }
+.discover-field .omni-input { width: auto; min-width: 96px; height: 34px; padding: 0 10px; border-radius: 999px; font-size: 13px; }
+.discover-field input.omni-input { width: 84px; min-width: 0; }
 .discover-reset { flex: none; }
 
-.overview-block { display: block; }
+.overview-block { display: block; padding: 18px 20px; border-radius: 18px; }
+.overview-cal { display: grid; width: 40px; height: 44px; flex: none; place-content: center; border: 1px solid var(--omni-line-soft); border-radius: 9px; background: rgba(255, 255, 255, .07); color: var(--omni-muted); font-size: 10px; line-height: 1.2; text-align: center; text-transform: uppercase; }
+.overview-cal b { display: block; color: var(--omni-text); font-size: 16px; font-weight: 500; }
 .overview-buckets { display: grid; gap: 14px; }
-.overview-bucket-title { margin: 0 0 6px; color: var(--omni-muted); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.overview-bucket-title { margin: 0 0 6px; color: var(--omni-muted); font-size: 12px; font-weight: 500; }
 .overview-bucket-title span { margin-left: 4px; color: #a1a1aa; }
 .overview-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
 .overview-row, .overview-event { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--omni-line-soft); border-radius: 12px; background: rgba(255, 255, 255, .03); padding: 10px 12px; }
@@ -43,6 +49,5 @@
 
 @media (max-width: 640px) {
   .room-pulse-bar { margin-inline: 10px; }
-  .discover-filters { padding: 12px; }
-  .discover-field { flex-basis: 45%; }
+  .discover-selects { margin-left: 0; }
 }

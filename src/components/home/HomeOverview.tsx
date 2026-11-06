@@ -108,6 +108,7 @@ export default function HomeOverview() {
             <ul className="overview-list">
               {data.map((event) => (
                 <li key={event.event_id} className="overview-event">
+                  <span className="overview-cal" aria-hidden="true">{new Date(event.starts_at).toLocaleDateString([], { weekday: 'short' })}<b>{new Date(event.starts_at).getDate()}</b></span>
                   <Link href={`/room/${event.room_id}`} className="overview-event-main">
                     <strong className="block truncate text-sm text-white">{event.title}</strong>
                     <small className="text-xs text-neutral-500">{event.room_name} · <time dateTime={event.starts_at}>{new Date(event.starts_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time></small>
