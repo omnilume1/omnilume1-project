@@ -4,8 +4,8 @@
    surface follows the tokens without per-page copies. */
 @theme {
   --color-black: #0d0a13;
-  --color-neutral-50: #f7f5fc; --color-neutral-100: #f3f0fa; --color-neutral-200: #e4dff0; --color-neutral-300: #cdc6dc; --color-neutral-400: #a9a1bd; --color-neutral-500: #8f88a3; --color-neutral-600: #6c6582; --color-neutral-700: #3d3550; --color-neutral-800: #2a2438; --color-neutral-900: #1e1a29; --color-neutral-950: #15111e;
-  --color-zinc-50: #f7f5fc; --color-zinc-100: #f3f0fa; --color-zinc-200: #e4dff0; --color-zinc-300: #cdc6dc; --color-zinc-400: #a9a1bd; --color-zinc-500: #8f88a3; --color-zinc-600: #6c6582; --color-zinc-700: #3d3550; --color-zinc-800: #2a2438; --color-zinc-900: #1e1a29; --color-zinc-950: #15111e;
+  --color-neutral-50: #f7f5fc; --color-neutral-100: #f3f0fa; --color-neutral-200: #e4dff0; --color-neutral-300: #cdc6dc; --color-neutral-400: #b3abc6; --color-neutral-500: #9c95b1; --color-neutral-600: #6c6582; --color-neutral-700: #3d3550; --color-neutral-800: #2a2438; --color-neutral-900: #1e1a29; --color-neutral-950: #15111e;
+  --color-zinc-50: #f7f5fc; --color-zinc-100: #f3f0fa; --color-zinc-200: #e4dff0; --color-zinc-300: #cdc6dc; --color-zinc-400: #b3abc6; --color-zinc-500: #9c95b1; --color-zinc-600: #6c6582; --color-zinc-700: #3d3550; --color-zinc-800: #2a2438; --color-zinc-900: #1e1a29; --color-zinc-950: #15111e;
   --color-indigo-300: #cfc3ff; --color-indigo-400: #b9a8ff; --color-indigo-500: #9d86ff; --color-indigo-600: #7c5cff; --color-indigo-700: #6447e0;
 }
 
@@ -20,9 +20,10 @@
   --omni-line-soft: rgba(255, 255, 255, 0.07);
   --omni-text: #f3f0fa;
   --omni-text-2: #bdb5d0;
-  --omni-muted: #8f88a3;
-  --omni-faint: #857e99;
-  --omni-dim: #564e6b;
+  /* text-3 and dim sit a step lighter than the concept so small text stays AA on glass */
+  --omni-muted: #a39cb8;
+  --omni-faint: #948daa;
+  --omni-dim: #746c8f;
   --omni-accent: #b9a8ff;
   --omni-accent-ink: #15111e;
   --omni-purple: #8b6cff;
@@ -66,7 +67,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .glass, .glass-card, .glass-panel, .glass-card-ambient, .public-feature-card, .glass-strong, .messages-list, .messages-pane { background: var(--omni-frost-solid); }
 }
 /* Pointer light: GlassPointerLight sets --mx/--my on the hovered .glow surface. */
-.glow { position: relative; }
+/* The host must be positioned (relative, absolute or fixed) for the light to sit on it. */
 .glow::before { content: ""; position: absolute; inset: -1px; z-index: 3; border-radius: inherit; padding: 1px; pointer-events: none; background: radial-gradient(240px circle at var(--mx, -999px) var(--my, -999px), rgba(206,192,255,.6), transparent 70%); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
 .glow::after { content: ""; position: absolute; inset: 0; z-index: 3; border-radius: inherit; pointer-events: none; background: radial-gradient(380px circle at var(--mx, -999px) var(--my, -999px), rgba(185,168,255,.075), transparent 65%); }
 .lift { transition: transform 220ms var(--omni-ease), border-color 220ms ease; }

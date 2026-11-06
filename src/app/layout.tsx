@@ -34,6 +34,8 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      // The landing's once-per-session intro script sets data-intro-seen before hydration.
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
     >
       <body className="min-h-full bg-background font-sans text-foreground">
