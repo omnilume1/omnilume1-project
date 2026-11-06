@@ -85,6 +85,9 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
   }, [activeIndex]);
 
   return (
+    <>
+    {/* Where a pointer can hover, the dock stays tucked below the screen until the pointer reaches this strip or the dock (app.css). */}
+    <div className="dock-edge" aria-hidden="true" />
     <div className="floating-dock-wrap">
       <nav className="floating-dock" aria-label="OmniLume navigation">
         <span className="dock-highlight" ref={highlightRef} aria-hidden="true" data-hidden />
@@ -114,6 +117,7 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
         })}
       </nav>
     </div>
+    </>
   );
 }
 
