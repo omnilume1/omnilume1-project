@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512" role="img" aria-label="OmniLume Orbit">
+  <defs>
+    <linearGradient id="et" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d1729"/><stop offset="1" stop-color="#0b0911"/></linearGradient>
+    <radialGradient id="es" cx=".3" cy=".08" r=".9"><stop offset="0" stop-color="#8f78ff" stop-opacity=".28"/><stop offset="1" stop-color="#8f78ff" stop-opacity="0"/></radialGradient>
+    <radialGradient id="eg"><stop offset="0" stop-color="#ece6ff" stop-opacity=".95"/><stop offset=".45" stop-color="#b9a8ff" stop-opacity=".45"/><stop offset="1" stop-color="#b9a8ff" stop-opacity="0"/></radialGradient>
+    <radialGradient id="ec"><stop offset="0" stop-color="#b9a8ff" stop-opacity=".32"/><stop offset="1" stop-color="#b9a8ff" stop-opacity="0"/></radialGradient>
+    <linearGradient id="er" gradientUnits="userSpaceOnUse" x1="16" y1="48" x2="48" y2="16"><stop offset="0" stop-color="#4b31d4"/><stop offset=".55" stop-color="#8f78ff"/><stop offset="1" stop-color="#e8e1ff"/></linearGradient>
+    <linearGradient id="er2" gradientUnits="userSpaceOnUse" x1="48" y1="48" x2="16" y2="16"><stop offset="0" stop-color="#9a84ff"/><stop offset="1" stop-color="#efeaff"/></linearGradient><radialGradient id="eo" cx=".38" cy=".32" r=".8"><stop offset="0" stop-color="#e8e1ff"/><stop offset=".45" stop-color="#8f78ff"/><stop offset="1" stop-color="#3b25b8"/></radialGradient>
+  </defs>
+  <rect x="1" y="1" width="62" height="62" rx="18" fill="url(#et)"/>
+  <rect x="1" y="1" width="62" height="62" rx="18" fill="url(#es)"/>
+  <rect x=".75" y=".75" width="62.5" height="62.5" rx="18.25" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="1.5"/>
+  <g transform="rotate(-28 32 32)" fill="none" stroke-linecap="round">
+    <path d="M10.5 32A21.5 9.5 0 0 1 53.5 32" stroke="url(#er)" stroke-width="3" stroke-opacity=".35"/>
+  </g>
+  <circle cx="32" cy="32" r="10.5" fill="url(#eo)"/>
+  <g transform="rotate(-28 32 32)" fill="none" stroke-linecap="round">
+    <path d="M10.5 32A21.5 9.5 0 0 0 53.5 32" stroke="url(#er)" stroke-width="3.6"/>
+    <circle cx="48.9" cy="38.1" r="8" fill="url(#eg)" stroke="none"/>
+    <circle cx="48.9" cy="38.1" r="3.3" fill="#fff" stroke="none"/>
+  </g>
+</svg>
