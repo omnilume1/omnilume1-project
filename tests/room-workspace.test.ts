@@ -62,7 +62,7 @@ test('one desk window per feature; chat, media and study stay mounted while clos
   }
   const desk = read('src/components/room/RoomDesk.tsx');
   assert.match(desk, /windows\.filter\(\(w\) => w\.open \|\| w\.keepMounted\)/, 'closed kept-mounted windows are still rendered');
-  const css = read('src/app/globals.css');
+  const css = read('src/app/app.css');
   assert.match(css, /\.desk-win\[data-open="false"\] \{ visibility: hidden; pointer-events: none; \}/, 'closed windows are hidden, not unmounted');
   assert.match(css, /@media \(max-width: 767px\) \{[^}]*\n  \.room-shell \{ height: auto; min-height: 100dvh; overflow: visible; \}/, 'phones scroll one stacked column');
 });

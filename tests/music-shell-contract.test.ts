@@ -28,8 +28,7 @@ test('music CSS is scoped to .music-app and globals.css is untouched', () => {
   // Lightning CSS merges a hand-written -webkit- copy with the standard one and keeps only the prefix (Chrome then shows no blur).
   assert.doesNotMatch(css, /-webkit-backdrop-filter/);
   assert.match(css, /--mu-key: #b9a8ff/);
-  const globals = read('src/app/globals.css');
-  assert.doesNotMatch(globals, /music-app|--mu-/);
+  for (const shared of ['src/app/globals.css', 'src/app/app.css']) assert.doesNotMatch(read(shared), /music-app|--mu-/);
 });
 
 test('server pages validate params with plain-module values, not client-module exports', () => {
@@ -39,12 +38,18 @@ test('server pages validate params with plain-module values, not client-module e
   assert.doesNotMatch(read('src/lib/music-model.ts'), /^'use client'/);
 });
 
-test('DM Sans loads only in the music layout; the player provider lives in the root layout', () => {
+test('DM Sans loads only in the music layout; the player provider wraps every page from the root layout', () => {
   assert.match(read('src/app/music/layout.tsx'), /DM_Sans\(/);
   const root = read('src/app/layout.tsx');
   assert.doesNotMatch(root, /DM_Sans/);
-  assert.match(root, /<MusicPlayerProvider>/);
-  assert.match(root, /<GlobalMiniPlayer \/>/);
+  assert.match(root, /<AppProviders>\{children\}<\/AppProviders>/);
+  // Off the landing the providers mount and then stay mounted, so playback survives every navigation.
+  const gate = read('src/components/AppProviders.tsx');
+  assert.match(gate, /import\('@\/components\/music\/MusicProviders'\)/);
+  assert.match(gate, /if \(!needed && !onLanding\) setNeeded\(true\)/);
+  const providers = read('src/components/music/MusicProviders.tsx');
+  assert.match(providers, /<MusicPlayerProvider>/);
+  assert.match(providers, /<GlobalMiniPlayer \/>/);
 });
 
 const key = (overrides: Partial<ShortcutEvent>): ShortcutEvent => ({ key: ' ', metaKey: false, ctrlKey: false, altKey: false, target: { tagName: 'BODY' }, ...overrides });

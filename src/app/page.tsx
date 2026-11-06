@@ -1,11 +1,11 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import type { CSSProperties, ReactNode } from 'react';
-import { getCurrentAccount } from '@/lib/current-account';
+import { Suspense, type CSSProperties, type ReactNode } from 'react';
 import { OmniIcon, type OmniIconName } from '@/components/ui/OmniIcon';
 import { OmniMark } from '@/components/ui/OmniMarkSprite';
 import OmniIntro from '@/components/ui/OmniIntro';
-import NotificationBell from '@/components/ui/NotificationBell';
+import LandingAccount from '@/components/landing/LandingAccount';
+import { ACCOUNT_HINT_SCRIPT } from '@/lib/session-hint';
 import HeroDesk, { AlbumArt } from '@/components/landing/HeroDesk';
 import FeatureCards from '@/components/landing/FeatureCards';
 import WhatElse from '@/components/landing/WhatElse';
@@ -17,11 +17,6 @@ import styles from './landing.module.css';
 const INTRO_ONCE = "try{if(sessionStorage.getItem('ol-intro'))document.documentElement.dataset.introSeen='';else sessionStorage.setItem('ol-intro','1')}catch(e){}";
 
 const d = (seconds: number) => ({ ['--d' as string]: `${seconds}s` }) as CSSProperties;
-
-function initials(value: string) {
-  const parts = value.trim().split(/\s+/).filter(Boolean);
-  return (parts.slice(0, 2).map((part) => part[0]).join('') || 'O').toUpperCase();
-}
 
 function Card({ icon, name, desc, tint, glow, children, visAlign }: { icon: OmniIconName; name: string; desc: string; tint: string; glow: string; children: ReactNode; visAlign?: 'start' }) {
   return (
@@ -42,14 +37,12 @@ const THUMBS = [
   { src: '/landing/explore.jpg', label: 'Find your next room' },
 ];
 
-export default async function Home() {
-  const account = await getCurrentAccount();
-  const startHref = account ? (account.profileDetailsCompleted ? '/home' : '/profile/setup') : '/login';
-  const profileHref = account?.profileDetailsCompleted ? '/profile' : '/profile/setup';
-
+// Static: no per-request work, so the CDN serves it. Member links go to app pages, where the proxy
+// sends anyone without a finished profile to setup and anyone signed out to sign in.
+export default function Home() {
   return (
     <div className={styles.page} data-landing>
-      <script dangerouslySetInnerHTML={{ __html: INTRO_ONCE }} />
+      <script dangerouslySetInnerHTML={{ __html: INTRO_ONCE + ACCOUNT_HINT_SCRIPT }} />
       <div className={styles.intro} aria-hidden="true"><OmniIntro /></div>
       <LandingMotion />
 
@@ -65,15 +58,10 @@ export default async function Home() {
             <a href="#ai">AI</a>
           </nav>
           <div className={styles.navRight}>
-            {account ? (
-              <>
-                <NotificationBell />
-                <Link href={profileHref} className="avatar avatar-small" aria-label="Open your profile" title="Profile">
-                  {account.avatarUrl ? <img src={account.avatarUrl} alt="" width={34} height={34} /> : initials(account.displayName)}
-                </Link>
-              </>
-            ) : <Link href="/login" className={styles.navLink}>Sign in</Link>}
-            <Link href={startHref} className={`${styles.btn} ${styles.btnPrimary} ${styles.btnSm}`}>{account ? 'Go to your space' : 'Get started'}</Link>
+            <Link href="/login" className={`${styles.navLink} ${styles.guestOnly}`}>Sign in</Link>
+            <LandingAccount />
+            <Link href="/login" className={`${styles.btn} ${styles.btnPrimary} ${styles.btnSm} ${styles.guestOnly}`}>Get started</Link>
+            <Link href="/home" className={`${styles.btn} ${styles.btnPrimary} ${styles.btnSm} ${styles.memberOnly}`}>Go to your space</Link>
           </div>
         </header>
 
@@ -83,20 +71,23 @@ export default async function Home() {
             <div>
               <p className={styles.lede}>Open a room and everyone stays in step: one focus timer, one synced video, the same song at the same second, with chat on the side.</p>
               <div className={styles.actions}>
-                <Link href={startHref} className={`${styles.btn} ${styles.btnPrimary}`}>{account ? 'Go to your space' : 'Get started'} <OmniIcon name="arrow" size={16} /></Link>
+                <Link href="/login" className={`${styles.btn} ${styles.btnPrimary} ${styles.guestOnly}`}>Get started <OmniIcon name="arrow" size={16} /></Link>
+                <Link href="/home" className={`${styles.btn} ${styles.btnPrimary} ${styles.memberOnly}`}>Go to your space <OmniIcon name="arrow" size={16} /></Link>
                 <Link href="/explore" className={`${styles.btn} ${styles.btnSecondary}`}>Explore rooms</Link>
               </div>
             </div>
           </div>
 
           <div className={styles.deskWrap}>
-            <HeroDesk />
+            {/* Each Suspense boundary hydrates as its own task, so no single long task blocks input. */}
+            <Suspense><HeroDesk /></Suspense>
             <div className={`${styles.caption} mono`}><span>Live preview. Drag a window, or pick another page</span><span>Real OmniLume screens</span></div>
           </div>
         </main>
       </div>
 
       {/* 1. Every feature gets its own card */}
+      <Suspense>
       <section id="cards" className={`${styles.wrap} ${styles.cards}`} aria-label="Features">
         <FeatureCards heading={<h2 className={styles.say}>There is a room for that.<span>Every tool your group needs, already inside the room.</span></h2>}>
           <Card icon="timer" name="Focus timer" desc="Run one Pomodoro timer for the whole room, so breaks start together." tint="#2a2160" glow="rgba(124,92,255,.32)">
@@ -154,8 +145,10 @@ export default async function Home() {
           </Card>
         </FeatureCards>
       </section>
+      </Suspense>
 
       {/* 2. AI (planned) */}
+      <Suspense>
       <section id="ai" className={`${styles.wrap} ${styles.ai}`} aria-labelledby="ai-title">
         <div className={`${styles.kicker} mono`} data-reveal>OmniLume AI · coming soon</div>
         <h2 id="ai-title" className={styles.big} data-reveal style={d(0.12)}>Meet your room companion</h2>
@@ -202,8 +195,10 @@ export default async function Home() {
         </div>
         <p className={styles.soon} data-reveal style={d(0.2)}>Planned feature. Not available yet</p>
       </section>
+      </Suspense>
 
       {/* 3. What else can OmniLume do */}
+      <Suspense>
       <section id="more" className={`${styles.wrap} ${styles.more}`} aria-label="What else OmniLume does">
         <WhatElse>
           <div data-reveal>
@@ -241,13 +236,15 @@ export default async function Home() {
           </div>
         </WhatElse>
       </section>
+      </Suspense>
 
       {/* 4. Community + core features reel */}
+      <Suspense>
       <section id="loop" className={`${styles.wrap} ${styles.loop}`} aria-label="Community">
         <h2 className={`${styles.say} ${styles.center}`} data-reveal>Find your people.<span>Join a public room or start your own, then invite your friends.</span></h2>
         <div className={styles.loopCards} data-reveal style={d(0.2)}>
           <Link href="/explore" className={`${styles.lc} glass glow`}><div className={styles.lcH}><OmniIcon name="globe" size={20} />Explore rooms<small className="mono">public · invite · code</small></div><p>Search public rooms by name or topic, or join with an invite link from a friend.</p><b>Explore →</b></Link>
-          <Link href={account ? '/create-room' : '/login'} className={`${styles.lc} glass glow`}><div className={styles.lcH}><OmniIcon name="plus" size={20} />Create a room<small className="mono">permanent or temporary</small></div><p>Pick a lifespan, choose who can join and share the link. You are the host.</p><b>Create →</b></Link>
+          <Link href="/create-room" className={`${styles.lc} glass glow`}><div className={styles.lcH}><OmniIcon name="plus" size={20} />Create a room<small className="mono">permanent or temporary</small></div><p>Pick a lifespan, choose who can join and share the link. You are the host.</p><b>Create →</b></Link>
         </div>
         <div className={styles.thumbsWrap} data-reveal style={d(0.45)}>
           <div className={styles.thumbs} data-anim>
@@ -261,7 +258,9 @@ export default async function Home() {
         </div>
         <p className={styles.loopFoot} data-reveal style={d(0.6)}>Real screens from OmniLume. Everything here works today.</p>
       </section>
+      </Suspense>
 
+      <Suspense>
       <div className={styles.footArea}>
         <Stripes count={10} seed={19} className={styles.stripesBottom} />
         <footer className={styles.footer}>
@@ -277,6 +276,7 @@ export default async function Home() {
           </div>
         </footer>
       </div>
+      </Suspense>
     </div>
   );
 }

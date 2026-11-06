@@ -1,44 +1,108 @@
 'use client';
 
-import Image from 'next/image';
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { OmniIcon, type OmniIconName } from '@/components/ui/OmniIcon';
 import { clampPoint } from '@/lib/desk-layout';
 import styles from '@/app/landing.module.css';
+import { mmss } from './LandingMotion';
+import { ROOM_SCREEN } from './heroScreenRoom';
+import './hero-app.css';
 
 type WinKey = 'main' | 'music' | 'chat';
 type Point = { x: number; y: number };
+type MoreKey = 'study' | 'home' | 'music';
 
 // The demo desk is laid out on a fixed 1200×680 stage and scaled to fit.
 const STAGE = { w: 1200, h: 680 };
 const START: Record<WinKey, Point> = { main: { x: 32, y: 40 }, music: { x: 904, y: 372 }, chat: { x: 868, y: 72 } };
-const ROOMS: Array<{ icon: OmniIconName; name: string; meta: string; title: string; src: string; alt: string }> = [
-  { icon: 'message', name: 'gg sh', meta: 'Room chat', title: 'gg sh · Room', src: '/landing/room.jpg', alt: 'A room with a synced film, a focus timer and the room chat' },
-  { icon: 'book', name: 'Study workspace', meta: 'Timer · notes · whiteboard', title: 'gg sh · Study workspace', src: '/landing/study.jpg', alt: 'A study room with the whiteboard, shared notes and focus timer tiled' },
-  { icon: 'home', name: 'Home', meta: 'Rooms and friends', title: 'Home', src: '/landing/home.jpg', alt: 'Home with your rooms, focus history and friends' },
-  { icon: 'music', name: 'Music', meta: 'Library · Listen Together', title: 'OmniLume Music', src: '/landing/music.jpg', alt: 'OmniLume Music with uploads and Listen together' },
+const ROOMS: Array<{ key: 'room' | MoreKey; icon: OmniIconName; name: string; meta: string; title: string; alt: string }> = [
+  { key: 'room', icon: 'message', name: 'gg sh', meta: 'Room chat', title: 'gg sh · Room', alt: 'A room with a synced film, a focus timer and the room chat' },
+  { key: 'study', icon: 'book', name: 'Study workspace', meta: 'Timer · notes · whiteboard', title: 'gg sh · Study workspace', alt: 'A study room with the whiteboard, shared notes and focus timer tiled' },
+  { key: 'home', icon: 'home', name: 'Home', meta: 'Rooms and friends', title: 'Home', alt: 'Home with your rooms, focus history and friends' },
+  { key: 'music', icon: 'music', name: 'Music', meta: 'Library · Listen Together', title: 'OmniLume Music', alt: 'OmniLume Music with uploads and Listen together' },
 ];
+
+// The first screen ships with the page; the other three load once it is idle (or on the first pick).
+let moreScreens: Promise<Readonly<Record<MoreKey, string>>> | null = null;
+const loadMore = () => (moreScreens ??= import('./heroScreensMore').then((mod) => mod.MORE_SCREENS));
 
 export default function HeroDesk() {
   const [pos, setPos] = useState(START);
   const [order, setOrder] = useState<WinKey[]>(['main', 'music', 'chat']);
   const [lifted, setLifted] = useState<WinKey | null>(null);
-  const [screen, setScreen] = useState({ cur: 0, prev: 0 });
+  // n counts switches: the current screen is keyed by it, so each pick mounts fresh and fades in over the last.
+  const [screen, setScreen] = useState({ cur: 0, prev: 0, n: 0 });
+  const [more, setMore] = useState<Readonly<Record<MoreKey, string>> | null>(null);
   const deskRef = useRef<HTMLDivElement>(null);
+  const screensRef = useRef<HTMLDivElement>(null);
   const winRefs = useRef<Partial<Record<WinKey, HTMLDivElement | null>>>({});
   const scaleRef = useRef(1);
+  const elapsedRef = useRef(0);
   const dragRef = useRef<{ key: WinKey; id: number; sx: number; sy: number; ox: number; oy: number; x: number; y: number; frame: number; size: { w: number; h: number } } | null>(null);
 
   useEffect(() => {
     const desk = deskRef.current;
-    if (!desk) return;
-    const observer = new ResizeObserver(([entry]) => {
-      scaleRef.current = Math.min(1, entry.contentRect.width / STAGE.w) || 1;
-      desk.style.setProperty('--s', String(scaleRef.current));
+    const screens = screensRef.current;
+    if (!desk || !screens) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target === screens) {
+          screens.style.setProperty('--ss', String(entry.contentRect.width / 1440));
+          continue;
+        }
+        scaleRef.current = Math.min(1, entry.contentRect.width / STAGE.w) || 1;
+        desk.style.setProperty('--s', String(scaleRef.current));
+      }
     });
     observer.observe(desk);
+    observer.observe(screens);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const start = () => loadMore().then((loaded) => { if (!cancelled) setMore(loaded); });
+    // Safari has no requestIdleCallback.
+    const idle = typeof window.requestIdleCallback === 'function';
+    const id = idle ? window.requestIdleCallback(start, { timeout: 4000 }) : window.setTimeout(start, 2500);
+    return () => {
+      cancelled = true;
+      if (idle) window.cancelIdleCallback(id);
+      else window.clearTimeout(id);
+    };
+  }, []);
+
+  // Clocks in the app screens tick once a second while the desk is on screen.
+  const applyTicks = useCallback(() => {
+    screensRef.current?.querySelectorAll<HTMLElement>('[data-tick]').forEach((el) => {
+      el.textContent = mmss(Number(el.dataset.tick) + Number(el.dataset.step) * elapsedRef.current);
+    });
+  }, []);
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!screensRef.current?.hasAttribute('data-playing')) return;
+      elapsedRef.current += 1;
+      applyTicks();
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [applyTicks]);
+  // A screen mounted mid-visit shows the same moment as the rest of the desk.
+  useLayoutEffect(() => {
+    applyTicks();
+    const bar = screensRef.current?.querySelector<HTMLElement>('[data-state="cur"] #ha-plProg');
+    if (bar) bar.style.animationDelay = `${-elapsedRef.current}s`;
+  }, [screen.n, more, applyTicks]);
+
+  const pick = (index: number) => {
+    const go = () => setScreen((current) => (current.cur === index ? current : { cur: index, prev: current.cur, n: current.n + 1 }));
+    if (index === 0 || more) go();
+    else loadMore().then((loaded) => { setMore(loaded); go(); });
+  };
+  const screenHtml = (index: number) => {
+    const key = ROOMS[index].key;
+    return key === 'room' ? ROOM_SCREEN : more?.[key] ?? '';
+  };
+  const layers: Array<[index: number, key: number]> = screen.n ? [[screen.prev, screen.n - 1], [screen.cur, screen.n]] : [[screen.cur, 0]];
 
   const raise = (key: WinKey) => setOrder((current) => (current[current.length - 1] === key ? current : [...current.filter((k) => k !== key), key]));
   const sizeOf = (key: WinKey) => ({ w: winRefs.current[key]?.offsetWidth ?? 300, h: winRefs.current[key]?.offsetHeight ?? 280 });
@@ -110,7 +174,7 @@ export default function HeroDesk() {
                 <div key={room.name} className={styles.sideGroup}>
                   {index === 0 && <div className={styles.sideLabel}>Your room</div>}
                   {index === 2 && <div className={styles.sideLabel}>Your space</div>}
-                  <button type="button" className={styles.room} aria-pressed={screen.cur === index} onClick={() => setScreen((current) => (current.cur === index ? current : { cur: index, prev: current.cur }))}>
+                  <button type="button" className={styles.room} aria-pressed={screen.cur === index} onClick={() => pick(index)}>
                     <OmniIcon name={room.icon} size={16} className={styles.roomIcon} />
                     <span className={styles.roomName}>{room.name}</span>
                     <span className={styles.roomMeta}>{room.meta}</span>
@@ -118,22 +182,15 @@ export default function HeroDesk() {
                 </div>
               ))}
             </nav>
-            <div className={styles.screens}>
-              {ROOMS.map((room, index) => (
-                <Image
-                  key={room.src}
-                  src={room.src}
-                  alt={index === screen.cur ? room.alt : ''}
-                  aria-hidden={index !== screen.cur}
-                  fill
-                  sizes="(max-width: 767px) 100vw, 720px"
-                  priority={index === 0}
-                  fetchPriority={index === 0 ? 'high' : 'low'}
-                  className={styles.screen}
-                  data-state={index === screen.cur ? 'cur' : index === screen.prev ? 'prev' : 'off'}
-                />
+            {/* The app itself, drawn live at 1440×900 and scaled in; screen readers get the one-line description. */}
+            <div ref={screensRef} className={styles.screens} aria-hidden="true" data-anim>
+              {layers.map(([index, key]) => (
+                <div key={key} className={styles.screen} data-state={key === screen.n ? 'cur' : 'prev'} data-enter={key === screen.n && key > 0 ? '' : undefined}>
+                  <div className={`ha-root ${styles.screenFit}`} dangerouslySetInnerHTML={{ __html: screenHtml(index) }} />
+                </div>
               ))}
             </div>
+            <span className="sr-only">{ROOMS[screen.cur].alt}</span>
           </div>
         </div>
 

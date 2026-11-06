@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 
-const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
+export const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
 
 // All landing motion bookkeeping in one place, with no React state:
 // - [data-reveal] rises in once when it scrolls into view (IntersectionObserver).
