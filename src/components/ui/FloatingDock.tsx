@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
-import OmniLogo from '@/components/ui/OmniLogo';
+import { OmniMark } from '@/components/ui/OmniMarkSprite';
 import { OmniIcon, type OmniIconName } from '@/components/ui/OmniIcon';
 import { usePersonalMessageNotifications } from '@/hooks/usePersonalMessageNotifications';
 
@@ -17,12 +17,16 @@ export interface FloatingDockItem {
 const defaultItems: FloatingDockItem[] = [
   { title: 'Home', href: '/home', icon: 'home' },
   { title: 'Search', href: '/search', icon: 'search' },
-  { title: 'Rooms', href: '/explore', icon: 'rooms' },
+  { title: 'Rooms', href: '/explore', icon: 'compass' },
   { title: 'Create', href: '/create-room', icon: 'plus', emphasis: true },
   { title: 'Messages', href: '/messages', icon: 'message' },
   { title: 'Music', href: '/music', icon: 'music' },
   { title: 'Profile', href: '/profile', icon: 'user' },
 ];
+
+// Each page mounts its own dock, so the highlight's last position is kept here
+// and the next dock slides from it instead of jumping.
+const highlightMemory = { x: -1 };
 
 function playDockClick() {
   if (typeof window === 'undefined') return;
@@ -45,83 +49,69 @@ function playDockClick() {
   }
 }
 
+function isActive(item: FloatingDockItem, pathname: string) {
+  if (item.href.includes('#')) return false;
+  if (item.href === '/home') return pathname === '/home';
+  return pathname.startsWith(item.href.split('#')[0]);
+}
+
 export function FloatingDock({ items = defaultItems }: { items?: FloatingDockItem[] }) {
   const pathname = usePathname();
   const itemRefs = useRef<Array<HTMLAnchorElement | null>>([]);
+  const highlightRef = useRef<HTMLSpanElement>(null);
   const { unreadCount } = usePersonalMessageNotifications();
+  const activeIndex = items.findIndex((item) => isActive(item, pathname));
 
-  const resetMagnification = useCallback(() => {
-    itemRefs.current.forEach((element) => {
-      element?.style.setProperty('--dock-scale', '1');
-      element?.style.setProperty('--dock-lift', '0px');
-      element?.style.setProperty('--dock-z-index', element?.dataset.dockEmphasis === 'true' ? '5' : '1');
-    });
-  }, []);
-
-  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
-    if (event.pointerType !== 'mouse') return;
-
-    const dockRect = event.currentTarget.getBoundingClientRect();
-    const pointerX = event.clientX - dockRect.left;
-
-    itemRefs.current.forEach((element) => {
-      if (!element) return;
-      const isCreate = element.dataset.dockEmphasis === 'true';
-      const center = element.offsetLeft + (element.offsetWidth / 2);
-      const distance = Math.abs(pointerX - center);
-      const proximity = Math.max(0, 1 - (distance / 165));
-
-      // Every item — including the central create control — shares the same
-      // distance-based scale and lift. The create control only keeps the top
-      // stack level, so magnified neighbours slide beneath it instead of
-      // clipping over it.
-      element.style.setProperty('--dock-scale', (1 + (proximity * 0.25)).toFixed(3));
-      element.style.setProperty('--dock-lift', `${Math.round(proximity * -7)}px`);
-      element.style.setProperty('--dock-z-index', isCreate ? '5' : proximity > 0.04 ? '2' : '1');
-    });
-  }, []);
+  useLayoutEffect(() => {
+    const highlight = highlightRef.current;
+    const active = itemRefs.current[activeIndex];
+    if (!highlight) return;
+    if (!active) { highlight.dataset.hidden = ''; return; }
+    delete highlight.dataset.hidden;
+    const x = active.offsetLeft;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (highlightMemory.x >= 0 && highlightMemory.x !== x && !reduced) {
+      // Start where the previous page's dock left off, then slide.
+      highlight.style.transition = 'none';
+      highlight.style.transform = `translateX(${highlightMemory.x}px)`;
+      void highlight.offsetWidth;
+      highlight.style.transition = '';
+    }
+    highlight.style.transform = `translateX(${x}px)`;
+    highlightMemory.x = x;
+    const onResize = () => { highlightMemory.x = active.offsetLeft; highlight.style.transform = `translateX(${active.offsetLeft}px)`; };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [activeIndex]);
 
   return (
     <div className="floating-dock-wrap">
-      <nav className="floating-dock" aria-label="OmniLume navigation" onPointerMove={handlePointerMove} onPointerLeave={resetMagnification}>
-        <div className="dock-brand"><OmniLogo compact /></div>
-        <div className="dock-items">
-          {items.map((item, index) => {
-            const active = item.href.includes('#')
-              ? false
-              : item.href === '/home'
-              ? pathname === '/home'
-              : pathname.startsWith(item.href.split('#')[0]);
-            return (
-              <Link
-                key={item.title}
-                ref={(element) => { itemRefs.current[index] = element; }}
-                href={item.href}
-                data-dock-emphasis={item.emphasis ? 'true' : undefined}
-                aria-label={item.title}
-                title={item.title}
-                onClick={playDockClick}
-                onFocus={(event) => {
-                  resetMagnification();
-                  event.currentTarget.style.setProperty('--dock-scale', '1.16');
-                  event.currentTarget.style.setProperty('--dock-lift', '-3px');
-                  event.currentTarget.style.setProperty('--dock-z-index', item.emphasis ? '5' : '2');
-                }}
-                onBlur={resetMagnification}
-                className={`dock-item ${active ? 'is-active' : ''} ${item.emphasis ? 'is-emphasis' : ''}`}
-              >
-                <OmniIcon name={item.icon} size={22} />
-                {item.title === 'Messages' && unreadCount > 0 ? (
-                  <span className="dock-message-badge" aria-label={`${unreadCount} unread personal message${unreadCount === 1 ? '' : 's'}`}>
-                    {unreadCount > 99 ? '99+' : unreadCount}
-                  </span>
-                ) : null}
-                <span className="dock-tooltip" aria-hidden="true">{item.title}</span>
-                <span className="dock-sr-label">{item.title}</span>
-              </Link>
-            );
-          })}
-        </div>
+      <nav className="floating-dock" aria-label="OmniLume navigation">
+        <span className="dock-highlight" ref={highlightRef} aria-hidden="true" data-hidden />
+        <Link href="/" className="dock-item dock-brand" aria-label="OmniLume home" title="OmniLume"><OmniMark size={26} /><span className="dock-tooltip" aria-hidden="true">OmniLume</span></Link>
+        <span className="dock-sep" aria-hidden="true" />
+        {items.map((item, index) => {
+          const active = index === activeIndex;
+          return (
+            <Link
+              key={item.title}
+              ref={(element) => { itemRefs.current[index] = element; }}
+              href={item.href}
+              aria-label={item.title}
+              aria-current={active ? 'page' : undefined}
+              onClick={playDockClick}
+              className={`dock-item ${active ? 'is-active' : ''} ${item.emphasis ? 'is-emphasis' : ''}`}
+            >
+              <OmniIcon name={item.icon} size={20} />
+              {item.title === 'Messages' && unreadCount > 0 ? (
+                <span className="dock-message-badge" aria-label={`${unreadCount} unread personal message${unreadCount === 1 ? '' : 's'}`}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              ) : null}
+              <span className="dock-tooltip" aria-hidden="true">{item.title}</span>
+            </Link>
+          );
+        })}
       </nav>
     </div>
   );
