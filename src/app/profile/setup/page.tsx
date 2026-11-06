@@ -9,6 +9,7 @@ import { getLoginPath, getSafeRedirectPath } from '@/lib/auth';
 import { createClient } from '@/utils/supabase/client';
 import ProfileForm from '@/components/profile/ProfileForm';
 import OmniLogo from '@/components/ui/OmniLogo';
+import { OmniMark } from '@/components/ui/OmniMarkSprite';
 interface ProfileRecord {
   display_name: string | null;
   username: string | null;
@@ -93,7 +94,7 @@ export default function ProfileSetupPage() {
         <div className="profile-setup-intro">
           <OmniLogo />
           <div className="profile-setup-visual" aria-hidden="true">
-            <span className="profile-setup-orb"><span /></span>
+            <OmniMark size={76} className="relative" />
             <span className="profile-setup-orbit profile-setup-orbit-one" />
             <span className="profile-setup-orbit profile-setup-orbit-two" />
             <span className="profile-setup-visual-label">One profile<br />Many possibilities</span>

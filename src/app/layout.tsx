@@ -4,6 +4,9 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "./management.css";
 import GlobalFocusTrap from "@/components/GlobalFocusTrap";
+import AmbientBackground from "@/components/ui/AmbientBackground";
+import GlassPointerLight from "@/components/ui/GlassPointerLight";
+import OmniMarkSprite from "@/components/ui/OmniMarkSprite";
 import GlobalMiniPlayer from "@/components/music/GlobalMiniPlayer";
 import { ListenTogetherProvider } from "@/hooks/useListenTogether";
 import { MusicPlayerProvider } from "@/hooks/useMusicPlayer";
@@ -34,6 +37,9 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
     >
       <body className="min-h-full bg-background font-sans text-foreground">
+        <OmniMarkSprite />
+        <AmbientBackground />
+        <GlassPointerLight />
         {/* Global Trap that enforces the URL redirect */}
         <GlobalFocusTrap />
 
