@@ -118,7 +118,7 @@ export default function HeroDesk() {
     const { x, y } = pos[key];
     // Measure once: a window's size never changes mid-drag, and reading it per move forces layout.
     dragRef.current = { key, id: event.pointerId, sx: event.clientX, sy: event.clientY, ox: x, oy: y, x, y, frame: 0, size: sizeOf(key) };
-    // The light stripes hold still while a window moves: their animated layers make every frame's commit costly.
+    // The screens under a moving window stop picking up hover while it moves.
     deskRef.current?.closest<HTMLElement>('[data-landing]')?.setAttribute('data-dragging', '');
     setLifted(key);
   };
