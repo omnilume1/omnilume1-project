@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 10 44 44" width="512" height="512" role="img" aria-label="OmniLume">
+  <!-- Mark without the tile, for small sizes and dark backgrounds (favicon, dock, inline). -->
+  <defs>
+    <linearGradient id="ring" gradientUnits="userSpaceOnUse" x1="16" y1="48" x2="48" y2="16"><stop offset="0" stop-color="#4b31d4"/><stop offset=".55" stop-color="#8f78ff"/><stop offset="1" stop-color="#e8e1ff"/></linearGradient>
+  </defs>
+  <path d="M48.59 28.29 A17 17 0 1 1 35.71 15.41" fill="none" stroke="url(#ring)" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="44.02" cy="19.98" r="3.6" fill="#fff"/>
+</svg>

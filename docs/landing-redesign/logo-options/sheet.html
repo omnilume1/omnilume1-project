@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OmniLume logo options</title>
+<style>
+  *{box-sizing:border-box;margin:0}
+  body{width:1600px;margin:0;background:#17141f;color:#f1ecff;font-family:Geist,Inter,"Segoe UI",system-ui,sans-serif;padding:48px;position:relative;overflow:hidden}
+  body::before{content:"";position:absolute;inset:0;background:radial-gradient(900px 500px at 12% -5%,rgba(111,82,255,.28),transparent 60%),radial-gradient(800px 500px at 100% 105%,rgba(139,108,255,.22),transparent 60%);pointer-events:none}
+  header{position:relative;display:flex;justify-content:space-between;align-items:end;margin-bottom:28px}
+  h1{font-size:30px;font-weight:600;letter-spacing:-.02em}
+  header p{color:#a79fc0;font-size:14px}
+  .grid{position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  .card{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.1);border-radius:24px;padding:24px;backdrop-filter:blur(30px);display:flex;flex-direction:column;gap:18px}
+  .top{display:flex;justify-content:space-between;align-items:center}
+  .num{font-size:12px;color:#8e86a8;letter-spacing:.04em}
+  .name{font-size:18px;font-weight:600;letter-spacing:-.01em}
+  .hero{display:flex;justify-content:center;padding:14px 0 4px}
+  .hero img{width:200px;height:200px;filter:drop-shadow(0 18px 40px rgba(111,82,255,.35))}
+  .lock{display:flex;align-items:center;gap:14px;justify-content:center;padding:14px;border-radius:16px;background:rgba(0,0,0,.2)}
+  .lock img{width:44px;height:44px}
+  .lock span{font-size:30px;font-weight:600;letter-spacing:-.035em}
+  .sizes{display:flex;align-items:end;gap:14px;justify-content:center}
+  .light{display:flex;align-items:center;gap:12px;justify-content:center;padding:12px;border-radius:16px;background:#f3f0fb;color:#17141f}
+  .light img{width:36px;height:36px}.light span{font-size:22px;font-weight:600;letter-spacing:-.03em}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  p.why{font-size:13px;line-height:1.5;color:#b8b0d0}
+  .pick{color:#17141f;background:linear-gradient(135deg,#b9a8ff,#efeaff);font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px}
+</style>
+</head>
+<body>
+<header><div><h1>OmniLume logo options</h1><p>Six directions. Each shown as app icon, wordmark, small sizes and on light.</p></div><p>Purple + soft black, frosted glass</p></header>
+<div class="grid" id="grid"></div>
+<script>
+const items=[
+['01-windows','Windows','Two frosted panes slide into each other. The bright overlap is the shared room, echoing the movable windows in the app.'],
+['02-trio','Trio','Study, watch and listen overlap, and the white centre is the moment friends share. Says what the product does at a glance.'],
+['03-gather','Gather','Friends sit around one light. The brightest dot is you, arriving. Reads as a room full of people.'],
+['04-echo','Echo','A ring made of sound with you at the centre. The listening-together side of the product.'],
+['05-twin','Twin','Two interlocked rings: two friends, one shared moment in the glow between them.'],
+['06-omega','Omega','Omni means all, and the arch is an omega and a doorway. A friend is the light inside. The most ownable silhouette.'],
+];
+const g=document.getElementById('grid');
+for(const [id,name,why] of items){
+  const src=`../logo-options/omnilume-${id}.svg`;
+  g.insertAdjacentHTML('beforeend',`<div class="card">
+   <div class="top"><span class="name">${name}</span><span class="num">${id==='06-omega'?'<span class="pick">Recommended</span> ':''}${id.slice(0,2)} / 06</span></div>
+   <div class="hero"><img src="${src}" alt=""></div>
+   <div class="lock"><img src="${src}" alt=""><span>OmniLume</span></div>
+   <div class="row2">
+     <div class="sizes"><img src="${src}" width="40" height="40"><img src="${src}" width="28" height="28"><img src="${src}" width="20" height="20"><img src="${src}" width="16" height="16"></div>
+     <div class="light"><img src="${src}" alt=""><span>OmniLume</span></div>
+   </div>
+   <p class="why">${why}</p></div>`);
+}
+</script>
+</body>
+</html>
