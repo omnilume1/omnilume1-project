@@ -112,16 +112,25 @@
 .room[aria-pressed="true"] .roomIcon { color: var(--omni-accent); }
 .roomName { font-size: 14px; }
 .roomMeta { margin-top: 2px; font-size: 12px; color: var(--omni-muted); }
-.screens { position: relative; overflow: hidden; background: #15111e; }
+/* contain: nothing inside the live screens reflows or restyles the page around it, and vice versa. */
+.screens { position: relative; overflow: hidden; background: #15111e; contain: strict; }
 .screen { position: absolute; inset: 0; transition: opacity 450ms var(--smooth), scale 450ms var(--quint); }
 .screen[data-state="cur"] { z-index: 2; }
 @starting-style { .screen[data-enter] { opacity: 0; scale: 1.02; } }
 /* The app screen is laid out at 1440×900 like the real app, then scaled to the window (--ss from HeroDesk). */
 .screenFit { position: absolute; left: 0; top: 0; transform-origin: 0 0; transform: scale(var(--ss, .5)); }
+/* Frost only where something detailed sits behind it (the room's desk windows over the dusk scene).
+   Elsewhere the backdrop is a smooth glow, so blur looks the same and only costs a layer per surface. */
+.screens :global(.ha-root *:not(.ha-win)) { backdrop-filter: none !important; }
+/* The app's hover brighten is a filter on every button; here that is a filter node per button for nothing. */
+.screens :global(.ha-root .ha-btn) { filter: none !important; }
 /* Live bits: hover answers, the talking levels move and the song plays on. */
+/* Hover is instant (an animated custom property restyles on the main thread every frame); registered so it does not inherit. */
 @property --h { syntax: '<number>'; inherits: false; initial-value: 0; }
-.screens :global(.ha-hv), .screens :global(.ha-lift), .screens :global(.ha-btn) { transition: --h 160ms ease; }
 .screens :global(.ha-hv:hover), .screens :global(.ha-lift:hover), .screens :global(.ha-btn:hover) { --h: 1; }
+/* While a hero window moves, the screens underneath neither hover nor animate. */
+.page[data-dragging] .screens { pointer-events: none; }
+.page[data-dragging] .screens :global(*) { animation-play-state: paused !important; }
 .screens :global(.ha-levels b) { animation: heroLevel 900ms ease-in-out infinite alternate; }
 .screens :global(.ha-levels b:nth-child(2n)) { animation-duration: 700ms; animation-delay: -300ms; }
 .screens :global(.ha-levels b:nth-child(3n)) { animation-duration: 1100ms; animation-delay: -500ms; }

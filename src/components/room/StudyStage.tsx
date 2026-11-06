@@ -28,6 +28,7 @@ import {
 } from '@/lib/focus-lock';
 
 type StudyTab = 'TIMER' | 'NOTES' | 'WHITEBOARD' | 'PDF' | 'TASKS' | 'RESOURCES';
+const STUDY_TABS: ReadonlyArray<readonly [StudyTab, string]> = [['TIMER', 'Timer'], ['NOTES', 'Notes'], ['WHITEBOARD', 'Whiteboard'], ['PDF', 'PDF'], ['TASKS', 'Tasks'], ['RESOURCES', 'Resources']];
 
 interface StudyStageProps {
   roomId: string;
@@ -495,21 +496,17 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
       {renderHistoryPanel}
       {focusWarning}
 
-      <div className="mb-5 flex items-center justify-between gap-4 border-b border-neutral-800 pb-4">
-        <h2 className="hidden text-lg font-bold text-white sm:block">Study Workspace</h2>
-        <div className="flex min-w-0 gap-1 overflow-x-auto rounded-xl bg-[#121212] p-1">
-          {(['TIMER', 'NOTES', 'WHITEBOARD', 'PDF', 'TASKS', 'RESOURCES'] as const).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setActiveTab(tab)}
-              className={`shrink-0 cursor-pointer rounded-lg px-3 py-2 text-[10px] font-bold tracking-wider transition sm:px-4 ${activeTab === tab ? 'bg-indigo-600 text-white shadow-lg' : 'text-neutral-500 hover:bg-white/5 hover:text-white'}`}
-            >
-              {tab}
+      <div className="mb-5 flex items-center justify-between gap-4 border-b border-white/10 pb-4">
+        {/* The window bar already says Study; the heading stays for screen readers. */}
+        <h2 className="sr-only">Study Workspace</h2>
+        <div className="omni-seg study-tabs" role="group" aria-label="Study tools">
+          {STUDY_TABS.map(([tab, label]) => (
+            <button key={tab} type="button" aria-pressed={activeTab === tab} onClick={() => setActiveTab(tab)}>
+              {label}
             </button>
           ))}
         </div>
-        <button type="button" onClick={() => { setShowHistory((visible) => !visible); if (!showHistory) void loadHistory(); }} className="shrink-0 cursor-pointer rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-neutral-300 transition hover:border-neutral-500 hover:text-white">
+        <button type="button" onClick={() => { setShowHistory((visible) => !visible); if (!showHistory) void loadHistory(); }} className="omni-button omni-button-ghost omni-button-sm shrink-0">
           History
         </button>
       </div>
@@ -559,17 +556,17 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
 
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               {!timerState.isRunning && (
-                <button type="button" onClick={startTimer} disabled={!canManageTimer || !currentUserId || isSavingSession} className="cursor-pointer rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white shadow-[0_0_20px_rgba(79,70,229,0.25)] transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">
+                <button type="button" onClick={startTimer} disabled={!canManageTimer || !currentUserId || isSavingSession} className="omni-button omni-button-primary">
                   {hasSession && !timerState.completed ? 'Resume' : 'Start session'}
                 </button>
               )}
               {timerState.isRunning && (
-                <button type="button" onClick={() => void pauseTimer()} disabled={!canManageTimer || isSavingSession} className="cursor-pointer rounded-xl bg-amber-500 px-6 py-3 text-sm font-bold text-black transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50">
+                <button type="button" onClick={() => void pauseTimer()} disabled={!canManageTimer || isSavingSession} className="omni-button omni-button-primary">
                   {isSavingSession ? 'Saving…' : 'Pause'}
                 </button>
               )}
-              <button type="button" onClick={() => void resetTimer()} disabled={!canManageTimer || isSavingSession} className="cursor-pointer rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2.5 text-sm font-bold text-neutral-200 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50">Reset</button>
-              <button type="button" onClick={() => { if (!focusLockActive) setShowFocusWarning(true); }} disabled={focusLockActive} className={`cursor-pointer rounded-xl border px-4 py-2.5 text-sm font-bold transition disabled:cursor-not-allowed ${focusLockActive ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-neutral-700 bg-neutral-900 text-neutral-300 hover:border-red-500/50 hover:text-red-300'}`}>
+              <button type="button" onClick={() => void resetTimer()} disabled={!canManageTimer || isSavingSession} className="omni-button omni-button-ghost">Reset</button>
+              <button type="button" onClick={() => { if (!focusLockActive) setShowFocusWarning(true); }} disabled={focusLockActive} className={`omni-button ${focusLockActive ? 'danger-button' : 'omni-button-ghost'}`}>
                 {focusLockActive ? `Locked · ${formatCountdown(focusLockRemaining)}` : 'Focus lock'}
               </button>
             </div>

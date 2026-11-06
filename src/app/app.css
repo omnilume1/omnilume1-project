@@ -70,7 +70,7 @@
 .explore-controls { display: grid; grid-template-columns: minmax(0,1fr) 380px; gap: 16px; }
 .explore-search, .explore-code-form { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 18px; border-radius: 16px; color: var(--omni-muted); transition: border-color 160ms ease; }
 .explore-code-form { padding: 0 8px 0 18px; gap: 8px; }
-.explore-search:focus-within, .explore-code-form:focus-within { border-color: rgba(185,168,255,.55); }
+.explore-search:focus-within, .explore-code-form:focus-within { border-color: rgba(185,168,255,.55); box-shadow: 0 0 0 4px rgba(185,168,255,.12); }
 .explore-search input, .explore-code-form input { min-width: 0; flex: 1; height: 100%; border: 0; background: transparent; color: var(--omni-text); font-size: 17px; outline: none; }
 .explore-code-form input { font-size: 14px; }
 .explore-search input::placeholder, .explore-code-form input::placeholder { color: var(--omni-muted); }
@@ -104,12 +104,27 @@ select.omni-input option { background: #241d36; color: var(--omni-text); }
 .omni-form-card { width: min(620px,100%); margin: 0 auto; padding: clamp(22px,5vw,40px); }
 .omni-form-card h2 { margin: 0; font-size: 24px; font-weight: 500; letter-spacing: -.02em; }
 .create-room-sheet { width: min(680px,100%); padding: 28px; border-radius: 22px; }
+.template-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.template-card { display: flex; min-height: 112px; flex-direction: column; align-items: flex-start; gap: 6px; padding: 14px; border: 1px solid var(--omni-line); border-radius: 14px; background: rgba(255,255,255,.04); color: var(--omni-text); text-align: left; cursor: pointer; transition: background-color 160ms ease, border-color 160ms ease; }
+.template-card > svg { margin-bottom: 8px; color: var(--omni-text-2); }
+.template-card strong { font-size: 14px; font-weight: 500; }
+.template-card small { color: var(--omni-muted); font-size: 12px; line-height: 1.35; }
+.template-card:hover { background: rgba(255,255,255,.07); }
+.template-card[aria-pressed="true"] { border-color: rgba(185,168,255,.55); background: linear-gradient(180deg, rgba(185,168,255,.16), rgba(185,168,255,.05)); box-shadow: inset 0 1px 0 rgba(255,255,255,.12); }
+.template-card:focus-visible { outline: 2px solid var(--omni-accent); outline-offset: 2px; }
 .create-room-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 /* Segmented control, toggle rows and a switch (forms and settings). */
 .omni-seg { display: flex; gap: 2px; padding: 4px; border: 1px solid var(--omni-line-soft); border-radius: 11px; background: rgba(20,16,30,.3); }
 .omni-seg > button { flex: 1; padding: 7px 0; border: 0; border-radius: 8px; background: transparent; color: var(--omni-muted); font-size: 13px; cursor: pointer; transition: background-color 160ms ease, color 160ms ease; }
 .omni-seg > button:hover { color: var(--omni-text); }
 .omni-seg > button[aria-pressed="true"] { background: rgba(255,255,255,.12); color: var(--omni-text); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); }
+/* Selects match the inputs: no native arrow, a quiet chevron, dark option lists. */
+select.omni-input, select.omni-select { appearance: none; padding-right: 38px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a39cb8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; background-size: 14px; cursor: pointer; }
+select.omni-select option { background: #241d36; color: var(--omni-text); }
+/* Study tools: a segmented row that scrolls sideways when the window is narrow. */
+.study-tabs { min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.study-tabs > button { flex: 0 0 auto; padding: 7px 12px; white-space: nowrap; }
+@media (max-width: 639px) { .media-sync-button { display: none; } }
 .omni-row-card { padding: 12px 14px; border: 1px solid var(--omni-line-soft); border-radius: 13px; background: rgba(255,255,255,.04); }
 .omni-row-toggle { display: flex; align-items: center; gap: 12px; font-size: 14px; cursor: pointer; }
 .omni-row-toggle > span { min-width: 0; flex: 1; }
@@ -234,6 +249,11 @@ select.omni-input option { background: #241d36; color: var(--omni-text); }
 /* Room features inside windows: the window frames them, so their own cards go flat. */
 .desk-body .room-cast-resizable, .desk-body .room-study-resizable { height: auto !important; max-height: none; min-height: 0; flex: 1 1 auto !important; border: 0; border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; }
 .desk-body .chat-panel { background: transparent; }
+/* Older feature panels shout in tiny tracked capitals; inside the glass windows they speak in sentence case. */
+.desk-body .uppercase { text-transform: none; }
+.desk-body [class*="tracking-w"] { letter-spacing: 0; }
+.desk-body .text-\[10px\] { font-size: 12px; }
+.desk-body .text-\[11px\] { font-size: 12px; }
 .desk-body .chat-topbar { min-height: 44px; }
 /* A bar that only repeats the window title (Room chat, Room files) is dropped; the window bar names it. */
 .desk-body .chat-topbar:has(> h3:only-child) { display: none; }
@@ -934,3 +954,8 @@ select.omni-input option { background: #241d36; color: var(--omni-text); }
   .collab-skeleton, .voice-live-dot { animation: none !important; }
   .collab-option-bar, .wb-cursor { transition: none !important; }
 }
+
+/* Quiet sentence-case labels, as in the concept video (last, so it wins over the older tracked capitals above). */
+.room-dashboard-kicker, .room-chat-divider, .room-chat-pinned-label, .room-layout-legend, .relationship-label, .collab-badge { text-transform: none; letter-spacing: 0; }
+.room-dashboard-kicker, .room-chat-pinned-label, .room-layout-legend { font-size: 12px; font-weight: 500; }
+.room-entry-kicker { margin: 0; color: var(--omni-accent); font-size: 12px; font-weight: 500; }
