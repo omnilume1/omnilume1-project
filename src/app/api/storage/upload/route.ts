@@ -3,6 +3,7 @@ import { assertActiveRoom } from '@/lib/room-lifecycle';
 import {
   ROOM_ATTACHMENT_BUCKET,
   assertRoomFileInput,
+  extensionForFileName,
   isRoomObjectPath,
   type RoomFileKind,
 } from '@/lib/room-file-contract';
@@ -47,11 +48,10 @@ function musicUploadType(path: string) {
 
 export async function POST(request: Request) {
   try {
-    const form = await request.formData();
-    const bucket = form.get('bucket');
-    const path = form.get('path');
-    const file = form.get('file');
-    if (typeof bucket !== 'string' || typeof path !== 'string' || !(file instanceof File)) {
+    const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+    const { bucket, path, fileName, contentType, size } = body ?? {};
+    if (typeof bucket !== 'string' || typeof path !== 'string' || typeof fileName !== 'string'
+      || typeof contentType !== 'string' || !Number.isSafeInteger(size) || typeof size !== 'number') {
       return failure('Invalid upload request.', 400);
     }
 
@@ -64,23 +64,32 @@ export async function POST(request: Request) {
       const kind: RoomFileKind | null = prefix === 'files' ? 'file' : prefix === 'media' ? 'media' : prefix === 'subtitles' ? 'subtitle' : null;
       if (!kind || !isUuid(roomId) || !isRoomObjectPath(roomId, path, kind)) return failure('Invalid room upload path.', 400);
       await assertRoomUploadAccess(supabase, roomId, user.id, kind === 'file' ? 'files' : 'watch_control');
-      assertRoomFileInput(file, kind);
+      const checked = assertRoomFileInput({ name: fileName, size, type: contentType }, kind);
+      const expectedExtension = extensionForFileName(checked.fileName, kind === 'subtitle' ? 'vtt' : 'bin');
+      if (!path.toLowerCase().endsWith(`.${expectedExtension}`)) return failure('Upload path and file name do not match.', 400);
     } else if (bucket === MUSIC_BUCKET) {
-      const [ownerId, objectName] = path.split('/');
-      if (ownerId !== user.id || !isUuid(objectName?.split('.')[0])) return failure('Invalid music upload path.', 400);
+      const [ownerId, objectName, extraSegment] = path.split('/');
+      if (extraSegment || ownerId !== user.id || !isUuid(objectName?.split('.')[0])) return failure('Invalid music upload path.', 400);
       const isCover = objectName.endsWith('.cover.jpg');
       const extension = musicUploadType(path);
-      if (isCover && file.type !== 'image/jpeg') return failure('Invalid music upload.', 400);
+      if (isCover && (objectName !== `${objectName.split('.')[0]}.cover.jpg` || contentType !== 'image/jpeg')) return failure('Invalid music upload.', 400);
       if (!isCover && !extension) return failure('Invalid music upload.', 400);
-      if (file.size <= 0 || file.size > (isCover ? MUSIC_MAX_COVER_BYTES : MUSIC_MAX_FILE_BYTES)) return failure('This file is too large.', 413);
-      if (!isCover && extension && file.type !== MUSIC_AUDIO_TYPES[extension]) return failure('Invalid music MIME type.', 400);
+      if (size <= 0 || size > (isCover ? MUSIC_MAX_COVER_BYTES : MUSIC_MAX_FILE_BYTES)) return failure('This file is too large.', 413);
+      if (!isCover && extension && contentType !== MUSIC_AUDIO_TYPES[extension]) return failure('Invalid music MIME type.', 400);
     } else {
       return failure('Unsupported storage bucket.', 400);
     }
 
-    const metadata = await getServerStorageProvider().upload(bucket, path, file);
-    return NextResponse.json({ path: metadata.path }, { headers: noStore });
+    const storage = getServerStorageProvider();
+    if (storage.name === 'r2') {
+      if (!storage.createSignedUploadUrl) return failure('R2 uploads are not configured.', 503);
+      const uploadUrl = await storage.createSignedUploadUrl(bucket, path, contentType);
+      return NextResponse.json({ provider: 'r2', uploadUrl, contentType }, { headers: noStore });
+    }
+    return NextResponse.json({ provider: 'supabase' }, { headers: noStore });
   } catch (error) {
-    return failure(error instanceof Error ? error.message : 'Upload failed.', 400);
+    const message = error instanceof Error ? error.message : 'Upload failed.';
+    const status = message === 'Unauthorized' ? 401 : message.includes('permission') ? 403 : 400;
+    return failure(message, status);
   }
 }

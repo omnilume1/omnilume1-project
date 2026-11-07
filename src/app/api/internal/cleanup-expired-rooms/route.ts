@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { cleanupMusicUploads } from '@/lib/music-cleanup';
-import { cleanupDestroyedRooms, cleanupExpiredMedia, cleanupExpiredRecordings, cleanupPendingRoomFiles } from '@/lib/room-cleanup';
+import { cleanupDestroyedRooms, cleanupExpiredMedia, cleanupExpiredRecordings, cleanupPendingRoomFiles, type RoomAttachmentStorage } from '@/lib/room-cleanup';
+import { getServerStorageProvider } from '@/lib/storage/server-provider';
 
 function getAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -46,11 +47,18 @@ async function cleanupExpiredRooms(request: Request) {
 
   try {
     const now = new Date().toISOString();
-    const media = await cleanupExpiredMedia(supabase, now);
-    const files = await cleanupPendingRoomFiles(supabase);
-    const rooms = await cleanupDestroyedRooms(supabase, now);
+    const provider = getServerStorageProvider();
+    const roomStorage: RoomAttachmentStorage | undefined = provider.name === 'r2' ? provider : undefined;
+    const musicStorage: RoomAttachmentStorage | undefined = provider.name === 'r2' ? provider : undefined;
+    const media = await cleanupExpiredMedia(supabase, now, roomStorage);
+    const files = await cleanupPendingRoomFiles(supabase, roomStorage);
+    const rooms = roomStorage
+      ? await cleanupDestroyedRooms(supabase, now, roomStorage)
+      : await cleanupDestroyedRooms(supabase, now);
     const recordings = await cleanupExpiredRecordings(supabase);
-    const music = await cleanupMusicUploads(supabase);
+    const music = musicStorage
+      ? await cleanupMusicUploads(supabase, musicStorage)
+      : await cleanupMusicUploads(supabase);
     const failures = [...media.failures, ...files.failures, ...rooms.failures, ...recordings.failures, ...music.failures];
 
     return NextResponse.json(

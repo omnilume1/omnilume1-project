@@ -4,6 +4,8 @@ import { actionResult } from '@/lib/action-result';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { createClient } from '@/utils/supabase/server';
 import { ACCOUNT_DELETION_CONFIRMATION, isRecentAuthentication, sessionAuthenticatedAt } from '@/lib/account-deletion';
+import { MUSIC_BUCKET } from '@/lib/music-upload-validation';
+import { getServerStorageProvider } from '@/lib/storage/server-provider';
 
 async function requireUser() {
   const supabase = await createClient();
@@ -19,12 +21,18 @@ async function removePersonalStorage(admin: ReturnType<typeof createAdminClient>
   const { data: buckets, error: bucketError } = await admin.storage.listBuckets();
   if (bucketError) throw new Error('Unable to prepare personal file deletion.');
 
+  const storage = getServerStorageProvider();
+  if (storage.name === 'r2') {
+    const musicPaths = await storage.list(MUSIC_BUCKET, userId);
+    await storage.cleanup(MUSIC_BUCKET, musicPaths);
+  }
+
   for (const { id: bucket } of buckets ?? []) {
     // Room attachments belong to the room lifecycle, never an individual
     // account deletion. Dedicated personal buckets scope uploads by account
     // UUID, which lets cleanup remain ownership-safe without reading the
     // non-exposed storage database schema.
-    if (bucket === 'room_attachments') continue;
+    if (bucket === 'room_attachments' || (bucket === MUSIC_BUCKET && storage.name === 'r2')) continue;
 
     const { data: objects, error: listError } = await admin.storage.from(bucket).list(userId, { limit: 1000 });
     if (listError) throw new Error('Unable to prepare personal file deletion.');

@@ -11,6 +11,11 @@ const ROOM_BATCH_SIZE = 100;
 const STORAGE_PAGE_SIZE = 1_000;
 const STORAGE_REMOVE_BATCH_SIZE = 100;
 
+export type RoomAttachmentStorage = {
+  list: (bucket: string, prefix: string) => Promise<string[]>;
+  cleanup: (bucket: string, paths: string[]) => Promise<void>;
+};
+
 type ExpiredMedia = {
   id: string;
   room_id: string | null;
@@ -100,7 +105,9 @@ async function listStorageFiles(
   supabase: SupabaseClient,
   prefix: string,
   bucket: string = STORAGE_BUCKET,
+  roomStorage?: RoomAttachmentStorage,
 ): Promise<string[]> {
+  if (bucket === STORAGE_BUCKET && roomStorage) return roomStorage.list(bucket, prefix);
   const paths: string[] = [];
   let offset = 0;
 
@@ -141,7 +148,14 @@ async function removeStorageFiles(
   supabase: SupabaseClient,
   paths: string[],
   bucket: string = STORAGE_BUCKET,
+  roomStorage?: RoomAttachmentStorage,
 ) {
+  if (bucket === STORAGE_BUCKET && roomStorage) {
+    for (let index = 0; index < paths.length; index += STORAGE_REMOVE_BATCH_SIZE) {
+      await roomStorage.cleanup(bucket, paths.slice(index, index + STORAGE_REMOVE_BATCH_SIZE));
+    }
+    return;
+  }
   for (
     let index = 0;
     index < paths.length;
@@ -158,7 +172,7 @@ async function removeStorageFiles(
   }
 }
 
-export async function cleanupExpiredMedia(supabase: SupabaseClient, now: string) {
+export async function cleanupExpiredMedia(supabase: SupabaseClient, now: string, roomStorage?: RoomAttachmentStorage) {
   const { data, error } = await supabase
     .from('temporary_media')
     .select('id, room_id, file_url, storage_path, subtitle_path')
@@ -205,7 +219,7 @@ export async function cleanupExpiredMedia(supabase: SupabaseClient, now: string)
         const subtitlePath = media.subtitle_path
           ? getRoomStoragePath(media.subtitle_path, media.room_id)
           : null;
-        await removeStorageFiles(supabase, [storagePath, subtitlePath].filter((path): path is string => Boolean(path)));
+        await removeStorageFiles(supabase, [storagePath, subtitlePath].filter((path): path is string => Boolean(path)), STORAGE_BUCKET, roomStorage);
       }
 
       const { error: deleteError } = await supabase
@@ -239,7 +253,7 @@ export async function cleanupExpiredMedia(supabase: SupabaseClient, now: string)
 
 // Permanent files are never selected by temporary-media expiry. This retry
 // queue only finishes an explicit, authorized permanent-file deletion.
-export async function cleanupPendingRoomFiles(supabase: SupabaseClient) {
+export async function cleanupPendingRoomFiles(supabase: SupabaseClient, roomStorage?: RoomAttachmentStorage) {
   const { data, error } = await supabase
     .from('room_files')
     .select('id, object_path')
@@ -251,7 +265,7 @@ export async function cleanupPendingRoomFiles(supabase: SupabaseClient) {
   const failures: string[] = [];
   for (const file of (data ?? []) as PendingRoomFile[]) {
     try {
-      await removeStorageFiles(supabase, [file.object_path]);
+      await removeStorageFiles(supabase, [file.object_path], STORAGE_BUCKET, roomStorage);
       const { error: completeError } = await supabase.rpc('complete_room_file_delete', {
         p_file_id: file.id,
         p_error: null,
@@ -293,6 +307,7 @@ export async function cleanupExpiredRecordings(supabase: SupabaseClient) {
 export async function cleanupDestroyedRooms(
   supabase: SupabaseClient,
   now: string,
+  roomStorage?: RoomAttachmentStorage,
 ) {
   const { data, error } = await supabase.rpc('list_rooms_due_for_destruction', {
     p_limit: ROOM_BATCH_SIZE,
@@ -339,8 +354,9 @@ export async function cleanupDestroyedRooms(
     try {
       // Storage objects are not children of public.rooms, so they are removed
       // first. Every room-owned table cascades from the room delete.
-      const storagePaths = await listStorageFiles(supabase, roomId);
-      await removeStorageFiles(supabase, storagePaths);
+      const storagePaths = await listStorageFiles(supabase, roomId, STORAGE_BUCKET, roomStorage);
+      if (roomStorage) await removeStorageFiles(supabase, storagePaths, STORAGE_BUCKET, roomStorage);
+      else await removeStorageFiles(supabase, storagePaths);
       const recordingPaths = await listStorageFiles(supabase, roomId, RECORDINGS_BUCKET);
       await removeStorageFiles(supabase, recordingPaths, RECORDINGS_BUCKET);
 
