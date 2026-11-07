@@ -26,7 +26,7 @@ export default function MusicSettingsPage() {
         <PresenceSetting />
         <h2 className="mu-section-title">Your music</h2>
         <p className="mu-muted">
-          Uploads are private to you and are deleted 7 days after you add them (up to 40 files, 50 MB each, 300 MB in total).
+          Uploads are private to you and are deleted 7 days after you add them (up to 40 files, 500 MB each, 500 MB in total).
           You can share an upload to a room or group you belong to; only its members can play it, and you can stop sharing at any time.
           Playlists and listening history are visible only to you; clear history from Recently Played. Shuffle, repeat and volume are remembered on this device.
         </p>

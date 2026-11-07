@@ -47,7 +47,7 @@ function sampleHue(bitmap: ImageBitmap, fallback: number) {
   return Math.round(((Math.atan2(y, x) * 180) / Math.PI + 360) % 360);
 }
 
-/** Re-encode embedded art as JPEG ≤ 1200 px and ≤ 2 MB (drops EXIF and other metadata). */
+/** Re-encode embedded art as JPEG ≤ 1200 px (drops EXIF and other metadata). */
 export async function toCover(source: Blob, fallbackHue: number) {
   try {
     const bitmap = await createImageBitmap(source);

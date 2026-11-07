@@ -1,4 +1,5 @@
 import { createClient } from '@/utils/supabase/client';
+import { MAX_UPLOAD_BYTES } from '@/lib/upload-limits';
 
 // Action 12 collaboration data, read through RLS and written only through the
 // capability-checked RPCs in 20261107100000_action12_collaboration.sql.
@@ -150,6 +151,7 @@ export async function deleteRecording(recordingId: string): Promise<DataResult<n
   return { ok: true, data: null };
 }
 export async function uploadRecording(path: string, blob: Blob): Promise<DataResult<null>> {
+  if (blob.size > MAX_UPLOAD_BYTES) return { ok: false, error: 'Recordings must be 500 MB or smaller.' };
   const { error } = await createClient().storage.from('room_recordings').upload(path, blob, { contentType: blob.type.split(';')[0] || 'audio/webm', upsert: false });
   if (error) return { ok: false, error: 'The recording could not be uploaded.' };
   return { ok: true, data: null };
