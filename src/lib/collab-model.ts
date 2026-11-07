@@ -101,6 +101,30 @@ export function shouldInitiateOffer(myId: string, peerId: string) {
   return myId < peerId;
 }
 
+// A shared tab is encoded once per watcher (peer-to-peer mesh), so the host's
+// video upload is capped in total (23 Mbps of video; with stereo tab sound
+// and packet overhead about 25 Mbps on the wire) and split between the
+// members actually watching: 10 Mbps each for one or two, 4.6 Mbps each for
+// five. Resolution is never lowered to meet it.
+export const SCREEN_UPLOAD_BUDGET = 23_000_000;
+export const SCREEN_VIEWER_MAX_BITRATE = 10_000_000;
+export function screenBitrate(watching: number) {
+  return Math.floor(Math.min(SCREEN_VIEWER_MAX_BITRATE, SCREEN_UPLOAD_BUDGET / Math.max(1, watching)));
+}
+
+// Browsers send Opus in mono unless the receiving side asks for stereo, which
+// flattens a film's sound. Marking the remote description's Opus as stereo
+// lets this side send the tab's sound in stereo (a mono microphone stays
+// effectively mono). Only the remote description is changed, which is allowed.
+export function withStereoOpus(sdp: string) {
+  const types = new Set([...sdp.matchAll(/a=rtpmap:(\d+) opus\/48000\/2/gi)].map((match) => match[1]));
+  if (types.size === 0) return sdp;
+  return sdp.replace(/^a=fmtp:(\d+) (.*)$/gm, (line, type: string, params: string) => {
+    if (!types.has(type) || /(^|;)\s*stereo=1/.test(params)) return line;
+    return `${line};stereo=1;sprop-stereo=1`;
+  });
+}
+
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
 export function youTubeId(url: string): string | null {
   try {

@@ -57,6 +57,14 @@ export function useVoiceRoom() {
   return value;
 }
 
+function samePeers(a: VoicePeer[], b: VoicePeer[]) {
+  return a.length === b.length && a.every((peer, index) => {
+    const other = b[index];
+    return peer.id === other.id && peer.audio === other.audio && peer.screen === other.screen && peer.state === other.state
+      && peer.sharingScreen === other.sharingScreen && peer.hasMic === other.hasMic;
+  });
+}
+
 const getMic = () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
 
 function voiceUnavailable(chatAllowed: boolean) {
@@ -65,10 +73,12 @@ function voiceUnavailable(chatAllowed: boolean) {
   return null;
 }
 
-// A shared tab at up to 720p and 30 fps, with the tab's own sound. Chrome and
-// Edge open on the tab list; the room's own tab is left out of it.
+// A shared tab at up to 1080p and 30 fps, with the tab's own sound. A tab is
+// captured at its on-screen size, so 1080p needs the video in full screen on a
+// 1080p display. Chrome and Edge open on the tab list; the room's own tab is
+// left out of it.
 export const TAB_SHARE_CONSTRAINTS = {
-  video: { frameRate: { ideal: 30, max: 30 }, width: { max: 1280 }, height: { max: 720 }, displaySurface: 'browser' },
+  video: { frameRate: { ideal: 30, max: 30 }, width: { max: 1920 }, height: { max: 1080 }, displaySurface: 'browser' },
   audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
   selfBrowserSurface: 'exclude',
   surfaceSwitching: 'include',
@@ -106,15 +116,19 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
   const [savingRecording, setSavingRecording] = useState(false);
   const recorderRef = useRef<{ recorder: MediaRecorder; context: AudioContext; destination: MediaStreamAudioDestinationNode; connected: Set<string>; chunks: Blob[]; recordingId: string; startedAt: number } | null>(null);
   const [hasMic, setHasMic] = useState(false);
-  const [sharerSeen, setSharerSeen] = useState<Map<string, number>>(() => new Map());
+  const [sharerSeen, setSharerSeen] = useState<Set<string>>(() => new Set());
+  const sharerSeenAt = useRef(new Map<string, number>());
   const [shareVolume, setShareVolume] = useState(1);
   const [shareMuted, setShareMuted] = useState(false);
   const [shareSoundBlocked, setShareSoundBlocked] = useState(false);
   const [soundNonce, setSoundNonce] = useState(0);
 
+  // The mesh reports every signal (ICE candidates, heartbeats); the room only
+  // re-renders when something a member can see changed.
   const syncFromMesh = useCallback(() => {
     const mesh = meshRef.current;
-    setPeers(mesh ? mesh.peerList() : []);
+    const next = mesh ? mesh.peerList() : [];
+    setPeers((current) => (samePeers(current, next) ? current : next));
     setSharingScreen(Boolean(mesh?.isSharingScreen));
     setScreenStream(mesh?.screenStream ?? null);
     setLocalStream(mesh?.localStream ?? null);
@@ -139,11 +153,14 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
     if (event.type !== 'rtc_signal') return;
     const signal = event.payload as RtcSignal;
     if (event.senderId !== currentUserId && (signal.kind === 'bye' || (signal.kind === 'hello' && typeof signal.screen === 'boolean'))) {
+      const id = event.senderId;
       const sharing = signal.kind === 'hello' && signal.screen === true;
+      // Heartbeats only refresh the time; the room re-renders when a share starts or ends.
+      if (sharing) sharerSeenAt.current.set(id, Date.now()); else sharerSeenAt.current.delete(id);
       setSharerSeen((current) => {
-        if (!sharing && !current.has(event.senderId)) return current;
-        const next = new Map(current);
-        if (sharing) next.set(event.senderId, Date.now()); else next.delete(event.senderId);
+        if (current.has(id) === sharing) return current;
+        const next = new Set(current);
+        if (sharing) next.add(id); else next.delete(id);
         return next;
       });
     }
@@ -160,10 +177,9 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
     if (sharerSeen.size === 0) return;
     const timer = window.setInterval(() => {
       const cutoff = Date.now() - PEER_TIMEOUT_MS;
-      setSharerSeen((current) => {
-        if (![...current.values()].some((seen) => seen < cutoff)) return current;
-        return new Map([...current].filter(([, seen]) => seen >= cutoff));
-      });
+      const seenAt = sharerSeenAt.current;
+      for (const [id, seen] of seenAt) if (seen < cutoff) seenAt.delete(id);
+      setSharerSeen((current) => ([...current].every((id) => seenAt.has(id)) ? current : new Set([...current].filter((id) => seenAt.has(id)))));
     }, 4_000);
     return () => window.clearInterval(timer);
   }, [sharerSeen.size]);
