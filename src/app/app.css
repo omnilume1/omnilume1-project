@@ -942,7 +942,12 @@ button.site-link { font-family: inherit; line-height: inherit; cursor: pointer; 
 .tab-share-join { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; }
 .tab-share-notice { margin-top: 2px; color: #d4d4d8; font-size: 11px; }
 .tab-share-notice button { margin-left: 4px; border: 0; background: none; color: #fca5a5; font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; }
-.tab-share:fullscreen { padding: 12px; }
+.tab-share-host-actions { margin-left: auto; }
+.tab-share-host-actions .tab-share-stop { margin-left: 0; }
+/* Full screen shows only the picture, edge to edge, at the tab's own ratio. */
+.tab-share-frame:fullscreen { width: 100%; height: 100%; border: 0; border-radius: 0; background: #000; }
+.tab-share-frame:fullscreen .tab-share-badge { display: none; }
+.tab-share-frame:fullscreen[data-idle] { cursor: none; }
 .voice-consents { margin: 4px 0; padding-left: 18px; color: #d4d4d8; font-size: 12px; }
 .voice-recording-audio { width: 100%; }
 .voice-recordings { display: grid; gap: 8px; }
