@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import { useNotificationCenter } from '@/hooks/useNotificationCenter';
 import {
@@ -19,16 +19,9 @@ import {
 
 type Phase = 'closed' | 'entering' | 'open' | 'closing';
 
-const reducedMotionQuery = '(prefers-reduced-motion: reduce)';
-function subscribeReducedMotion(callback: () => void) {
-  const media = window.matchMedia(reducedMotionQuery);
-  media.addEventListener('change', callback);
-  return () => media.removeEventListener('change', callback);
-}
-
 // Notification center bell (Action 08). An anchored popover beside the bell,
 // not a modal: spring-like 180 ms enter from the bell, 120 ms exit, staggered
-// items, fade-only under reduced motion; Esc / outside click close it and
+// items (on every device, whatever its reduce-motion setting); Esc / outside click close it and
 // focus returns to the bell; arrow keys move between notifications.
 export default function NotificationBell({ roomId }: { roomId?: string } = {}) {
   const center = useNotificationCenter();
@@ -37,8 +30,7 @@ export default function NotificationBell({ roomId }: { roomId?: string } = {}) {
   const [dndWorking, setDndWorking] = useState(false);
   const [roomMuteWorking, setRoomMuteWorking] = useState(false);
   const roomMuted = roomId ? center.isRoomMuted(roomId) : false;
-  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, () => window.matchMedia(reducedMotionQuery).matches, () => false);
-  const motion = popoverMotion(reducedMotion);
+  const motion = popoverMotion(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -176,7 +168,7 @@ export default function NotificationBell({ roomId }: { roomId?: string } = {}) {
                   const presentation = notificationPresentation(item.notification_type);
                   const roomName = notificationRoomName(item);
                   return (
-                    <li key={item.id} className="notification-popover-item" style={{ ['--stagger' as string]: `${itemStaggerDelay(index, reducedMotion)}ms` }}>
+                    <li key={item.id} className="notification-popover-item" style={{ ['--stagger' as string]: `${itemStaggerDelay(index, false)}ms` }}>
                       <Link
                         ref={(element) => { itemRefs.current[index] = element; }}
                         href={notificationHref(item)}

@@ -162,8 +162,7 @@ export function Lyrics({ anchor }: { anchor: number }) {
     const scroller = list.current;
     const line = scroller?.children[active] as HTMLElement | undefined;
     if (!scroller || !line) return;
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    scroller.scrollTo({ top: line.offsetTop - scroller.clientHeight * anchor, behavior: reduce ? 'auto' : 'smooth' });
+    scroller.scrollTo({ top: line.offsetTop - scroller.clientHeight * anchor, behavior: 'smooth' });
   }, [active, anchor]);
 
   if (!lines?.length) return <EmptyState title="No lyrics available" detail="Lyrics show up when a song includes them or you add an .lrc file." />;

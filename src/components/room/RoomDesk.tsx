@@ -37,7 +37,6 @@ export type DeskHandle = { tile: () => void; reset: () => void; focus: () => voi
 const LIMITS = { minW: 280, minH: 200 };
 const EDGES: Edge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 const STACKED = '(max-width: 767px)';
-const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 type Gesture =
   | { kind: 'move' | 'resize'; id: string; edge?: Edge; pointer: number; sx: number; sy: number; start: Box; box: Box; frame: number }
@@ -154,7 +153,7 @@ export default function RoomDesk({ ref, windows, preset, storageKey, onClose, em
   }, [openKey, area]);
 
   const animateTo = useCallback((next: Record<string, Box>) => {
-    if (!reducedMotion()) flipRef.current = boxes;
+    flipRef.current = boxes;
     setMaxId(null);
     setBoxes(next);
     persist(next);

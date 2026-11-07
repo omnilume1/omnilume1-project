@@ -69,8 +69,7 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
     if (!active) { highlight.dataset.hidden = ''; return; }
     delete highlight.dataset.hidden;
     const x = active.offsetLeft;
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (highlightMemory.x >= 0 && highlightMemory.x !== x && !reduced) {
+    if (highlightMemory.x >= 0 && highlightMemory.x !== x) {
       // Start where the previous page's dock left off, then slide.
       highlight.style.transition = 'none';
       highlight.style.transform = `translateX(${highlightMemory.x}px)`;

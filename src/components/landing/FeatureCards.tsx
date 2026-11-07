@@ -30,8 +30,7 @@ export default function FeatureCards({ heading, children }: { heading: ReactNode
     const rail = railRef.current;
     const card = cardsOf()[TABS[index].first];
     if (!rail || !card) return;
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    rail.scrollTo({ left: card.offsetLeft - cardsOf()[0].offsetLeft, behavior: reduced ? 'auto' : 'smooth' });
+    rail.scrollTo({ left: card.offsetLeft - cardsOf()[0].offsetLeft, behavior: 'smooth' });
   };
 
   useEffect(() => {

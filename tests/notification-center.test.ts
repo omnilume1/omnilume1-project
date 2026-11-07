@@ -80,7 +80,7 @@ test('motion: spring-like enter, quicker exit, short stagger; reduced motion fad
   const css = read('src/app/app.css');
   assert.match(css, /\.notification-popover \{[^}]*transform-origin: top right;[^}]*opacity: 0; transform: translateY\(-8px\) scale\(0\.96\);/);
   assert.match(css, /\.notification-popover\[data-state="open"\] \{ opacity: 1; transform: translateY\(0\) scale\(1\); transition: opacity 180ms/);
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\n  \.notification-popover, \.notification-popover\[data-state="open"\] \{ transform: none !important; transition: opacity 120ms linear !important; \}/);
+  assert.doesNotMatch(css, /prefers-reduced-motion/); // motion plays on every device
   assert.match(css, /border-radius: 16px;/);
 });
 

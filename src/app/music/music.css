@@ -495,11 +495,6 @@
 @media (hover: none) {
   .music-app .mu-art-play, .music-app .mu-upnext-remove { opacity: 1; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .music-app *, .music-app *::before, .music-app *::after {
-    animation: none !important; transition-duration: .01ms !important; scroll-behavior: auto !important;
-  }
-}
 @media (prefers-contrast: more) {
   .music-app { --mu-glass: #2a2340; --mu-thin: #2a2340; --mu-thick: #2a2340; --mu-text-2: #ffffffcc; }
 }
