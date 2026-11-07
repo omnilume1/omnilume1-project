@@ -7,8 +7,11 @@ import {
   createThrottle,
   localDateTimeInput,
   pollPercentages,
+  SCREEN_UPLOAD_BUDGET,
+  screenBitrate,
   shouldInitiateOffer,
   studyStats,
+  withStereoOpus,
   youTubeId,
 } from '../src/lib/collab-model.js';
 
@@ -57,6 +60,16 @@ test('countdown, offer rule, YouTube ids, datetime input', () => {
   const b = '22222222-2222-4222-8222-222222222222';
   assert.equal(shouldInitiateOffer(a, b), true);
   assert.equal(shouldInitiateOffer(b, a), false, 'exactly one side offers');
+  assert.equal(screenBitrate(0), 10_000_000);
+  assert.equal(screenBitrate(1), 10_000_000);
+  assert.equal(screenBitrate(2), 10_000_000);
+  assert.equal(screenBitrate(5), 4_600_000);
+  const sdp = 'v=0\r\na=rtpmap:111 opus/48000/2\r\na=fmtp:111 minptime=10;useinbandfec=1\r\na=rtpmap:96 VP8/90000\r\na=fmtp:97 apt=96\r\n';
+  const stereo = withStereoOpus(sdp);
+  assert.ok(stereo.includes('a=fmtp:111 minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1\r\n'), 'opus marked stereo');
+  assert.ok(stereo.includes('a=fmtp:97 apt=96\r\n'), 'other codecs untouched');
+  assert.equal(withStereoOpus(stereo), stereo, 'idempotent');
+  for (let watching = 1; watching <= 12; watching += 1) assert.ok(screenBitrate(watching) * watching <= SCREEN_UPLOAD_BUDGET, 'total upload stays under the cap');
   assert.equal(youTubeId('https://www.youtube.com/watch?v=aqz-KE-bpKQ'), 'aqz-KE-bpKQ');
   assert.equal(youTubeId('https://youtu.be/aqz-KE-bpKQ?t=10'), 'aqz-KE-bpKQ');
   assert.equal(youTubeId('https://m.youtube.com/shorts/aqz-KE-bpKQ'), 'aqz-KE-bpKQ');
