@@ -10,15 +10,21 @@ import { shouldInitiateOffer } from '@/lib/collab-model';
 // Negotiation follows the "perfect negotiation" pattern: either side may
 // renegotiate (e.g. to add a screen track); on an offer collision the polite
 // peer (the higher user id) rolls back and the impolite peer's offer wins.
+//
+// Members may join without a microphone ("watch only") to receive a shared
+// tab. A shared tab carries its video and, when the browser allows it, its
+// sound: both tracks travel in one MediaStream, so the receiver tells tab
+// sound from a microphone by the stream they arrive in.
 
 export type RtcSignal = {
   to?: string;
-  kind: 'hello' | 'bye' | 'offer' | 'answer' | 'ice';
+  kind: 'hello' | 'bye' | 'offer' | 'answer' | 'ice' | 'who';
   sdp?: string;
   candidate?: string;
   sdpMid?: string;
   sdpMLineIndex?: number;
   screen?: boolean;
+  mic?: boolean;
 };
 
 export type VoicePeer = {
@@ -27,6 +33,7 @@ export type VoicePeer = {
   screen: MediaStream | null;
   state: RTCPeerConnectionState | 'new';
   sharingScreen: boolean;
+  hasMic: boolean;
 };
 
 type PeerEntry = {
@@ -37,13 +44,31 @@ type PeerEntry = {
   audio: MediaStream | null;
   screen: MediaStream | null;
   screenSenders: RTCRtpSender[];
+  micSenders: RTCRtpSender[];
   lastSeen: number;
   sharingScreen: boolean;
+  hasMic: boolean;
 };
 
 const HEARTBEAT_MS = 10_000;
-const PEER_TIMEOUT_MS = 32_000;
+export const PEER_TIMEOUT_MS = 32_000;
 export const ICE_SERVERS: RTCIceServer[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+
+// Up to 2.5 Mbps per viewer at 720p30 from the first seconds; under a weaker
+// link the browser trades some resolution and some frame rate, not only one.
+export const SCREEN_MAX_BITRATE = 2_500_000;
+async function tuneVideoSender(sender: RTCRtpSender) {
+  try {
+    const params = sender.getParameters();
+    if (!params.encodings?.length) params.encodings = [{}];
+    params.encodings[0].maxBitrate = SCREEN_MAX_BITRATE;
+    params.encodings[0].maxFramerate = 30;
+    (params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference = 'balanced';
+    await sender.setParameters(params);
+  } catch {
+    // Older browsers keep their defaults.
+  }
+}
 
 export class VoiceMesh {
   private peers = new Map<string, PeerEntry>();
@@ -60,22 +85,37 @@ export class VoiceMesh {
 
   get isJoined() { return this.joined; }
   get isSharingScreen() { return this.screen !== null; }
+  get hasMic() { return Boolean(this.local?.getAudioTracks().length); }
   get localStream() { return this.local; }
   get screenStream() { return this.screen; }
 
   peerList(): VoicePeer[] {
-    return [...this.peers.entries()].map(([id, peer]) => ({ id, audio: peer.audio, screen: peer.screen, state: peer.pc.connectionState, sharingScreen: peer.sharingScreen }));
+    return [...this.peers.entries()].map(([id, peer]) => ({ id, audio: peer.audio, screen: peer.screen, state: peer.pc.connectionState, sharingScreen: peer.sharingScreen, hasMic: peer.hasMic }));
   }
 
-  join(local: MediaStream) {
+  private hello(to?: string) {
+    this.send({ kind: 'hello', ...(to ? { to } : {}), screen: this.screen !== null, mic: this.hasMic });
+  }
+
+  // `local` is null for a member who only watches (no microphone).
+  join(local: MediaStream | null) {
     this.local = local;
     this.joined = true;
-    this.send({ kind: 'hello', screen: false });
+    this.hello();
     this.heartbeat = setInterval(() => {
-      this.send({ kind: 'hello', screen: this.screen !== null });
+      this.hello();
       const now = Date.now();
       for (const [id, peer] of this.peers) if (now - peer.lastSeen > PEER_TIMEOUT_MS) this.dropPeer(id);
     }, HEARTBEAT_MS);
+    this.onChange();
+  }
+
+  // Turns a watch-only member into a speaking one.
+  addMic(stream: MediaStream) {
+    if (this.hasMic) { stream.getTracks().forEach((track) => track.stop()); return; }
+    this.local = stream;
+    for (const peer of this.peers.values()) this.addMicTracks(peer);
+    this.hello();
     this.onChange();
   }
 
@@ -101,9 +141,11 @@ export class VoiceMesh {
     this.stopScreen();
     this.screen = stream;
     const [track] = stream.getVideoTracks();
-    track?.addEventListener('ended', () => this.stopScreen());
+    // No contentHint: 'motion' makes Chrome capture a tab at camera-like low
+    // resolution (288x180 in tests); the sender settings below keep 720p30.
+    track?.addEventListener('ended', () => { if (this.screen === stream) this.stopScreen(); });
     for (const peer of this.peers.values()) this.addScreenTrack(peer);
-    this.send({ kind: 'hello', screen: true });
+    this.hello();
     this.onChange();
   }
 
@@ -117,27 +159,29 @@ export class VoiceMesh {
     }
     this.stopTracks(this.screen);
     this.screen = null;
-    this.send({ kind: 'hello', screen: false });
+    this.hello();
     this.onChange();
   }
 
   async handleSignal(senderId: string, signal: RtcSignal) {
     if (!this.joined || senderId === this.selfId) return;
     if (signal.to && signal.to !== this.selfId) return;
+    if (signal.kind === 'who') { if (this.screen) this.hello(); return; }
     if (signal.kind === 'bye') { this.dropPeer(senderId); this.onChange(); return; }
 
     const known = this.peers.has(senderId);
     const peer = this.ensurePeer(senderId);
     peer.lastSeen = Date.now();
-    if (typeof signal.screen === 'boolean' && signal.kind === 'hello') {
-      peer.sharingScreen = signal.screen;
-      if (!signal.screen) peer.screen = null;
-    }
-
     if (signal.kind === 'hello') {
+      if (typeof signal.screen === 'boolean') {
+        peer.sharingScreen = signal.screen;
+        if (!signal.screen) peer.screen = null;
+      }
+      // Older clients do not send `mic`; they always joined with one.
+      peer.hasMic = signal.mic !== false;
       // Introduce ourselves to a newcomer (a directed hello is not answered,
       // so heartbeats never ping-pong).
-      if (!known && !signal.to) this.send({ kind: 'hello', to: senderId, screen: this.screen !== null });
+      if (!known && !signal.to) this.hello(senderId);
       this.onChange();
       return;
     }
@@ -182,8 +226,10 @@ export class VoiceMesh {
       audio: null,
       screen: null,
       screenSenders: [],
+      micSenders: [],
       lastSeen: Date.now(),
       sharingScreen: false,
+      hasMic: true,
     };
     this.peers.set(peerId, peer);
     pc.onnegotiationneeded = async () => {
@@ -208,12 +254,17 @@ export class VoiceMesh {
       });
     };
     pc.ontrack = ({ track, streams }) => {
+      const stream = streams[0] ?? new MediaStream([track]);
       if (track.kind === 'video') {
-        peer.screen = streams[0] ?? new MediaStream([track]);
-        track.addEventListener('ended', () => { peer.screen = null; this.onChange(); });
-        track.addEventListener('mute', () => { if (!peer.sharingScreen) { peer.screen = null; this.onChange(); } });
+        peer.screen = stream;
+        track.addEventListener('ended', () => { if (peer.screen === stream) { peer.screen = null; this.onChange(); } });
+        track.addEventListener('mute', () => { if (!peer.sharingScreen && peer.screen === stream) { peer.screen = null; this.onChange(); } });
+      } else if (stream.getVideoTracks().length > 0 || peer.screen?.id === stream.id) {
+        // Tab sound: it already plays from the shared-tab stream. Tracks of one
+        // offer are attached to their streams before any track event fires, so
+        // the video is in the stream by the time its sound arrives.
       } else {
-        peer.audio = streams[0] ?? new MediaStream([track]);
+        peer.audio = stream;
       }
       this.onChange();
     };
@@ -221,14 +272,24 @@ export class VoiceMesh {
       if (pc.connectionState === 'failed') pc.restartIce();
       this.onChange();
     };
-    this.local?.getAudioTracks().forEach((track) => pc.addTrack(track, this.local as MediaStream));
+    this.addMicTracks(peer);
     if (this.screen) this.addScreenTrack(peer);
     return peer;
   }
 
+  private addMicTracks(peer: PeerEntry) {
+    if (!this.local || peer.micSenders.length) return;
+    for (const track of this.local.getAudioTracks()) peer.micSenders.push(peer.pc.addTrack(track, this.local));
+  }
+
+  // Video first, then the tab's sound, in the same stream.
   private addScreenTrack(peer: PeerEntry) {
     if (!this.screen) return;
-    for (const track of this.screen.getVideoTracks()) peer.screenSenders.push(peer.pc.addTrack(track, this.screen));
+    for (const track of [...this.screen.getVideoTracks(), ...this.screen.getAudioTracks()]) {
+      const sender = peer.pc.addTrack(track, this.screen);
+      peer.screenSenders.push(sender);
+      if (track.kind === 'video') void tuneVideoSender(sender);
+    }
   }
 
   private dropPeer(peerId: string) {

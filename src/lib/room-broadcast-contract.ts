@@ -57,7 +57,9 @@ type FieldKind = 'uuid' | 'id' | 'number' | 'version' | 'boolean' | 'source' | '
 
 export const STUDY_CHANGE_KINDS = ['notes', 'tasks', 'resources', 'pdf'] as const;
 export const COLLAB_CHANGE_KINDS = ['hands', 'polls', 'countdowns', 'events', 'voice', 'recordings'] as const;
-export const RTC_SIGNAL_KINDS = ['hello', 'bye', 'offer', 'answer', 'ice'] as const;
+// 'who' asks members who are sharing to announce it (sent once on connect, so
+// people who just opened the room see a live tab without waiting for a heartbeat).
+export const RTC_SIGNAL_KINDS = ['hello', 'bye', 'offer', 'answer', 'ice', 'who'] as const;
 // Session descriptions and ICE candidates are WebRTC connection data (codecs,
 // fingerprints, candidate addresses), never room content. They are bounded and
 // shape-checked so the topic cannot carry arbitrary payloads.
@@ -124,7 +126,7 @@ const EVENT_FIELDS: Record<RoomBroadcastEventType, Record<string, FieldKind>> = 
   cursor: { x: 'coord', y: 'coord' },
   note_editing: { noteId: 'uuid', editing: 'boolean' },
   pdf_follow: { fileId: 'uuid', page: 'page' },
-  rtc_signal: { to: 'uuid', kind: 'rtc_kind', sdp: 'sdp', candidate: 'candidate', sdpMid: 'id', sdpMLineIndex: 'index', screen: 'boolean' },
+  rtc_signal: { to: 'uuid', kind: 'rtc_kind', sdp: 'sdp', candidate: 'candidate', sdpMid: 'id', sdpMLineIndex: 'index', screen: 'boolean', mic: 'boolean' },
 };
 
 // Fields an event is useless without.
