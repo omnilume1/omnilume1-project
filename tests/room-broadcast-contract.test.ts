@@ -80,6 +80,10 @@ test('Action 12 events: hints carry only a version and kind, signaling is shape-
   assert.deepEqual(toRoomBroadcastPayload('rtc_signal', { kind: 'offer', to, sdp: 'v=0\r\no=- 1 2 IN IP4 0.0.0.0\r\n', content: SECRET_MARKER }), { to, kind: 'offer', sdp: 'v=0\r\no=- 1 2 IN IP4 0.0.0.0\r\n' });
   assert.equal(toRoomBroadcastPayload('rtc_signal', { kind: 'ice', to, candidate: SECRET_MARKER }), null, 'ICE must be a candidate line');
   assert.equal(toRoomBroadcastPayload('rtc_signal', { kind: 'offer', to, sdp: `v=0${'x'.repeat(30_001)}` }), null, 'SDP is bounded');
+  // Tab sharing: who is sharing, and whether a member joined with a mic.
+  assert.deepEqual(toRoomBroadcastPayload('rtc_signal', { kind: 'who', note: SECRET_MARKER }), { kind: 'who' });
+  assert.deepEqual(toRoomBroadcastPayload('rtc_signal', { kind: 'hello', screen: true, mic: false }), { kind: 'hello', screen: true, mic: false });
+  assert.deepEqual(toRoomBroadcastPayload('rtc_signal', { kind: 'hello', mic: 'yes' }), { kind: 'hello' }, 'mic must be a boolean');
 });
 
 test('chat events are not part of the Broadcast contract', () => {

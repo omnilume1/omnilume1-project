@@ -43,7 +43,9 @@ export default function VoicePanel() {
           </button>
         ) : (
           <>
-            <button type="button" className={`voice-button ${voice.micEnabled ? '' : 'is-off'}`} onClick={voice.toggleMic} aria-pressed={!voice.micEnabled}>{voice.micEnabled ? 'Mute' : 'Unmute'}</button>
+            {voice.hasMic
+              ? <button type="button" className={`voice-button ${voice.micEnabled ? '' : 'is-off'}`} onClick={voice.toggleMic} aria-pressed={!voice.micEnabled}>{voice.micEnabled ? 'Mute' : 'Unmute'}</button>
+              : <button type="button" className="voice-button" onClick={() => void voice.enableMic()} disabled={voice.joining}>Turn on mic</button>}
             {voice.sharingScreen
               ? <button type="button" className="voice-button is-live" onClick={voice.stopScreen}>Stop sharing</button>
               : <button type="button" className="voice-button" onClick={() => void voice.startScreen()}>Share screen</button>}
@@ -65,7 +67,7 @@ export default function VoicePanel() {
       <h3 className="voice-heading">In voice ({voice.joined ? voice.peers.length + 1 : voice.peers.length})</h3>
       <ul className="voice-list">
         {voice.joined && currentUserId && (
-          <li className="voice-person"><span className={`voice-dot ${voice.micEnabled ? 'is-on' : ''}`} aria-hidden="true" /><span className="voice-name">You</span><span className="voice-state">{voice.moderation.get(currentUserId)?.audio_muted ? 'Muted by a manager' : voice.micEnabled ? 'Mic on' : 'Muted'}</span></li>
+          <li className="voice-person"><span className={`voice-dot ${voice.micEnabled && voice.hasMic ? 'is-on' : ''}`} aria-hidden="true" /><span className="voice-name">You</span><span className="voice-state">{voice.moderation.get(currentUserId)?.audio_muted ? 'Muted by a manager' : !voice.hasMic ? 'Watching · mic off' : voice.micEnabled ? 'Mic on' : 'Muted'}</span></li>
         )}
         {voice.peers.map((peer) => {
           const mod = voice.moderation.get(peer.id);
@@ -73,7 +75,7 @@ export default function VoicePanel() {
             <li key={peer.id} className="voice-person">
               <span className={`voice-dot ${peer.state === 'connected' && !mod?.audio_muted ? 'is-on' : ''}`} aria-hidden="true" />
               <span className="voice-name">{name(peer.id)}</span>
-              <span className="voice-state">{mod?.audio_muted ? 'Muted by a manager' : peer.state === 'connected' ? 'Connected' : 'Connecting…'}{peer.sharingScreen ? ' · Sharing' : ''}</span>
+              <span className="voice-state">{mod?.audio_muted ? 'Muted by a manager' : !peer.hasMic && !peer.sharingScreen ? 'Watching · mic off' : peer.state === 'connected' ? 'Connected' : 'Connecting…'}{peer.sharingScreen ? ' · Sharing' : ''}</span>
               {capabilities.manageMembers && (
                 <span className="voice-actions">
                   <button type="button" className="collab-link" onClick={() => void moderate(peer.id, !mod?.audio_muted, Boolean(mod?.screen_blocked))}>{mod?.audio_muted ? 'Unmute' : 'Mute'}</button>
@@ -132,7 +134,9 @@ export function VoiceDock({ onOpen, panelOpen }: { onOpen: () => void; panelOpen
       {voice.joined && (
         <>
           <span className="voice-dock-label">In voice · {voice.peers.length + 1}</span>
-          <button type="button" className={`voice-dock-button ${voice.micEnabled ? '' : 'is-off'}`} onClick={voice.toggleMic} aria-pressed={!voice.micEnabled}>{voice.micEnabled ? 'Mute' : 'Unmute'}</button>
+          {voice.hasMic
+            ? <button type="button" className={`voice-dock-button ${voice.micEnabled ? '' : 'is-off'}`} onClick={voice.toggleMic} aria-pressed={!voice.micEnabled}>{voice.micEnabled ? 'Mute' : 'Unmute'}</button>
+            : <button type="button" className="voice-dock-button" onClick={() => void voice.enableMic()} disabled={voice.joining}>Turn on mic</button>}
           {!panelOpen && <button type="button" className="voice-dock-button" onClick={onOpen}>Open</button>}
           <button type="button" className="voice-dock-button is-danger" onClick={voice.leave}>Leave</button>
         </>

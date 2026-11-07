@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
-import { VoiceMesh, type RtcSignal, type VoicePeer } from '@/lib/voice-mesh';
+import { PEER_TIMEOUT_MS, VoiceMesh, type RtcSignal, type VoicePeer } from '@/lib/voice-mesh';
 import { useAnnounce, useHintedLoad, useRoomCapabilities } from '@/lib/collab-hooks';
 import {
   finishRecording, listConsents, listHands, listRecordings, listVoiceModeration, uploadRecording,
@@ -26,7 +26,20 @@ type VoiceContextValue = {
   savingRecording: boolean;
   localStream: MediaStream | null;
   screenStream: MediaStream | null;
-  join: () => Promise<void>;
+  // False while joined only to watch a shared tab (no microphone).
+  hasMic: boolean;
+  canUseVoice: boolean;
+  // Other members sharing a tab or screen right now, known even before this
+  // member joins voice (from the room's `hello` heartbeats).
+  liveSharers: string[];
+  shareVolume: number;
+  shareMuted: boolean;
+  shareSoundBlocked: boolean;
+  setShareVolume: (volume: number) => void;
+  setShareMuted: (muted: boolean) => void;
+  resumeShareSound: () => void;
+  join: (options?: { mic?: boolean }) => Promise<void>;
+  enableMic: () => Promise<void>;
   leave: () => void;
   toggleMic: () => void;
   startScreen: () => Promise<void>;
@@ -44,6 +57,24 @@ export function useVoiceRoom() {
   return value;
 }
 
+const getMic = () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+
+function voiceUnavailable(chatAllowed: boolean) {
+  if (!chatAllowed) return 'Voice is not available to your room role.';
+  if (typeof RTCPeerConnection === 'undefined') return 'This browser does not support voice.';
+  return null;
+}
+
+// A shared tab at up to 720p and 30 fps, with the tab's own sound. Chrome and
+// Edge open on the tab list; the room's own tab is left out of it.
+export const TAB_SHARE_CONSTRAINTS = {
+  video: { frameRate: { ideal: 30, max: 30 }, width: { max: 1280 }, height: { max: 720 }, displaySurface: 'browser' },
+  audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+  selfBrowserSurface: 'exclude',
+  surfaceSwitching: 'include',
+  systemAudio: 'include',
+} as DisplayMediaStreamOptions;
+
 function mediaErrorMessage(error: unknown, kind: 'mic' | 'screen') {
   const name = error instanceof DOMException ? error.name : '';
   if (name === 'NotAllowedError') return kind === 'mic' ? 'Microphone permission was denied.' : 'Screen sharing was cancelled or not allowed.';
@@ -55,7 +86,7 @@ function mediaErrorMessage(error: unknown, kind: 'mic' | 'screen') {
 // while members switch tools. Server state (moderation, hands, recordings) is
 // re-read on `collab_changed` hints; WebRTC signaling arrives as `rtc_signal`.
 export function VoiceRoomProvider({ roomId, children }: { roomId: string; children: ReactNode }) {
-  const { currentUserId, subscribeRoomEvents, sendRoomEvent } = useRoomRealtime();
+  const { currentUserId, subscribeRoomEvents, sendRoomEvent, connectionState, connectionGeneration } = useRoomRealtime();
   const capabilities = useRoomCapabilities(roomId);
   const announce = useAnnounce();
   const meshRef = useRef<VoiceMesh | null>(null);
@@ -74,6 +105,12 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
   const [recorderRunning, setRecorderRunning] = useState(false);
   const [savingRecording, setSavingRecording] = useState(false);
   const recorderRef = useRef<{ recorder: MediaRecorder; context: AudioContext; destination: MediaStreamAudioDestinationNode; connected: Set<string>; chunks: Blob[]; recordingId: string; startedAt: number } | null>(null);
+  const [hasMic, setHasMic] = useState(false);
+  const [sharerSeen, setSharerSeen] = useState<Map<string, number>>(() => new Map());
+  const [shareVolume, setShareVolume] = useState(1);
+  const [shareMuted, setShareMuted] = useState(false);
+  const [shareSoundBlocked, setShareSoundBlocked] = useState(false);
+  const [soundNonce, setSoundNonce] = useState(0);
 
   const syncFromMesh = useCallback(() => {
     const mesh = meshRef.current;
@@ -81,6 +118,7 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
     setSharingScreen(Boolean(mesh?.isSharingScreen));
     setScreenStream(mesh?.screenStream ?? null);
     setLocalStream(mesh?.localStream ?? null);
+    setHasMic(Boolean(mesh?.hasMic));
   }, []);
 
   const reload = useCallback(() => {
@@ -94,11 +132,41 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
   }, [roomId]);
   useHintedLoad(['voice', 'hands', 'recordings'], reload);
 
-  // Signaling. Messages for other members are ignored inside the mesh.
+  // Signaling. Messages for other members are ignored inside the mesh. Every
+  // member (in voice or not) notes who announces a share, so the stage can
+  // offer "Watch" before anyone joins voice.
   useEffect(() => subscribeRoomEvents((event) => {
     if (event.type !== 'rtc_signal') return;
-    void meshRef.current?.handleSignal(event.senderId, event.payload as RtcSignal);
-  }), [subscribeRoomEvents]);
+    const signal = event.payload as RtcSignal;
+    if (event.senderId !== currentUserId && (signal.kind === 'bye' || (signal.kind === 'hello' && typeof signal.screen === 'boolean'))) {
+      const sharing = signal.kind === 'hello' && signal.screen === true;
+      setSharerSeen((current) => {
+        if (!sharing && !current.has(event.senderId)) return current;
+        const next = new Map(current);
+        if (sharing) next.set(event.senderId, Date.now()); else next.delete(event.senderId);
+        return next;
+      });
+    }
+    void meshRef.current?.handleSignal(event.senderId, signal);
+  }), [currentUserId, subscribeRoomEvents]);
+
+  // Ask who is sharing whenever the room connection (re)opens.
+  useEffect(() => {
+    if (connectionState === 'connected' && capabilities.chat) sendRoomEvent('rtc_signal', { kind: 'who' });
+  }, [capabilities.chat, connectionGeneration, connectionState, sendRoomEvent]);
+
+  // A sharer that stops sending heartbeats (closed tab, lost network) is dropped.
+  useEffect(() => {
+    if (sharerSeen.size === 0) return;
+    const timer = window.setInterval(() => {
+      const cutoff = Date.now() - PEER_TIMEOUT_MS;
+      setSharerSeen((current) => {
+        if (![...current.values()].some((seen) => seen < cutoff)) return current;
+        return new Map([...current].filter(([, seen]) => seen >= cutoff));
+      });
+    }, 4_000);
+    return () => window.clearInterval(timer);
+  }, [sharerSeen.size]);
 
   const myModeration = currentUserId ? moderation.get(currentUserId) : undefined;
   const forcedMute = Boolean(myModeration?.audio_muted);
@@ -114,25 +182,53 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
     if (screenBlocked && meshRef.current?.isSharingScreen) meshRef.current.stopScreen();
   }, [screenBlocked]);
 
-  const join = useCallback(async () => {
+  // Joins the mesh synchronously (no await) so a screen picker opened in the
+  // same click still has the user's gesture.
+  const openMesh = useCallback((local: MediaStream | null) => {
+    if (!currentUserId) return null;
+    const mesh = new VoiceMesh(currentUserId, (signal) => sendRoomEvent('rtc_signal', signal as unknown as Record<string, unknown>), syncFromMesh);
+    meshRef.current = mesh;
+    mesh.join(local);
+    mesh.setMicEnabled(!forcedMute && micEnabled);
+    setJoined(true);
+    setError(null);
+    return mesh;
+  }, [currentUserId, forcedMute, micEnabled, sendRoomEvent, syncFromMesh]);
+
+  // `mic: false` joins only to watch and listen; the browser asks for nothing.
+  const join = useCallback(async (options?: { mic?: boolean }) => {
     if (!currentUserId || meshRef.current?.isJoined || joining) return;
-    if (!capabilities.chat) { setError('Voice is not available to your room role.'); return; }
-    if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') { setError('This browser does not support voice.'); return; }
+    const unavailable = voiceUnavailable(capabilities.chat);
+    if (unavailable) { setError(unavailable); return; }
+    if (options?.mic === false) { openMesh(null); return; }
+    if (!navigator.mediaDevices?.getUserMedia) { setError('This browser does not support voice.'); return; }
     setJoining(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
-      const mesh = new VoiceMesh(currentUserId, (signal) => sendRoomEvent('rtc_signal', signal as unknown as Record<string, unknown>), syncFromMesh);
-      meshRef.current = mesh;
-      mesh.join(stream);
-      mesh.setMicEnabled(!forcedMute && micEnabled);
-      setJoined(true);
-      setError(null);
+      const stream = await getMic();
+      if (meshRef.current?.isJoined) meshRef.current.addMic(stream);
+      else openMesh(stream);
     } catch (joinError) {
       setError(mediaErrorMessage(joinError, 'mic'));
     } finally {
       setJoining(false);
     }
-  }, [capabilities.chat, currentUserId, forcedMute, joining, micEnabled, sendRoomEvent, syncFromMesh]);
+  }, [capabilities.chat, currentUserId, joining, openMesh]);
+
+  const enableMic = useCallback(async () => {
+    const mesh = meshRef.current;
+    if (!mesh?.isJoined || mesh.hasMic || joining) return;
+    if (!navigator.mediaDevices?.getUserMedia) { setError('This browser does not support voice.'); return; }
+    setJoining(true);
+    try {
+      const stream = await getMic();
+      if (meshRef.current === mesh && mesh.isJoined) { mesh.addMic(stream); mesh.setMicEnabled(!forcedMute && micEnabled); setError(null); }
+      else stream.getTracks().forEach((track) => track.stop());
+    } catch (micError) {
+      setError(mediaErrorMessage(micError, 'mic'));
+    } finally {
+      setJoining(false);
+    }
+  }, [forcedMute, joining, micEnabled]);
 
   const stopRecorder = useCallback(async (save: boolean) => {
     const active = recorderRef.current;
@@ -175,19 +271,37 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
     setMicEnabled((current) => !current);
   }, [forcedMute]);
 
+  // Works without joining voice first: the picker opens straight from the
+  // click, then the member joins watch-only (no microphone) to send it.
   const startScreen = useCallback(async () => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
     if (screenBlocked) { setError('A room manager stopped your screen sharing.'); return; }
+    const unavailable = voiceUnavailable(capabilities.chat);
+    if (unavailable) { setError(unavailable); return; }
     if (!navigator.mediaDevices?.getDisplayMedia) { setError('This browser does not support screen sharing.'); return; }
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false });
-      mesh.startScreen(stream);
-      setError(null);
+      stream = await navigator.mediaDevices.getDisplayMedia(TAB_SHARE_CONSTRAINTS);
     } catch (screenError) {
       setError(mediaErrorMessage(screenError, 'screen'));
+      return;
     }
-  }, [screenBlocked]);
+    const mesh = meshRef.current?.isJoined ? meshRef.current : openMesh(null);
+    if (!mesh) { stream.getTracks().forEach((track) => track.stop()); return; }
+    mesh.startScreen(stream);
+    setError(null);
+  }, [capabilities.chat, openMesh, screenBlocked]);
+
+  // Remote tab sound plays from one hidden element per sharer; a browser that
+  // blocks it until the next click reports it so the stage can offer a button.
+  const resumeShareSound = useCallback(() => { setShareSoundBlocked(false); setSoundNonce((value) => value + 1); }, []);
+  const markShareSoundBlocked = useCallback(() => setShareSoundBlocked(true), []);
+
+  const liveSharers = useMemo(() => {
+    const blocked = (id: string) => Boolean(moderation.get(id)?.screen_blocked);
+    const ids = new Set<string>([...sharerSeen.keys()]);
+    for (const peer of peers) if (peer.sharingScreen) ids.add(peer.id);
+    return [...ids].filter((id) => id !== currentUserId && !blocked(id));
+  }, [currentUserId, moderation, peers, sharerSeen]);
 
   const stopScreen = useCallback(() => { meshRef.current?.stopScreen(); }, []);
 
@@ -234,20 +348,42 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
   const value = useMemo<VoiceContextValue>(() => ({
     roomId, joined, joining, micEnabled: micEnabled && !forcedMute, sharingScreen, peers, error, moderation, hands,
     recordings, consents, recordingActive: Boolean(activeRecording), recorderRunning, savingRecording,
-    localStream, screenStream, join, leave, toggleMic, startScreen, stopScreen, stopRecording, reload, setError,
-  }), [activeRecording, consents, error, forcedMute, hands, join, joined, joining, leave, localStream, micEnabled, moderation, peers, recorderRunning, recordings, reload, roomId, savingRecording, screenStream, sharingScreen, startScreen, stopRecording, stopScreen, toggleMic]);
+    localStream, screenStream, hasMic, canUseVoice: capabilities.chat, liveSharers, shareVolume, shareMuted, shareSoundBlocked,
+    setShareVolume, setShareMuted, resumeShareSound,
+    join, enableMic, leave, toggleMic, startScreen, stopScreen, stopRecording, reload, setError,
+  }), [activeRecording, capabilities.chat, consents, enableMic, error, forcedMute, hands, hasMic, join, joined, joining, leave, liveSharers, localStream, micEnabled, moderation, peers, recorderRunning, recordings, reload, resumeShareSound, roomId, savingRecording, screenStream, shareMuted, shareSoundBlocked, shareVolume, sharingScreen, startScreen, stopRecording, stopScreen, toggleMic]);
 
   return (
     <VoiceContext.Provider value={value}>
       {children}
-      {/* Remote voices play here so they continue while the panel is closed. */}
+      {/* Remote voices and shared-tab sound play here so they continue while the panel is closed. */}
       <div hidden>
         {peers.map((peer) => (
           <VoiceAudio key={peer.id} stream={peer.audio} muted={Boolean(moderation.get(peer.id)?.audio_muted)} />
         ))}
+        {peers.filter((peer) => peer.screen && liveSharers.includes(peer.id)).map((peer) => (
+          <ShareAudio key={`${peer.id}-${soundNonce}`} stream={peer.screen as MediaStream} volume={shareVolume} muted={shareMuted} onBlocked={markShareSoundBlocked} />
+        ))}
       </div>
     </VoiceContext.Provider>
   );
+}
+
+function ShareAudio({ stream, volume, muted, onBlocked }: { stream: MediaStream; volume: number; muted: boolean; onBlocked: () => void }) {
+  const ref = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    if (element.srcObject !== stream) element.srcObject = stream;
+    void element.play().catch((playError: unknown) => { if (playError instanceof DOMException && playError.name === 'NotAllowedError') onBlocked(); });
+  }, [onBlocked, stream]);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    element.volume = Math.min(1, Math.max(0, volume));
+    element.muted = muted;
+  }, [muted, volume]);
+  return <audio ref={ref} autoPlay data-share-audio="live" />;
 }
 
 function VoiceAudio({ stream, muted }: { stream: MediaStream | null; muted: boolean }) {
