@@ -213,8 +213,8 @@ select.omni-select option { background: #241d36; color: var(--omni-text); }
 @supports not (backdrop-filter: blur(1px)) { .desk-win { background: var(--omni-frost-solid); } }
 .desk-bar { position: relative; z-index: 4; display: flex; flex: none; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-bottom: 1px solid var(--omni-line-soft); color: var(--omni-text-2); font-size: 13px; cursor: grab; touch-action: none; user-select: none; }
 .is-lifted .desk-bar { cursor: grabbing; }
-.desk-dots { display: flex; flex: none; gap: 6px; }
-.desk-dots > i, .desk-dot { display: grid; width: 10px; height: 10px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: rgba(255,255,255,.2); color: transparent; cursor: pointer; }
+.desk-dots { display: flex; flex: none; gap: 8px; }
+.desk-dots > i, .desk-dot { display: grid; width: 16px; height: 16px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: rgba(255,255,255,.2); color: transparent; cursor: pointer; }
 .desk-bar:hover .desk-dot, .desk-dot:focus-visible { background: rgba(255,255,255,.5); color: #15111e; }
 .desk-dot:focus-visible { outline-offset: 2px; }
 .desk-title { display: flex; min-width: 0; flex: 1; align-items: center; justify-content: center; gap: 6px; overflow: hidden; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; white-space: nowrap; cursor: inherit; }
@@ -312,6 +312,10 @@ select.omni-select option { background: #241d36; color: var(--omni-text); }
 .message-composer { padding: 12px; border-top: 1px solid var(--omni-line-soft); background: rgba(12,13,16,.75); }
 .omni-state-screen { display: flex; min-height: 100vh; align-items: center; justify-content: center; padding: 24px; }
 .omni-state-card { width: min(440px,100%); padding: 30px; text-align: center; }
+.share-link { overflow: hidden; margin: 8px 0 0; color: var(--omni-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.share-rooms { display: grid; gap: 6px; max-height: 50vh; overflow-y: auto; margin: 16px 0 0; padding: 0; list-style: none; text-align: left; }
+.share-room { display: block; overflow: hidden; border: 1px solid var(--omni-line); border-radius: 12px; padding: 12px 14px; background: rgba(255,255,255,.04); color: var(--omni-text); font-size: 14px; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; transition: background-color 150ms ease, border-color 150ms ease; }
+.share-room:hover, .share-room:focus-visible { border-color: rgba(185,168,255,.45); background: rgba(185,168,255,.1); }
 .auth-shell { display: flex; min-height: 100vh; align-items: center; justify-content: center; padding: 28px; }
 .auth-session-check { width: min(320px,100%); padding: 22px; color: var(--omni-muted); text-align: center; }
 .auth-card { display: grid; grid-template-columns: minmax(360px,1fr) minmax(380px,1fr); width: min(980px,100%); overflow: hidden; border: 1px solid var(--omni-line); border-radius: 24px; background: rgba(10,11,14,.84); box-shadow: var(--omni-shadow); }
@@ -794,6 +798,30 @@ select.omni-select option { background: #241d36; color: var(--omni-text); }
 .watch-panel-hint { color: var(--omni-faint); font-size: 11px; }
 .watch-panel-skeleton { height: 120px; border-radius: 12px; background: linear-gradient(90deg, rgba(255,255,255,.04), rgba(255,255,255,.08), rgba(255,255,255,.04)); background-size: 200% 100%; animation: notification-skeleton 1.2s ease-in-out infinite; }
 .watch-panel-clip-form { display: grid; grid-template-columns: 1fr; gap: 6px; margin-bottom: 8px; }
+.watch-panel-link-form { display: flex; gap: 6px; margin-bottom: 8px; }
+.watch-panel-link-form .omni-input { min-width: 0; flex: 1; }
+.site-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.site-links-label { width: 100%; color: var(--omni-faint); font-size: 11px; }
+.site-link { display: inline-flex; min-height: 30px; align-items: center; gap: 6px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; background: rgba(255,255,255,.04); padding: 0 10px; color: var(--omni-text-2); font-size: 12px; font-weight: 600; text-decoration: none; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+.site-link:hover, .site-link:focus-visible { border-color: rgba(255,255,255,.22); background: rgba(255,255,255,.09); color: white; }
+.site-link svg { flex: none; }
+.watch-panel-progress { margin: 8px 10px 0; border-radius: 8px; background: rgba(255,255,255,.05); padding: 6px 10px; color: var(--omni-text-2); font-size: 12px; }
+/* Search (YouTube, Twitch): results with Play now, Play next and Add to queue. */
+.watch-search-form { margin: 8px 8px 0; }
+.watch-search-row { display: flex; align-items: flex-start; gap: 10px; border-radius: 10px; padding: 8px; background: rgba(255,255,255,.03); }
+.watch-search-thumb { width: 96px; aspect-ratio: 16 / 9; flex: none; border-radius: 8px; background: rgba(255,255,255,.06); object-fit: cover; }
+.watch-search-thumb.is-avatar { width: 54px; aspect-ratio: 1; border-radius: 50%; }
+.watch-search-live { display: inline-block; margin-right: 6px; border-radius: 4px; background: #e11d48; padding: 0 5px; color: white; font-size: 10px; font-weight: 700; }
+.watch-search-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+/* A link pasted, dropped or shared into the room: what to do with it. */
+.link-catch { position: fixed; left: 50%; bottom: calc(104px + env(safe-area-inset-bottom)); z-index: 70; width: min(440px, calc(100vw - 32px)); transform: translateX(-50%); border-radius: 16px; padding: 14px; animation: room-chat-pop 220ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.link-catch-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.link-catch-title { display: block; color: var(--omni-text); font-size: 14px; font-weight: 600; }
+.link-catch-url { display: block; overflow: hidden; margin-top: 2px; color: var(--omni-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.link-catch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.link-catch-actions:empty { display: none; }
+.link-catch-note { margin: 10px 0 0; color: var(--omni-text-2); font-size: 12px; }
+.link-catch-note.is-error { color: #fca5a5; }
 .now-playing-slot { width: min(440px, calc(100vw - 48px)); }
 .now-playing-bar { display: flex; align-items: center; gap: 10px; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 8px 8px 8px 12px; background: rgba(17,18,23,.94); box-shadow: 0 16px 40px -14px rgba(0,0,0,.8); backdrop-filter: blur(14px); animation: room-chat-pop 200ms cubic-bezier(0.16, 1, 0.3, 1) both; }
 .now-playing-pulse { width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: var(--omni-faint); }

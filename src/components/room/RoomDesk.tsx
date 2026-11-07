@@ -341,9 +341,9 @@ export default function RoomDesk({ ref, windows, preset, storageKey, onClose, em
           >
             <header className="desk-bar" onPointerDown={(event) => startGesture(event, w.id, 'move')} onPointerMove={onGestureMove} onPointerUp={onGestureEnd} onPointerCancel={onGestureEnd} onDoubleClick={() => setMaxId((current) => (current === w.id ? null : w.id))}>
               <span className="desk-dots">
-                <button type="button" className="desk-dot" aria-label={`Close the ${w.title} window`} title="Close" onPointerDown={(event) => event.stopPropagation()} onClick={() => onClose(w.id)}><OmniIcon name="close" size={8} strokeWidth={2.4} /></button>
+                <button type="button" className="desk-dot" aria-label={`Close the ${w.title} window`} title="Close" onPointerDown={(event) => event.stopPropagation()} onClick={() => onClose(w.id)}><OmniIcon name="close" size={11} strokeWidth={2.4} /></button>
                 <i aria-hidden="true" />
-                <button type="button" className="desk-dot" aria-label={`Fill the desk with the ${w.title} window`} aria-pressed={maxId === w.id} title={maxId === w.id ? 'Restore' : 'Focus'} onPointerDown={(event) => event.stopPropagation()} onClick={() => setMaxId((current) => (current === w.id ? null : w.id))}><OmniIcon name="maximize" size={8} strokeWidth={2.4} /></button>
+                <button type="button" className="desk-dot" aria-label={`Fill the desk with the ${w.title} window`} aria-pressed={maxId === w.id} title={maxId === w.id ? 'Restore' : 'Focus'} onPointerDown={(event) => event.stopPropagation()} onClick={() => setMaxId((current) => (current === w.id ? null : w.id))}><OmniIcon name="maximize" size={11} strokeWidth={2.4} /></button>
               </span>
               <button type="button" className="desk-title" aria-describedby="desk-move-hint" aria-roledescription="movable window title" onKeyDown={keyNudge(w.id, false)}>
                 <OmniIcon name={w.icon} size={14} />{w.title}

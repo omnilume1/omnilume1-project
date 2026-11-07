@@ -273,7 +273,7 @@ export default function Home() {
               <div><h3>Account</h3><Link href="/login">Sign in</Link><Link href="/login">Create account</Link><Link href="/forgot-password">Forgot password</Link></div>
               <div><h3>OmniLume</h3><a href="#more">About</a><span>Privacy</span><span>Terms</span></div>
             </div>
-            <div className={styles.footBottom} data-reveal style={d(0.2)}><span className={styles.logo}><OmniMark size={22} />OmniLume</span><span>© {new Date().getFullYear()} OmniLume</span></div>
+            <div className={styles.footBottom} data-reveal style={d(0.2)}><span className={styles.logo}><OmniMark size={44} />OmniLume</span><span>© {new Date().getFullYear()} OmniLume</span></div>
           </div>
         </footer>
       </div>
