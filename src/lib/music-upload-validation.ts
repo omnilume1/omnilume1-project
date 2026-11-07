@@ -1,11 +1,13 @@
+import { MAX_UPLOAD_BYTES } from '@/lib/upload-limits';
+
 // Shared by the browser upload flow and POST /api/music/uploads. The database
 // (register_music_upload) stays authoritative for caps and the 7-day expiry.
 
 export const MUSIC_BUCKET = 'music_uploads';
-export const MUSIC_MAX_FILE_BYTES = 50 * 1024 * 1024;
-export const MUSIC_MAX_COVER_BYTES = 2 * 1024 * 1024;
+export const MUSIC_MAX_FILE_BYTES = MAX_UPLOAD_BYTES;
+export const MUSIC_MAX_COVER_BYTES = MAX_UPLOAD_BYTES;
 export const MUSIC_MAX_ACTIVE_FILES = 40;
-export const MUSIC_MAX_TOTAL_BYTES = 300 * 1024 * 1024;
+export const MUSIC_MAX_TOTAL_BYTES = MAX_UPLOAD_BYTES;
 export const MUSIC_MAX_LYRICS_CHARS = 20_000;
 
 export const MUSIC_AUDIO_TYPES = {

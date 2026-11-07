@@ -1,3 +1,5 @@
+import { MAX_UPLOAD_BYTES } from '@/lib/upload-limits';
+
 export type RoomUploadCandidate = {
   name: string;
   type: string;
@@ -6,8 +8,8 @@ export type RoomUploadCandidate = {
 
 export type RoomMediaKind = 'audio' | 'video';
 
-export const ROOM_MEDIA_MAX_BYTES = 50 * 1024 * 1024;
-export const ROOM_SUBTITLE_MAX_BYTES = 5 * 1024 * 1024;
+export const ROOM_MEDIA_MAX_BYTES = MAX_UPLOAD_BYTES;
+export const ROOM_SUBTITLE_MAX_BYTES = MAX_UPLOAD_BYTES;
 
 const AUDIO_EXTENSIONS = new Set(['aac', 'flac', 'm4a', 'mp3', 'ogg', 'opus', 'wav', 'weba']);
 const VIDEO_EXTENSIONS = new Set(['avi', 'm4v', 'mkv', 'mov', 'mp4', 'mpeg', 'mpg', 'ogv', 'webm']);
@@ -94,7 +96,7 @@ export function roomStorageObjectPath(
 
 export function validateRoomMediaUpload(file: RoomUploadCandidate) {
   if (!Number.isSafeInteger(file.size) || file.size <= 0) return 'The selected file is empty.';
-  if (file.size > ROOM_MEDIA_MAX_BYTES) return 'Files are capped at 50MB.';
+  if (file.size > ROOM_MEDIA_MAX_BYTES) return 'Files are capped at 500MB.';
   if (!getRoomMediaKind(file)) return 'Choose a supported audio or video file.';
   if (!roomMediaStorageMimeType(file)) {
     return 'Supported formats are MP3, FLAC, OGG, Opus, WAV, WEBA, MP4, M4V, OGV and WebM.';
@@ -104,7 +106,7 @@ export function validateRoomMediaUpload(file: RoomUploadCandidate) {
 
 export function validateRoomSubtitleUpload(file: RoomUploadCandidate) {
   if (!Number.isSafeInteger(file.size) || file.size <= 0) return 'The selected subtitle file is empty.';
-  if (file.size > ROOM_SUBTITLE_MAX_BYTES) return 'Subtitle files are capped at 5MB.';
+  if (file.size > ROOM_SUBTITLE_MAX_BYTES) return 'Subtitle files are capped at 500MB.';
   if (!SUBTITLE_EXTENSIONS.has(roomFileExtension(file.name)) || !SUBTITLE_MIME_TYPES.has(file.type.trim().toLowerCase())) {
     return 'Choose a VTT or SRT subtitle file.';
   }

@@ -1,5 +1,7 @@
+import { MAX_UPLOAD_BYTES } from '@/lib/upload-limits';
+
 export const ROOM_ATTACHMENT_BUCKET = 'room_attachments';
-export const ROOM_FILE_MAX_BYTES = 50 * 1024 * 1024;
+export const ROOM_FILE_MAX_BYTES = MAX_UPLOAD_BYTES;
 
 const UUID_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const ROOM_ID_PATTERN = new RegExp(`^${UUID_PATTERN}$`, 'i');
@@ -86,7 +88,7 @@ export function assertRoomFileInput(file: Pick<File, 'name' | 'size' | 'type'>, 
     throw new Error('Choose a non-empty file.');
   }
   if (file.size > ROOM_FILE_MAX_BYTES) {
-    throw new Error('Files are capped at 50 MB.');
+    throw new Error('Files are capped at 500 MB.');
   }
 
   const mimeType = file.type.toLowerCase();

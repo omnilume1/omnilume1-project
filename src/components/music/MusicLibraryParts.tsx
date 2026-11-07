@@ -64,7 +64,7 @@ export function UploadPanel() {
       >
         <MusicIcon name="note" size={28} />
         <h2 id="mu-upload-title">Add your music</h2>
-        <p>Drop audio files here (MP3, FLAC, OGG, Opus, WAV, M4A, AAC, WebM, up to 50 MB each). Add a matching <code>.lrc</code> file for synced lyrics.</p>
+        <p>Drop audio files here (MP3, FLAC, OGG, Opus, WAV, M4A, AAC, WebM, up to 500 MB each). Add a matching <code>.lrc</code> file for synced lyrics.</p>
         <button type="button" className="mu-pill-button is-key" onClick={() => input.current?.click()} disabled={busy}>Choose Files</button>
         <input ref={input} type="file" multiple hidden accept=".mp3,.flac,.ogg,.oga,.opus,.wav,.m4a,.aac,.webm,.lrc,audio/*" onChange={(event) => { void start([...(event.target.files ?? [])]); event.target.value = ''; }} />
         <p className="mu-fine">

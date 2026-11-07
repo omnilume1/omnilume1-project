@@ -9,9 +9,9 @@ SELECT ok(
     SELECT 1 FROM storage.buckets
     WHERE id = 'room_attachments'
       AND public = false
-      AND file_size_limit = 52428800
+      AND file_size_limit = 524288000
   ),
-  'room attachment bucket is private and capped at 50 MB'
+  'room attachment bucket is private and capped at 500 MB'
 );
 
 SELECT ok(

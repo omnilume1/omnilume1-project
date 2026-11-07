@@ -195,9 +195,9 @@ export function MusicLibraryProvider({ children }: { children: ReactNode }) {
   }, [songs]);
 
   const uploadFile = useCallback<MusicLibrary['uploadFile']>(async (file, lrcText, onProgress) => {
-    if (file.size > MUSIC_MAX_FILE_BYTES) throw new Error('Files can be up to 50 MB.');
+    if (file.size > MUSIC_MAX_FILE_BYTES) throw new Error('Files can be up to 500 MB.');
     if (usage.files >= MUSIC_MAX_ACTIVE_FILES) throw new Error('You can keep up to 40 uploads at a time.');
-    if (usage.bytes + file.size > MUSIC_MAX_TOTAL_BYTES) throw new Error('Uploads are limited to 300 MB in total.');
+    if (usage.bytes + file.size > MUSIC_MAX_TOTAL_BYTES) throw new Error('Uploads are limited to 500 MB in total.');
     onProgress({ stage: 'reading', percent: 0 });
     const info = await readMusicFile(file);
     const supabase = createClient();

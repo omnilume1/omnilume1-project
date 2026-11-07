@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerStorageProvider } from '@/lib/storage/server-provider';
-import { MUSIC_BUCKET, musicCoverPath, musicObjectPath, parseRegisterBody, sniffAudio } from '@/lib/music-upload-validation';
+import { MUSIC_BUCKET, MUSIC_MAX_COVER_BYTES, MUSIC_MAX_FILE_BYTES, musicCoverPath, musicObjectPath, parseRegisterBody, sniffAudio } from '@/lib/music-upload-validation';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { createClient } from '@/utils/supabase/server';
 
@@ -38,6 +38,30 @@ export async function POST(request: Request) {
     return fail(422, 'This file is not a supported audio file.');
   }
 
+  const audioObject = await storage.getMetadata(MUSIC_BUCKET, audioPath).catch(() => null);
+  if (!audioObject || audioObject.size === null || audioObject.mimeType !== input.mimeType) {
+    await discard();
+    return fail(400, 'The uploaded file could not be verified. Please try again.');
+  }
+  if (audioObject.size <= 0 || audioObject.size > MUSIC_MAX_FILE_BYTES) {
+    await discard();
+    return fail(413, 'Files can be up to 500 MB.');
+  }
+
+  let coverSize: number | null = null;
+  if (input.hasCover) {
+    const coverObject = await storage.getMetadata(MUSIC_BUCKET, musicCoverPath(user.id, input.uploadId)).catch(() => null);
+    if (!coverObject || coverObject.size === null || coverObject.mimeType !== 'image/jpeg') {
+      await discard();
+      return fail(400, 'The uploaded artwork could not be verified. Please try again.');
+    }
+    if (coverObject.size <= 0 || coverObject.size > MUSIC_MAX_COVER_BYTES) {
+      await discard();
+      return fail(413, 'Files can be up to 500 MB.');
+    }
+    coverSize = coverObject.size;
+  }
+
   const { data, error } = await createAdminClient().rpc('register_music_upload', {
     p_owner_id: user.id,
     p_upload_id: input.uploadId,
@@ -55,6 +79,8 @@ export async function POST(request: Request) {
     p_hue: input.hue,
     p_lyrics: input.lyrics,
     p_has_cover: input.hasCover,
+    p_audio_size: audioObject.size,
+    p_cover_size: coverSize,
   });
   if (error) {
     // 23505: this upload id is already registered, so its objects belong to that row.
