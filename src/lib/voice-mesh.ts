@@ -1,4 +1,4 @@
-import { screenBitrate, SCREEN_VIEWER_MAX_BITRATE, shouldInitiateOffer, withStereoOpus } from '@/lib/collab-model';
+import { screenBitrate, shouldInitiateOffer, withStereoOpus } from '@/lib/collab-model';
 
 // Peer-to-peer voice and screen share (Action 12). No managed media provider
 // is configured, so this is the provider-neutral free path: a full mesh of
@@ -12,7 +12,7 @@ import { screenBitrate, SCREEN_VIEWER_MAX_BITRATE, shouldInitiateOffer, withSter
 // peer (the higher user id) rolls back and the impolite peer's offer wins.
 //
 // Members may join without a microphone ("watch only") to receive a shared
-// tab. A shared tab carries its video and, when the browser allows it, its
+// screen. A shared screen carries its video and, when the browser allows it, its
 // sound: both tracks travel in one MediaStream, so the receiver tells tab
 // sound from a microphone by the stream they arrive in.
 
@@ -55,11 +55,13 @@ type PeerEntry = {
 const HEARTBEAT_MS = 10_000;
 export const PEER_TIMEOUT_MS = 32_000;
 export const ICE_SERVERS: RTCIceServer[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+// A conservative per-viewer ceiling keeps ordinary desktop uploads viable.
+const SCREEN_ENCODER_MAX_BITRATE = 2_500_000;
 
-// The shared tab goes out at the captured resolution (up to 1080p30) and is
-// never scaled down: under a weak link or a busy CPU the encoder skips frames
-// instead. Bitrate per watcher comes from screenBitrate (total upload cap).
-// A mesh encodes the tab once per viewer, so a viewer who is not looking (room
+// Allow the browser to trade resolution and frame rate under load. Bitrate per
+// watcher comes from screenBitrate (total upload cap), with a conservative
+// sender ceiling for compatibility.
+// A mesh encodes the screen once per viewer, so a viewer who is not looking (room
 // tab hidden, no picture-in-picture) gets no video: that copy costs the host
 // no CPU or upload, frees its share of the cap for the others, and the picture
 // resumes with a fresh key frame the moment they look again. Tab sound keeps
@@ -69,10 +71,9 @@ async function tuneVideoSender(sender: RTCRtpSender, active: boolean, maxBitrate
     const params = sender.getParameters();
     if (!params.encodings?.length) params.encodings = [{}];
     params.encodings[0].active = active;
-    params.encodings[0].maxBitrate = maxBitrate;
+    params.encodings[0].maxBitrate = Math.min(maxBitrate, SCREEN_ENCODER_MAX_BITRATE);
     params.encodings[0].maxFramerate = 30;
-    params.encodings[0].scaleResolutionDownBy = 1;
-    (params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference = 'maintain-resolution';
+    (params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference = 'balanced';
     await sender.setParameters(params);
   } catch {
     // Older browsers keep their defaults.
@@ -93,45 +94,6 @@ async function tuneAudioSender(sender: RTCRtpSender) {
   }
 }
 
-// A hardware encoder runs at a fraction of the CPU of software VP8 (Chrome's
-// default) and, when it keeps up, never queues frames (no added delay). The
-// first one the browser reports as power efficient at 1080p30 goes first,
-// best picture per bit first: AV1, then VP9, then H.264. The other codecs stay
-// in the list, so a viewer who cannot decode it gets the next one.
-const HARDWARE_CANDIDATES = [
-  { mime: 'video/av1', probe: 'video/AV1' },
-  { mime: 'video/vp9', probe: 'video/VP9;profile-id=0' },
-  { mime: 'video/h264', probe: 'video/H264;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f' },
-];
-let codecProbe: Promise<void> | null = null;
-let hardwareCodec: string | null = null;
-function detectEfficientCodec() {
-  if (codecProbe || typeof navigator === 'undefined' || !navigator.mediaCapabilities?.encodingInfo) return;
-  codecProbe = (async () => {
-    for (const candidate of HARDWARE_CANDIDATES) {
-      try {
-        const info = await navigator.mediaCapabilities.encodingInfo({ type: 'webrtc', video: { contentType: candidate.probe, width: 1920, height: 1080, bitrate: SCREEN_VIEWER_MAX_BITRATE, framerate: 30 } });
-        if (info.supported && info.powerEfficient) { hardwareCodec = candidate.mime; return; }
-      } catch {
-        // Unknown to this browser; try the next.
-      }
-    }
-  })();
-}
-function preferEfficientCodec(pc: RTCPeerConnection, sender: RTCRtpSender) {
-  if (!hardwareCodec) return;
-  const transceiver = pc.getTransceivers().find((item) => item.sender === sender);
-  const codecs = typeof RTCRtpReceiver.getCapabilities === 'function' ? RTCRtpReceiver.getCapabilities('video')?.codecs : undefined;
-  if (!transceiver?.setCodecPreferences || !codecs?.length) return;
-  // Among H.264 entries the widely decodable baseline profile leads.
-  const rank = (codec: RTCRtpCodec) => codec.mimeType.toLowerCase() !== hardwareCodec ? 2 : codec.sdpFmtpLine?.includes('profile-level-id=42e01f') ? 0 : 1;
-  try {
-    transceiver.setCodecPreferences([...codecs].sort((a, b) => rank(a) - rank(b)));
-  } catch {
-    // Keep the browser's order.
-  }
-}
-
 export class VoiceMesh {
   private peers = new Map<string, PeerEntry>();
   private local: MediaStream | null = null;
@@ -144,7 +106,7 @@ export class VoiceMesh {
     private readonly selfId: string,
     private readonly send: (signal: RtcSignal) => boolean,
     private readonly onChange: () => void,
-  ) { detectEfficientCodec(); }
+  ) {}
 
   get isJoined() { return this.joined; }
   get isSharingScreen() { return this.screen !== null; }
@@ -382,8 +344,7 @@ export class VoiceMesh {
     for (const track of [...this.screen.getVideoTracks(), ...this.screen.getAudioTracks()]) {
       const sender = peer.pc.addTrack(track, this.screen);
       peer.screenSenders.push(sender);
-      if (track.kind === 'video') preferEfficientCodec(peer.pc, sender);
-      else void tuneAudioSender(sender);
+      if (track.kind === 'audio') void tuneAudioSender(sender);
     }
     this.retuneScreen();
   }
