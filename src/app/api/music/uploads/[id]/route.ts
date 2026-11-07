@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { isUuid, MUSIC_BUCKET } from '@/lib/music-upload-validation';
 import { createAdminClient } from '@/utils/supabase/admin';
+import { getServerStorageProvider } from '@/lib/storage/server-provider';
 import { createClient } from '@/utils/supabase/server';
 
 /** Owner deletes an upload: the RPC checks ownership and stops playback, then storage, then the row. */
@@ -18,7 +19,12 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   if (paths.length === 0) return NextResponse.json({ ok: true });
 
   const admin = createAdminClient();
-  const { error: removeError } = await admin.storage.from(MUSIC_BUCKET).remove(paths);
+  let removeError: Error | null = null;
+  try {
+    await getServerStorageProvider().cleanup(MUSIC_BUCKET, paths);
+  } catch (error) {
+    removeError = error instanceof Error ? error : new Error('Unable to remove upload objects.');
+  }
   const { error: completeError } = await admin.rpc('complete_music_upload_cleanup', {
     p_upload_id: id,
     p_error: removeError ? removeError.message : null,

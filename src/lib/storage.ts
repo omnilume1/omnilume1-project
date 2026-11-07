@@ -12,15 +12,12 @@ export interface StorageUploadTask {
   supportsCancellation: boolean;
 }
 
-function encodeStoragePath(path: string) {
-  return path.split('/').map(encodeURIComponent).join('/');
+function uploadBody(file: Blob, contentType?: string) {
+  if (!contentType || file.type === contentType) return file;
+  return new Blob([file], { type: contentType });
 }
 
-/**
- * Supabase's browser upload helper resolves only after completion. XHR gives
- * the upload screen a real byte-level progress signal while still using the
- * authenticated Supabase storage endpoint.
- */
+/** Upload through the authenticated server route so storage credentials stay server-only. */
 export function startUploadFileWithProgress(
   supabase: SupabaseClient,
   bucket: string,
@@ -29,45 +26,32 @@ export function startUploadFileWithProgress(
   onProgress?: (progress: StorageUploadProgress) => void,
   contentType?: string,
 ): StorageUploadTask {
-  // The bucket's allowed_mime_types checks the uploaded part's type, so send
-  // the caller's contract type rather than whatever the browser reported.
-  const body = contentType && file.type !== contentType ? new Blob([file], { type: contentType }) : file;
+  void supabase;
+  const body = uploadBody(file, contentType);
+  const fileName = typeof File !== 'undefined' && file instanceof File ? file.name : 'upload.bin';
   if (typeof XMLHttpRequest === 'undefined') {
     return {
       supportsCancellation: false,
       cancel: () => undefined,
       promise: (async () => {
-        const { data, error } = await supabase.storage.from(bucket).upload(path, body, {
-          cacheControl: '3600',
-          upsert: false,
-          ...(contentType ? { contentType } : {}),
-        });
-        if (error) throw error;
+        const formData = new FormData();
+        formData.append('bucket', bucket);
+        formData.append('path', path);
+        formData.append('file', body, fileName);
+        const response = await fetch('/api/storage/upload', { method: 'POST', body: formData, credentials: 'include' });
+        const result = (await response.json().catch(() => ({}))) as { path?: string; error?: string };
+        if (!response.ok || !result.path) throw new Error(result.error ?? `Upload failed (${response.status}).`);
         onProgress?.({ loaded: file.size, total: file.size, percent: 100 });
-        return data;
+        return { path: result.path };
       })(),
     };
   }
 
   let request: XMLHttpRequest | undefined;
-  const promise = (async () => {
-    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError) throw sessionError;
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    const accessToken = sessionData.session?.access_token;
-    if (!supabaseUrl || !supabaseKey || !accessToken) {
-      throw new Error('Your session has expired. Please sign in again.');
-    }
-
-    return new Promise<{ path: string }>((resolve, reject) => {
+  const promise = new Promise<{ path: string }>((resolve, reject) => {
       request = new XMLHttpRequest();
-      const encodedPath = encodeStoragePath(path);
-      request.open('POST', `${supabaseUrl}/storage/v1/object/${encodeURIComponent(bucket)}/${encodedPath}`);
-      request.setRequestHeader('Authorization', `Bearer ${accessToken}`);
-      request.setRequestHeader('apikey', supabaseKey);
-      request.setRequestHeader('x-upsert', 'false');
+      request.open('POST', '/api/storage/upload');
+      request.withCredentials = true;
 
       request.upload.addEventListener('progress', (event) => {
         const total = event.lengthComputable ? event.total : file.size;
@@ -77,28 +61,23 @@ export function startUploadFileWithProgress(
       });
 
       request.addEventListener('load', () => {
-        if (request && request.status >= 200 && request.status < 300) {
+        let result: { path?: string; error?: string } = {};
+        try { result = JSON.parse(request?.responseText ?? '') as { path?: string; error?: string }; } catch { /* status fallback */ }
+        if (request && request.status >= 200 && request.status < 300 && result.path) {
           onProgress?.({ loaded: file.size, total: file.size, percent: 100 });
-          resolve({ path });
+          resolve({ path: result.path });
           return;
         }
-        let message = `Upload failed (${request?.status ?? 0}).`;
-        try {
-          const response = JSON.parse(request?.responseText ?? '') as { message?: string; error?: string };
-          message = response.message || response.error || message;
-        } catch {
-          // Keep the useful status fallback when the storage response is not JSON.
-        }
-        reject(new Error(message));
+        reject(new Error(result.error ?? `Upload failed (${request?.status ?? 0}).`));
       });
       request.addEventListener('error', () => reject(new Error('Network error while uploading.')));
       request.addEventListener('abort', () => reject(new Error('Upload cancelled.')));
       const formData = new FormData();
-      formData.append('cacheControl', '3600');
-      formData.append('', body);
+      formData.append('bucket', bucket);
+      formData.append('path', path);
+      formData.append('file', body, fileName);
       request.send(formData);
     });
-  })();
 
   return { promise, cancel: () => request?.abort(), supportsCancellation: true };
 }

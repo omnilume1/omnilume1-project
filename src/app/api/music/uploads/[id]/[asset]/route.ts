@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isUuid, MUSIC_BUCKET, signedUrlTtlSeconds } from '@/lib/music-upload-validation';
-import { createAdminClient } from '@/utils/supabase/admin';
+import { getServerStorageProvider } from '@/lib/storage/server-provider';
 import { createClient } from '@/utils/supabase/server';
 
 const noStore = { 'Cache-Control': 'private, no-store' };
@@ -31,9 +31,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!path) return missing();
   if (ttl < 1) return missing(410);
 
-  const signed = await createAdminClient().storage.from(MUSIC_BUCKET).createSignedUrl(path, ttl);
-  if (signed.error || !signed.data?.signedUrl) return missing(502);
-  const response = NextResponse.redirect(signed.data.signedUrl, 302);
+  let signedUrl: string;
+  try {
+    signedUrl = await getServerStorageProvider().createSignedDownloadUrl(MUSIC_BUCKET, path, ttl);
+  } catch {
+    return missing(502);
+  }
+  const response = NextResponse.redirect(signedUrl, 302);
   response.headers.set('Cache-Control', noStore['Cache-Control']);
   return response;
 }
