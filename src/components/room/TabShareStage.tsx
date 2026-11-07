@@ -60,6 +60,33 @@ function ShareVideo({ stream, label }: { stream: MediaStream; label: string }) {
   return <video ref={ref} autoPlay playsInline muted className="tab-share-video" aria-label={label} />;
 }
 
+type FullscreenDocument = Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => void };
+type FullscreenTarget = HTMLElement & { webkitRequestFullscreen?: () => void };
+type IosVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+
+// A muted <video> does not keep the screen awake, so hold a wake lock while watching.
+function useScreenWakeLock(active: boolean) {
+  useEffect(() => {
+    if (!active || !navigator.wakeLock) return;
+    let lock: WakeLockSentinel | null = null;
+    let stopped = false;
+    const acquire = () => {
+      if (stopped || document.visibilityState !== 'visible' || (lock && !lock.released)) return;
+      navigator.wakeLock.request('screen').then((next) => {
+        if (stopped) void next.release().catch(() => undefined);
+        else lock = next;
+      }).catch(() => undefined);
+    };
+    acquire();
+    document.addEventListener('visibilitychange', acquire);
+    return () => {
+      stopped = true;
+      document.removeEventListener('visibilitychange', acquire);
+      void lock?.release().catch(() => undefined);
+    };
+  }, [active]);
+}
+
 export default function TabShareStage() {
   const voice = useVoiceRoom();
   const { currentUserId } = useRoomRealtime();
@@ -72,6 +99,9 @@ export default function TabShareStage() {
   const sharerId = picked && voice.liveSharers.includes(picked) ? picked : voice.liveSharers[0] ?? null;
   const peer = sharerId ? voice.peers.find((item) => item.id === sharerId) : undefined;
   const waiting = Boolean(!voice.sharingScreen && sharerId && voice.joined && !peer?.screen);
+  const idleTimer = useRef<number | undefined>(undefined);
+  useScreenWakeLock(Boolean(!voice.sharingScreen && voice.joined && peer?.screen));
+  useEffect(() => () => window.clearTimeout(idleTimer.current), []);
 
   // After 15 s without a picture, say why it may not arrive.
   useEffect(() => {
@@ -80,19 +110,40 @@ export default function TabShareStage() {
     return () => window.clearTimeout(timer);
   }, [sharerId, waiting]);
 
-  const fullscreen = () => {
+  // In full screen the cursor hides after 2.5 s without moving.
+  const showCursor = () => {
     const frame = frameRef.current;
     if (!frame) return;
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
-    else void frame.requestFullscreen?.().catch(() => undefined);
+    delete frame.dataset.idle;
+    window.clearTimeout(idleTimer.current);
+    idleTimer.current = window.setTimeout(() => { frame.dataset.idle = ''; }, 2500);
   };
+
+  // Full screen holds only the picture; Esc or a double-click leaves it.
+  const fullscreen = () => {
+    const frame = frameRef.current as FullscreenTarget | null;
+    if (!frame) return;
+    const doc = document as FullscreenDocument;
+    if (document.fullscreenElement ?? doc.webkitFullscreenElement) {
+      if (document.exitFullscreen) void document.exitFullscreen().catch(() => undefined);
+      else doc.webkitExitFullscreen?.();
+      return;
+    }
+    if (voice.shareSoundBlocked) voice.resumeShareSound();
+    showCursor();
+    if (frame.requestFullscreen) void frame.requestFullscreen({ navigationUI: 'hide' }).catch(() => undefined);
+    else if (frame.webkitRequestFullscreen) frame.webkitRequestFullscreen();
+    // iPhone Safari can only show a <video> in full screen.
+    else (frame.querySelector('video') as IosVideo | null)?.webkitEnterFullscreen?.();
+  };
+  const frameProps = { ref: frameRef, className: 'tab-share-frame', onDoubleClick: fullscreen, onMouseMove: showCursor };
 
   if (voice.sharingScreen && voice.screenStream) {
     const watching = voice.peers.filter((item) => item.state === 'connected').length;
     const hasSound = voice.screenStream.getAudioTracks().length > 0;
     return (
-      <div className="tab-share" ref={frameRef}>
-        <div className="tab-share-frame">
+      <div className="tab-share">
+        <div {...frameProps}>
           <ShareVideo stream={voice.screenStream} label="Your shared tab" />
           <span className="tab-share-badge"><span className="tab-share-dot" aria-hidden="true" />Live · Your tab</span>
         </div>
@@ -103,8 +154,12 @@ export default function TabShareStage() {
               {watching === 0 ? 'Waiting for people to watch' : `${watching} watching`} · only you can control it
             </p>
             {!hasSound && <p className="tab-share-warn">No tab sound. Stop, share again and turn on &ldquo;Also share tab audio&rdquo; (Chrome or Edge).</p>}
+            <p className="tab-share-meta">Tip: press full screen on the video in that tab so everyone sees just the video.</p>
           </div>
-          <button type="button" className="tab-share-stop" onClick={voice.stopScreen}>Stop sharing</button>
+          <div className="tab-share-controls tab-share-host-actions">
+            <button type="button" onClick={fullscreen}>Full screen</button>
+            <button type="button" className="tab-share-stop" onClick={voice.stopScreen}>Stop sharing</button>
+          </div>
         </div>
       </div>
     );
@@ -114,7 +169,7 @@ export default function TabShareStage() {
   const others = voice.liveSharers.length > 1 ? voice.liveSharers : [];
 
   return (
-    <div className="tab-share" ref={frameRef}>
+    <div className="tab-share">
       {others.length > 0 && (
         <div className="tab-share-pick" role="group" aria-label="Choose whose tab to watch">
           {others.map((id) => <button key={id} type="button" aria-pressed={id === sharerId} onClick={() => setPicked(id)}>{name(id)}</button>)}
@@ -133,7 +188,7 @@ export default function TabShareStage() {
         </div>
       ) : peer?.screen ? (
         <>
-          <div className="tab-share-frame">
+          <div {...frameProps}>
             <ShareVideo stream={peer.screen} label={`${name(sharerId)}'s shared tab`} />
             <span className="tab-share-badge"><span className="tab-share-dot" aria-hidden="true" />Live · {name(sharerId)}&apos;s tab</span>
             {voice.shareSoundBlocked && <button type="button" className="tab-share-sound" onClick={voice.resumeShareSound}>Turn on sound</button>}
