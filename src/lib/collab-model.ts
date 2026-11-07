@@ -101,11 +101,8 @@ export function shouldInitiateOffer(myId: string, peerId: string) {
   return myId < peerId;
 }
 
-// A shared tab is encoded once per watcher (peer-to-peer mesh), so the host's
-// video upload is capped in total (23 Mbps of video; with stereo tab sound
-// and packet overhead about 25 Mbps on the wire) and split between the
-// members actually watching: 10 Mbps each for one or two, 4.6 Mbps each for
-// five. Resolution is never lowered to meet it.
+// Desired per-viewer allocation under a 23 Mbps total upload budget. The
+// sender applies a more conservative per-viewer cap for broader compatibility.
 export const SCREEN_UPLOAD_BUDGET = 23_000_000;
 export const SCREEN_VIEWER_MAX_BITRATE = 10_000_000;
 export function screenBitrate(watching: number) {

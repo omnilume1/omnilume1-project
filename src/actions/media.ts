@@ -180,10 +180,8 @@ async function signRoomObject(
   // Never let a signed URL outlive the room's server-side expiry.
   const signedUrlLifetime = Math.min(60 * 60, roomExpirySeconds(room) ?? 60 * 60);
   if (signedUrlLifetime <= 0) throw new Error('This room has expired and is no longer active.');
-  const { data, error } = await supabase.storage.from('room_attachments').createSignedUrl(objectPath, signedUrlLifetime);
-  if (error) throw new Error(error.message);
-  if (!data?.signedUrl) throw new Error('Failed to generate signed URL.');
-  return data.signedUrl;
+  void supabase;
+  return getServerStorageProvider().createSignedDownloadUrl(ROOM_ATTACHMENT_BUCKET, objectPath, signedUrlLifetime);
 }
 
 export type ResolvedRoomMedia = {

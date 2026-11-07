@@ -11,7 +11,16 @@ const BATCH = 200;
 
 type DueUpload = { id: string; object_path: string; cover_path: string | null };
 
-export async function cleanupMusicUploads(supabase: SupabaseClient) {
+type MusicStorageAdapter = {
+  cleanup: (bucket: string, paths: string[]) => Promise<void>;
+};
+
+export async function cleanupMusicUploads(supabase: SupabaseClient, storage?: MusicStorageAdapter) {
+  const remove = async (paths: string[]) => {
+    if (storage) return storage.cleanup(BUCKET, paths);
+    const { error } = await supabase.storage.from(BUCKET).remove(paths);
+    if (error) throw new Error(error.message);
+  };
   const failures: string[] = [];
   let removed = 0;
   let orphansRemoved = 0;
@@ -21,7 +30,12 @@ export async function cleanupMusicUploads(supabase: SupabaseClient) {
 
   for (const upload of (due.data ?? []) as DueUpload[]) {
     const paths = [upload.object_path, upload.cover_path].filter((path): path is string => Boolean(path));
-    const { error: removeError } = await supabase.storage.from(BUCKET).remove(paths);
+    let removeError: Error | null = null;
+    try {
+      await remove(paths);
+    } catch (error) {
+      removeError = error instanceof Error ? error : new Error('Unable to remove upload objects.');
+    }
     const { error: completeError } = await supabase.rpc('complete_music_upload_cleanup', {
       p_upload_id: upload.id,
       p_error: removeError ? removeError.message : null,
@@ -34,9 +48,12 @@ export async function cleanupMusicUploads(supabase: SupabaseClient) {
   if (orphans.error) throw new Error(orphans.error.message);
   const names = ((orphans.data ?? []) as { name: string }[]).map((row) => row.name);
   if (names.length > 0) {
-    const { error } = await supabase.storage.from(BUCKET).remove(names);
-    if (error) failures.push(`music orphans: ${error.message}`);
-    else orphansRemoved = names.length;
+    try {
+      await remove(names);
+      orphansRemoved = names.length;
+    } catch (error) {
+      failures.push(`music orphans: ${error instanceof Error ? error.message : 'Unable to remove upload objects.'}`);
+    }
   }
 
   return { removed, orphansRemoved, failures };
