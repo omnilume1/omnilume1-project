@@ -96,8 +96,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 @keyframes omni-draw { to { stroke-dashoffset: 0; } }
 @keyframes omni-pop { from { transform: scale(0); } }
 @keyframes omni-rise { from { opacity: 0; transform: translateY(12px); } }
-@media (prefers-reduced-motion: reduce) { .omni-intro * { animation: none !important; } .omni-intro-ring { stroke-dashoffset: 0; } }
-
 .public-login, .omni-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; border: 1px solid var(--omni-line); border-radius: 10px; padding: 0 16px; color: var(--omni-text); font-size: 14px; font-weight: 500; text-decoration: none; white-space: nowrap; cursor: pointer; transition: filter 160ms ease, border-color 160ms ease, background-color 160ms ease, transform 160ms var(--omni-ease); }
 .public-login:hover, .omni-button:hover { filter: brightness(1.12); }
 .public-login:active, .omni-button:active { transform: scale(.965); }
@@ -152,7 +150,3 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 /* Page entrance: children rise in one after another (transform/opacity only). */
 .rise { animation: omni-rise-in 750ms var(--omni-ease) calc(60ms + var(--i, 0) * 45ms) both; }
 @keyframes omni-rise-in { from { opacity: 0; transform: translateY(18px); } }
-@media (prefers-reduced-motion: reduce) { .rise { animation: none; } }
-
-/* Site-wide: under reduced motion nothing animates or smooth-scrolls. */
-@media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }

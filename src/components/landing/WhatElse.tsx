@@ -7,8 +7,7 @@ const STATES = 3;
 
 // Steps through focus timer → whiteboard → shared notes while on screen.
 // The markup is server-rendered; this only sets data-state on the wrapper.
-// Lit sentences are buttons, so the order can be picked by hand (and is the
-// only way it changes under reduced motion).
+// Lit sentences are buttons, so the order can also be picked by hand.
 export default function WhatElse({ children }: { children: ReactNode }) {
   const [state, setState] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -16,7 +15,7 @@ export default function WhatElse({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const root = rootRef.current;
-    if (!root || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!root) return;
     let timer = 0;
     const observer = new IntersectionObserver(([entry]) => {
       window.clearInterval(timer);

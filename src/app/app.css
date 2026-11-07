@@ -137,7 +137,6 @@ select.omni-select option { background: #241d36; color: var(--omni-text); }
 .omni-switch:checked { background: var(--omni-accent); }
 .omni-switch:checked::after { transform: translateX(16px); }
 .omni-switch:focus-visible { outline: 2px solid var(--omni-accent); outline-offset: 3px; }
-@media (prefers-reduced-motion: reduce) { .omni-switch::after { transition: none; } }
 .form-label { display: block; margin: 0 0 8px; color: var(--omni-text-2); font-size: 13px; font-weight: 400; }
 .form-help { margin: 6px 0 0; color: var(--omni-muted); font-size: 12px; }
 .form-error, .form-success { border-radius: 10px; padding: 10px 12px; font-size: .74rem; }
@@ -647,11 +646,6 @@ select.omni-select option { background: #241d36; color: var(--omni-text); }
 @media (max-width: 639px) {
   .notification-popover { position: fixed; top: 64px; right: 12px; left: 12px; width: auto; max-height: calc(100dvh - 140px); }
 }
-@media (prefers-reduced-motion: reduce) {
-  .notification-popover, .notification-popover[data-state="open"] { transform: none !important; transition: opacity 120ms linear !important; }
-  .notification-popover-item, .notification-skeleton { animation: none !important; }
-}
-
 /* Room chat (Action 08): names, replies, reactions, pins, mentions, unread
    divider and composer modes. Transform/opacity motion only. */
 .room-chat-row { scroll-margin: 72px 0; border-radius: 16px; transition: background 400ms ease; }
@@ -697,11 +691,6 @@ select.omni-select option { background: #241d36; color: var(--omni-text); }
 .room-chat-mentions li.is-active, .room-chat-mentions li:hover { background: rgba(124, 108, 240, 0.25); }
 .chat-row-unread { min-width: 20px; height: 20px; flex-shrink: 0; border-radius: 999px; padding: 0 6px; background: #f43f5e; color: white; font-size: 11px; font-weight: 800; line-height: 20px; text-align: center; }
 @keyframes room-chat-pop { from { opacity: 0; transform: translateY(4px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
-@media (prefers-reduced-motion: reduce) {
-  .room-chat-reaction-picker, .room-chat-composer-mode, .room-chat-mentions { animation: none !important; }
-  .room-chat-reaction, .room-chat-reaction-picker button { transition: none !important; }
-}
-
 /* Room themes (Action 09): the owner's or member's accent for the room desk. */
 .room-shell[data-room-theme="violet"] { --omni-accent: #b9a8ff; --room-accent-rgb: 157, 134, 255; }
 .room-shell[data-room-theme="ocean"] { --omni-accent: #7dd3fc; --room-accent-rgb: 56, 189, 248; }
@@ -768,11 +757,6 @@ select.omni-select option { background: #241d36; color: var(--omni-text); }
 @media (max-width: 767px) {
   .room-dashboard-layer { padding: 10px; overflow: visible; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .room-dashboard-card, .room-layout-popover { animation: none !important; }
-  .room-dashboard-action { transition: none !important; }
-}
-
 /* Now playing (Action 10): artwork from the file's tags or generated art. */
 .media-now-playing { display: flex; min-height: 0; flex: 1; align-items: center; justify-content: center; gap: 18px; padding: 56px 20px 16px; background: radial-gradient(circle at 30% 20%, rgba(var(--room-accent-rgb, 168, 85, 247), .18), transparent 60%), #050506; animation: room-chat-pop 240ms cubic-bezier(0.16, 1, 0.3, 1) both; }
 .media-now-playing-art { width: clamp(88px, 24vh, 220px); height: clamp(88px, 24vh, 220px); flex-shrink: 0; border-radius: 16px; object-fit: cover; box-shadow: 0 18px 48px -12px rgba(0, 0, 0, .8); }
@@ -787,10 +771,6 @@ select.omni-select option { background: #241d36; color: var(--omni-text); }
 @media (max-width: 520px) {
   .media-now-playing { flex-direction: column; text-align: center; padding-top: 64px; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .media-now-playing { animation: none !important; }
-}
-
 /* Watch queue, clips and Now Playing (Action 11). */
 .watch-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 16px; background: rgba(17,17,17,.96); box-shadow: 0 22px 60px -14px rgba(0,0,0,.75); backdrop-filter: blur(14px); }
 .watch-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid rgba(255,255,255,.08); padding: 8px 10px; }
@@ -823,10 +803,6 @@ select.omni-select option { background: #241d36; color: var(--omni-text); }
 .now-playing-meta { overflow: hidden; color: var(--omni-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .now-playing-toggle { display: inline-flex; width: 34px; height: 34px; flex-shrink: 0; align-items: center; justify-content: center; border: 0; border-radius: 10px; background: rgba(var(--room-accent-rgb, 168, 85, 247), .2); color: white; cursor: pointer; }
 .now-playing-toggle:hover, .now-playing-toggle:focus-visible { background: rgba(var(--room-accent-rgb, 168, 85, 247), .32); }
-@media (prefers-reduced-motion: reduce) {
-  .now-playing-bar, .watch-panel-skeleton { animation: none !important; }
-}
-
 /* Room notification strip: several notices wrap instead of running off the
    side of the page (task and event notices made this common on phones). */
 .room-state-bar[aria-label="Room notifications"] { flex-wrap: wrap; justify-content: flex-start; max-height: 9.5rem; overflow-y: auto; }
@@ -951,11 +927,6 @@ select.omni-select option { background: #241d36; color: var(--omni-text); }
 @media (max-width: 520px) {
   .voice-dock { left: 8px; right: 8px; bottom: calc(140px + env(safe-area-inset-bottom)); max-width: none; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .collab-skeleton, .voice-live-dot { animation: none !important; }
-  .collab-option-bar, .wb-cursor { transition: none !important; }
-}
-
 /* Quiet sentence-case labels, as in the concept video (last, so it wins over the older tracked capitals above). */
 .room-dashboard-kicker, .room-chat-divider, .room-chat-pinned-label, .room-layout-legend, .relationship-label, .collab-badge { text-transform: none; letter-spacing: 0; }
 .room-dashboard-kicker, .room-chat-pinned-label, .room-layout-legend { font-size: 12px; font-weight: 500; }

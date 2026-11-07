@@ -22,7 +22,7 @@ test('music CSS is scoped to .music-app and globals.css is untouched', () => {
       assert.match(part.trim(), /^\.music-app\b/, `unscoped selector: ${part.trim()}`);
     }
   }
-  assert.match(css, /prefers-reduced-motion: reduce/);
+  assert.doesNotMatch(css, /prefers-reduced-motion/); // motion plays on every device
   assert.match(css, /:focus-visible/);
   assert.match(css, /saturate\(2\.2\) blur\(16px\)/);
   // Lightning CSS merges a hand-written -webkit- copy with the standard one and keeps only the prefix (Chrome then shows no blur).

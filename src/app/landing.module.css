@@ -16,8 +16,6 @@
   line-height: normal;
 }
 :global(html[data-intro-seen]) .page { --intro-delay: 0s; }
-@media (prefers-reduced-motion: reduce) { .page { --intro-delay: 0s; } }
-
 .wrap { position: relative; z-index: 1; width: min(1200px, calc(100% - 48px)); margin: 0 auto; }
 
 /* Intro: the mark draws itself, then the page shows (once per tab session). */
@@ -28,8 +26,6 @@
 :global(html[data-intro-seen]) .intro { display: none; }
 @keyframes introOut { to { opacity: 0; visibility: hidden; } }
 @keyframes introScale { to { transform: scale(1.04); } }
-@media (prefers-reduced-motion: reduce) { .intro { display: none; } }
-
 /* Reveals: rise in once on first sight (LandingMotion sets data-revealed). */
 .page[data-motion="on"] [data-reveal] { transition: opacity 800ms var(--quint) var(--d, 0s), translate 800ms var(--quint) var(--d, 0s); }
 .page[data-motion="on"] [data-reveal]:not([data-revealed]) { opacity: 0; translate: 0 22px; }
@@ -38,10 +34,6 @@
 .stripes:not([data-playing]) .stripe > span,
 .row:not([data-playing]) *, .row:not([data-playing]) *::before,
 .thumbs:not([data-playing]), .track:not([data-playing]) b { animation-play-state: paused !important; }
-@media (prefers-reduced-motion: reduce) {
-  .page *, .page *::before, .page *::after { animation: none !important; transition: none !important; }
-}
-
 /* Light stripes */
 .stripes { position: absolute; left: 0; width: 100%; overflow: hidden; pointer-events: none; z-index: 0; }
 .stripesRot { position: absolute; left: 50%; top: 50%; width: 2600px; height: 2600px; margin: -1300px 0 0 -1300px; transform: rotate(40deg); }
@@ -52,7 +44,6 @@
 .stripesTop { top: 0; height: 1000px; mask-image: linear-gradient(#000 30%, transparent 92%); }
 .stripesBottom { bottom: 0; height: 100%; mask-image: linear-gradient(transparent, #000 30%); }
 .stripesCorner { inset: 0; height: 100%; }
-@media (max-width: 767px) { .stripe > span { animation: none; } }
 
 /* Nav */
 .nav { display: flex; align-items: center; gap: 32px; height: 64px; }

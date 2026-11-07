@@ -7,7 +7,6 @@ import { useEffect } from 'react';
 export default function GlassPointerLight() {
   useEffect(() => {
     if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     let frame = 0;
     let x = 0;
     let y = 0;
