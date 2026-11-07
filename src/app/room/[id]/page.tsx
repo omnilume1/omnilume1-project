@@ -378,6 +378,16 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   };
   const closeWindow = (id: string) => setOpenWindows((current) => current.filter((open) => open !== id));
   const toggleWindow = (id: WinId) => (isOpen(id) ? closeWindow(id) : openWindow(id));
+  // Windows ask to be shown (Watch does when a pasted or shared link starts
+  // playing). Re-subscribed each render so it always sees the current windows.
+  useEffect(() => {
+    const onOpenWindow = (event: Event) => {
+      const id = (event as CustomEvent<unknown>).detail;
+      if (isWinId(id)) openWindow(id);
+    };
+    window.addEventListener('omni:open-window', onOpenWindow);
+    return () => window.removeEventListener('omni:open-window', onOpenWindow);
+  });
   const layout = effectiveLayout(appearance, personalLayout);
   const theme = effectiveTheme(appearance, personalTheme);
   const handleControlStateChange = useCallback(({ featureFlags: nextFlags, canManageMembers: nextCanManageMembers, canControlMedia: nextCanControlMedia, appearance: nextAppearance }: { featureFlags: Partial<Record<RoomFeature, boolean>>; canManageMembers: boolean; canControlMedia: boolean; isGhostMode: boolean; appearance: RoomAppearance }) => {

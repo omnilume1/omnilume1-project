@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { OmniIcon } from '@/components/ui/OmniIcon';
+import SiteLinks from '@/components/room/SiteLinks';
+import { hasYouTubeVideo, normalizeCastUrl, youtubePlaylistId } from '@/lib/cast-url';
+import { fetchPlaylist, importPlaylist, queueLink as queueLinkInRoom } from '@/lib/watch-links';
 import { formatPlaybackTime } from '@/lib/watch-sync';
 import {
   createClip,
@@ -53,6 +56,8 @@ export default function WatchQueuePanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [clipLabel, setClipLabel] = useState('');
   const [clipLength, setClipLength] = useState('0');
+  const [link, setLink] = useState('');
+  const [progress, setProgress] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
@@ -103,6 +108,53 @@ export default function WatchQueuePanel({
     setBusy(null);
   };
 
+  // A pasted link is registered like a cast (same server checks), then queued.
+  // A YouTube playlist link (no single video in it) brings the whole playlist.
+  const queueLink = async () => {
+    if (!link.trim() || busy) return;
+    setProgress(null);
+    const playlistId = youtubePlaylistId(link);
+    if (playlistId && !hasYouTubeVideo(link)) {
+      await addPlaylist(playlistId);
+      return;
+    }
+    let cast;
+    try {
+      cast = normalizeCastUrl(link);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'That link cannot be played.');
+      return;
+    }
+    await run('link', async () => {
+      const queued = await queueLinkInRoom(roomId, cast.title, cast.url);
+      if (queued.ok) setLink('');
+      return queued;
+    }, 'queue');
+  };
+
+  const addPlaylist = async (playlistId: string) => {
+    setBusy('link');
+    setError(null);
+    setProgress('Loading the playlist…');
+    const playlist = await fetchPlaylist(playlistId);
+    if (!playlist.ok) {
+      setBusy(null);
+      setProgress(null);
+      setError(playlist.error);
+      return;
+    }
+    const room = Math.max(0, 50 - queue.length);
+    const items = playlist.items.slice(0, room);
+    const result = await importPlaylist(roomId, items, (done, total) => setProgress(`Adding ${Math.min(done + 1, total)} of ${total}…`));
+    setBusy(null);
+    setProgress(result.added ? `Added ${result.added} video${result.added === 1 ? '' : 's'} to the queue.${playlist.items.length > items.length ? ' The queue holds 50.' : ''}` : null);
+    if (result.error) setError(result.error);
+    if (result.added) {
+      setLink('');
+      onChanged('queue');
+    }
+  };
+
   const saveClip = async () => {
     if (!currentMediaId) return;
     const label = clipLabel.trim();
@@ -127,6 +179,7 @@ export default function WatchQueuePanel({
       </header>
 
       {error && <p role="alert" className="watch-panel-error">{error}</p>}
+      {progress && <p role="status" className="watch-panel-progress">{progress}</p>}
 
       <div className="watch-panel-body">
         {status === 'loading' ? (
@@ -137,7 +190,16 @@ export default function WatchQueuePanel({
             <button type="button" className="omni-button omni-button-ghost" onClick={() => { setStatus('loading'); setReload((value) => value + 1); }}>Retry</button>
           </div>
         ) : tab === 'queue' ? (
-          queue.length === 0 ? (
+          <>
+          {canControl && (
+            <form className="watch-panel-link-form" onSubmit={(event) => { event.preventDefault(); void queueLink(); }}>
+              <label className="sr-only" htmlFor="watch-queue-link">Video or stream link</label>
+              <input id="watch-queue-link" className="omni-input" type="text" inputMode="url" value={link} onChange={(event) => setLink(event.target.value)} placeholder="Paste a video, stream or playlist link" title="YouTube videos and playlists, Twitch, a Kick .m3u8 stream or a direct video link" />
+              <button type="submit" className="omni-button omni-button-primary omni-button-sm" disabled={busy !== null || !link.trim()}>{busy === 'link' ? 'Adding…' : 'Add'}</button>
+            </form>
+          )}
+          {canControl && <SiteLinks className="mb-2" />}
+          {queue.length === 0 ? (
             <div className="watch-panel-empty"><p>The queue is empty.</p><p className="watch-panel-hint">Add items from Cast history with “Queue”.</p></div>
           ) : (
             <ol className="watch-panel-list">
@@ -163,7 +225,8 @@ export default function WatchQueuePanel({
                 );
               })}
             </ol>
-          )
+          )}
+          </>
         ) : !currentMediaId ? (
           <div className="watch-panel-empty"><p>Clips belong to the media playing now.</p><p className="watch-panel-hint">Cast something to save its best moments.</p></div>
         ) : (

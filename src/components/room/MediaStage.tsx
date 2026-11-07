@@ -2,11 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent, type FormEvent } from 'react';
 import dynamic from 'next/dynamic';
-import { attachRoomMediaSubtitle, cleanupUnregisteredTemporaryMedia, getActiveTemporaryMedia, getRoomMediaDetails, logCastHistory, logTemporaryMedia, resolveRoomMedia, type RoomMediaDetails } from '@/actions/media';
+import { createPortal } from 'react-dom';
+import { attachRoomMediaSubtitle, cleanupUnregisteredTemporaryMedia, getActiveTemporaryMedia, getRoomMediaDetails, logTemporaryMedia, resolveRoomMedia, type RoomMediaDetails } from '@/actions/media';
 import { fallbackArtwork } from '@/lib/media-metadata';
 import { HEARTBEAT_INTERVAL_MS, SEEK_COALESCE_MS, createCoalescer, expectedPosition, needsDriftSeek, shouldBroadcastNative } from '@/lib/watch-sync';
 import { addToQueue, listQueue, removeFromQueue } from '@/lib/watch-queue-data';
+import { findLink, hasYouTubeVideo, normalizeCastUrl, youtubePlaylistId } from '@/lib/cast-url';
+import SiteLinks from '@/components/room/SiteLinks';
+import { fetchPlaylist, importPlaylist, queueLink, registerLink, type LinkOutcome } from '@/lib/watch-links';
 import WatchQueuePanel from '@/components/room/WatchQueuePanel';
+import WatchSearchPanel from '@/components/room/WatchSearchPanel';
+import { OmniIcon } from '@/components/ui/OmniIcon';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import { createRoomObjectPath, assertRoomFileInput, ROOM_ATTACHMENT_BUCKET } from '@/lib/room-file-contract';
@@ -75,41 +81,6 @@ function subscribeToNothing() {
   return () => undefined;
 }
 
-function normalizeCastUrl(value: string) {
-  const trimmed = value.trim();
-  const youtubeMatch = trimmed.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|live\/|shorts\/))([\w-]{11})/i);
-  if (youtubeMatch?.[1]) {
-    return {
-      url: `https://www.youtube.com/watch?v=${youtubeMatch[1]}`,
-      title: 'YouTube video',
-    };
-  }
-
-  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  const parsed = new URL(withProtocol);
-  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Please enter an HTTP or HTTPS media URL.');
-  const hostname = parsed.hostname.replace(/^www\./i, '').toLowerCase();
-  if (hostname === 'kick.com' || hostname.endsWith('.kick.com')) {
-    if (!/\.m3u8(?:$|\?)/i.test(parsed.pathname + parsed.search)) {
-      throw new Error('Kick channel or video pages are not direct media streams. Paste a direct HTTPS HLS (.m3u8) stream URL provided by the source.');
-    }
-    return { url: parsed.toString(), title: 'Kick live stream' };
-  }
-  if (hostname === 'twitch.tv' || hostname === 'go.twitch.tv') {
-    const path = parsed.pathname.replace(/\/+$/, '');
-    const isChannel = /^\/[a-z0-9_]+$/i.test(path);
-    const isVideo = /^\/videos?\/\d+$/i.test(path) || /^\d+$/.test(parsed.searchParams.get('video') ?? '');
-    if (!isChannel && !isVideo) {
-      throw new Error('This Twitch URL is not a supported channel or video. Paste a Twitch channel/video URL or a direct HTTPS media URL.');
-    }
-    return { url: parsed.toString(), title: isVideo ? 'Twitch video' : 'Twitch live stream' };
-  }
-  return {
-    url: parsed.toString(),
-    title: parsed.hostname.replace(/^www\./i, '') || 'Web stream',
-  };
-}
-
 export default function MediaStage({ roomId, canControlMedia }: MediaStageProps) {
   const {
     mediaState,
@@ -159,6 +130,13 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
   const [showQueue, setShowQueue] = useState(false);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  // A link pasted or dropped anywhere in the room, or shared into it (?link=).
+  const [found, setFound] = useState<string | null>(null);
+  // Work and messages are tied to the link they belong to, so pasting another
+  // link while one is still being added never mixes the two up.
+  const [foundBusy, setFoundBusy] = useState<string | null>(null);
+  const [foundNote, setFoundNote] = useState<{ link: string; text: string; error: boolean } | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const supabase = createClient();
@@ -476,30 +454,131 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
       return;
     }
 
+    setCastInput('');
+    setIsCastingUrl(true);
+    await castLink(cast.url, cast.title);
+    setIsCastingUrl(false);
+  };
+
+  // Register first. Members receive only the resulting media id over
+  // Broadcast and resolve the URL themselves under their own authorization,
+  // so an unregistered cast cannot be shared with the room.
+  const castLink = async (url: string, title: string): Promise<LinkOutcome> => {
+    if (!canCast) return { ok: false, error: 'Only the room owner or people with Watch control can cast.' };
     setPlayerError(null);
     setErrorUrl(null);
-    setCastInput('');
-
-    // Register first. Members receive only the resulting media id over
-    // Broadcast and resolve the URL themselves under their own authorization,
-    // so an unregistered cast cannot be shared with the room.
-    setIsCastingUrl(true);
     try {
-      const result = await logCastHistory(roomId, cast.title, cast.url);
-      if (!result.success || !result.mediaId) {
-        setHistoryError(result.error ?? 'The cast could not be shared with the room.');
-        return;
+      const result = await registerLink(roomId, title, url);
+      if (!result.ok) {
+        setHistoryError(result.error);
+        return result;
       }
       readyCastIdRef.current = null;
       setReadyCastId(null);
-      broadcastEvent('cast', { url: cast.url, title: cast.title, mediaId: result.mediaId, speed: 1, playing: true, sourceType: 'url' });
+      broadcastEvent('cast', { url, title, mediaId: result.mediaId, speed: 1, playing: true, sourceType: 'url' });
+      window.dispatchEvent(new CustomEvent('omni:open-window', { detail: 'watch' }));
       await loadHistory();
+      return { ok: true };
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : 'The cast could not be shared with the room.');
-    } finally {
-      setIsCastingUrl(false);
+      const message = error instanceof Error ? error.message : 'The cast could not be shared with the room.';
+      setHistoryError(message);
+      return { ok: false, error: message };
     }
   };
+
+  const queueFromLink = async (url: string, title: string, place: 'next' | 'last'): Promise<LinkOutcome> => {
+    try {
+      const result = await queueLink(roomId, title, url, place);
+      if (result.ok) broadcastEvent('queue_changed', { version: Date.now() });
+      return result;
+    } catch {
+      return { ok: false, error: 'That could not be added to the queue. Try again.' };
+    }
+  };
+
+  // Paste (outside text fields) or drop a link anywhere in the room.
+  useEffect(() => {
+    const editable = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]'));
+    const take = (text: string | undefined) => {
+      const link = text ? findLink(text) : null;
+      if (!link) return false;
+      setFound(link);
+      setFoundNote(null);
+      return true;
+    };
+    const linkDrag = (event: DragEvent) => {
+      const types = event.dataTransfer?.types;
+      return Boolean(types && !types.includes('Files') && (types.includes('text/uri-list') || types.includes('text/plain')));
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      if (!editable(event.target) && take(event.clipboardData?.getData('text/plain'))) event.preventDefault();
+    };
+    const onDragOver = (event: DragEvent) => {
+      if (editable(event.target) || !linkDrag(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    };
+    const onDrop = (event: DragEvent) => {
+      if (editable(event.target) || !linkDrag(event)) return;
+      if (take(event.dataTransfer?.getData('text/uri-list') || event.dataTransfer?.getData('text/plain'))) event.preventDefault();
+    };
+    document.addEventListener('paste', onPaste);
+    document.addEventListener('dragover', onDragOver);
+    document.addEventListener('drop', onDrop);
+    return () => {
+      document.removeEventListener('paste', onPaste);
+      document.removeEventListener('dragover', onDragOver);
+      document.removeEventListener('drop', onDrop);
+    };
+  }, []);
+
+  // A link shared into the room (/room/<id>?link=…, from the share page or the
+  // browser extension) opens the same prompt; the address is then cleaned up.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const shared = params.get('link');
+    if (!shared) return;
+    params.delete('link');
+    const rest = params.toString();
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`);
+    const timer = window.setTimeout(() => setFound(findLink(shared) ?? shared), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const foundAction = async (work: (note: (text: string) => void) => Promise<LinkOutcome>, done: string) => {
+    const link = found;
+    if (!link || foundBusy === link) return;
+    setFoundBusy(link);
+    setFoundNote(null);
+    const result = await work((text) => setFoundNote({ link, text, error: false }));
+    setFoundBusy((current) => (current === link ? null : current));
+    setFoundNote(result.ok ? { link, text: done, error: false } : { link, text: result.error, error: true });
+    if (result.ok) window.setTimeout(() => setFound((current) => (current === link ? null : current)), 1800);
+  };
+
+  const foundPlaylist = found ? youtubePlaylistId(found) : null;
+  const foundHasVideo = Boolean(found) && (!foundPlaylist || hasYouTubeVideo(found ?? ''));
+  let foundCast: { url: string; title: string } | null = null;
+  let foundProblem: string | null = null;
+  if (found && foundHasVideo) {
+    try {
+      foundCast = normalizeCastUrl(found);
+    } catch (error) {
+      foundProblem = error instanceof Error ? error.message : 'That link cannot be played.';
+    }
+  }
+
+  const addFoundPlaylist = (playlistId: string) => foundAction(async (note) => {
+    note('Loading the playlist…');
+    const playlist = await fetchPlaylist(playlistId);
+    if (!playlist.ok) return playlist;
+    const queued = await listQueue(roomId);
+    const items = playlist.items.slice(0, Math.max(0, 50 - (queued.ok ? queued.data.length : 0)));
+    const result = await importPlaylist(roomId, items, (done, total) => note(`Adding ${Math.min(done + 1, total)} of ${total}…`));
+    if (result.added) broadcastEvent('queue_changed', { version: Date.now() });
+    if (result.error) return { ok: false, error: result.added ? `Added ${result.added}, then: ${result.error}` : result.error };
+    return { ok: true };
+  }, 'Playlist added to the queue.');
 
   const castHistoryItem = async (item: Pick<TemporaryMedia, 'id'>): Promise<boolean> => {
     if (!canCast) return false;
@@ -710,11 +789,17 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
               </div>
             )}
 
-            <button type="button" onClick={() => { setShowQueue((visible) => !visible); setShowHistory(false); }} aria-expanded={showQueue} className="omni-button omni-button-ghost omni-button-sm" aria-label="Open queue and clips">
+            {canCast && (
+              <button type="button" onClick={() => { setShowSearch((visible) => !visible); setShowQueue(false); setShowHistory(false); }} aria-expanded={showSearch} className="omni-button omni-button-ghost omni-button-sm" aria-label="Search YouTube and Twitch">
+                Search
+              </button>
+            )}
+
+            <button type="button" onClick={() => { setShowQueue((visible) => !visible); setShowHistory(false); setShowSearch(false); }} aria-expanded={showQueue} className="omni-button omni-button-ghost omni-button-sm" aria-label="Open queue and clips">
               Queue
             </button>
 
-            <button type="button" onClick={() => { setShowHistory((visible) => !visible); setShowQueue(false); if (!showHistory) void loadHistory(); }} className="omni-button omni-button-ghost omni-button-sm" aria-label="Open cast history">
+            <button type="button" onClick={() => { setShowHistory((visible) => !visible); setShowQueue(false); setShowSearch(false); if (!showHistory) void loadHistory(); }} className="omni-button omni-button-ghost omni-button-sm" aria-label="Open cast history">
               History
             </button>
 
@@ -768,6 +853,48 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
               onClose={() => setShowQueue(false)}
             />
           </div>
+        )}
+
+        {showSearch && canCast && (
+          <div data-media-history className="absolute right-4 top-16 z-40 flex max-h-[78%] w-[min(28rem,calc(100%-2rem))] flex-col overflow-hidden">
+            <WatchSearchPanel
+              onPlay={(result) => castLink(result.url, result.title)}
+              onQueue={(result, place) => queueFromLink(result.url, result.title, place)}
+              onClose={() => setShowSearch(false)}
+            />
+          </div>
+        )}
+
+        {found && createPortal(
+          <div className="link-catch glass" role="dialog" aria-label="Link found">
+            <div className="link-catch-head">
+              <span className="min-w-0">
+                <span className="link-catch-title">{foundCast?.title ?? (foundPlaylist ? 'YouTube playlist' : 'Link found')}</span>
+                <span className="link-catch-url" title={found}>{found}</span>
+              </span>
+              <button type="button" className="watch-panel-close" aria-label="Dismiss" onClick={() => setFound(null)}><OmniIcon name="close" size={13} /></button>
+            </div>
+            {!canCast ? (
+              <p className="link-catch-note">Only the room owner or people with Watch control can add links here.</p>
+            ) : (
+              <>
+                {foundProblem && <p className="link-catch-note is-error">{foundProblem}</p>}
+                <div className="link-catch-actions">
+                  {foundCast && (
+                    <>
+                      <button type="button" className="omni-button omni-button-primary omni-button-sm" disabled={foundBusy === found} onClick={() => { const cast = foundCast; if (cast) void foundAction(() => castLink(cast.url, cast.title), 'Playing now.'); }}>Play now</button>
+                      <button type="button" className="omni-button omni-button-ghost omni-button-sm" disabled={foundBusy === found} onClick={() => { const cast = foundCast; if (cast) void foundAction(() => queueFromLink(cast.url, cast.title, 'next'), 'Plays next.'); }}>Play next</button>
+                      <button type="button" className="omni-button omni-button-ghost omni-button-sm" disabled={foundBusy === found} onClick={() => { const cast = foundCast; if (cast) void foundAction(() => queueFromLink(cast.url, cast.title, 'last'), 'Added to the queue.'); }}>Add to queue</button>
+                    </>
+                  )}
+                  {foundPlaylist && <button type="button" className="omni-button omni-button-ghost omni-button-sm" disabled={foundBusy === found} onClick={() => void addFoundPlaylist(foundPlaylist)}>Add the whole playlist</button>}
+                </div>
+              </>
+            )}
+            {foundBusy === found && foundNote?.link !== found && <p role="status" className="link-catch-note">Working on it{'…'}</p>}
+            {foundNote && foundNote.link === found && <p role={foundNote.error ? 'alert' : 'status'} className={`link-catch-note${foundNote.error ? ' is-error' : ''}`}>{foundNote.text}</p>}
+          </div>,
+          document.body,
         )}
 
         {showHistory && (
@@ -847,7 +974,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
             <div className="flex w-full max-w-xl flex-col items-center">
               <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-white/5"><svg viewBox="0 0 24 24" className="ml-0.5 h-7 w-7 text-white" fill="currentColor"><path d="M8 5.14v13.72L19.06 12 8 5.14z" /></svg></div>
               <h2 className="mb-2 text-lg font-bold text-white">Stage is empty</h2>
-              {canCast ? <div className="mt-4 w-full"><p className="text-center text-xs text-neutral-400">Paste a YouTube, Twitch, direct HTTPS media, or Kick HLS (.m3u8) URL to cast it immediately, or upload local media including FLAC for the room.</p><form onSubmit={startUrlCasting} className="mt-4 flex gap-2"><input type="url" value={castInput} onChange={(event) => setCastInput(event.target.value)} placeholder="Paste YouTube, Twitch, MP4, or media URL..." className="min-w-0 flex-1 rounded-lg border border-neutral-800 bg-[#121212] px-3 py-2 text-sm text-white transition focus:border-indigo-500 focus:outline-none" /><button type="submit" disabled={isCastingUrl || Boolean(localUpload)} className="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-60">Cast</button></form><input type="file" ref={localFileRef} onChange={handleLocalFileUpload} className="hidden" accept="audio/flac,.flac,audio/*,video/*" />{localUpload ? <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-left" aria-live="polite"><div className="flex items-center justify-between gap-2 text-xs font-bold text-white"><span className="truncate" title={localUpload.fileName}>{localUpload.fileName} · {formatBytes(localUpload.total)}</span><span className="shrink-0 text-emerald-400">{localUpload.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-neutral-800"><div className="h-full rounded-full bg-emerald-500 transition-[width] duration-150" style={{ width: `${localUpload.percent}%` }} /></div><p className="mt-2 text-[10px] text-neutral-500">{localUpload.phase === 'saving' ? 'Finishing upload...' : `${formatBytes(localUpload.loaded)} of ${formatBytes(localUpload.total)}`}</p></div> : <button type="button" onClick={() => localFileRef.current?.click()} className="mx-auto mt-4 block cursor-pointer rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2 text-xs font-bold text-neutral-200 transition hover:border-neutral-600 hover:text-white">Upload local media including FLAC (under 50MB)</button>}{historyError && <p className="mt-3 text-center text-[10px] text-amber-300">{historyError}</p>}</div> : <p className="mt-2 text-sm text-zinc-500">Waiting for a room admin to cast media...</p>}
+              {canCast ? <div className="mt-4 w-full"><p className="text-center text-xs text-neutral-400">Paste a YouTube, Twitch, direct HTTPS media, or Kick HLS (.m3u8) URL to cast it immediately, or upload local media including FLAC for the room.</p><form onSubmit={startUrlCasting} className="mt-4 flex gap-2"><input type="url" value={castInput} onChange={(event) => setCastInput(event.target.value)} placeholder="Paste YouTube, Twitch, MP4, or media URL..." className="min-w-0 flex-1 rounded-lg border border-neutral-800 bg-[#121212] px-3 py-2 text-sm text-white transition focus:border-indigo-500 focus:outline-none" /><button type="submit" disabled={isCastingUrl || Boolean(localUpload)} className="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-60">Cast</button></form><SiteLinks className="mt-3 justify-center text-center" /><input type="file" ref={localFileRef} onChange={handleLocalFileUpload} className="hidden" accept="audio/flac,.flac,audio/*,video/*" />{localUpload ? <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-left" aria-live="polite"><div className="flex items-center justify-between gap-2 text-xs font-bold text-white"><span className="truncate" title={localUpload.fileName}>{localUpload.fileName} · {formatBytes(localUpload.total)}</span><span className="shrink-0 text-emerald-400">{localUpload.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-neutral-800"><div className="h-full rounded-full bg-emerald-500 transition-[width] duration-150" style={{ width: `${localUpload.percent}%` }} /></div><p className="mt-2 text-[10px] text-neutral-500">{localUpload.phase === 'saving' ? 'Finishing upload...' : `${formatBytes(localUpload.loaded)} of ${formatBytes(localUpload.total)}`}</p></div> : <button type="button" onClick={() => localFileRef.current?.click()} className="mx-auto mt-4 block cursor-pointer rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2 text-xs font-bold text-neutral-200 transition hover:border-neutral-600 hover:text-white">Upload local media including FLAC (under 50MB)</button>}{historyError && <p className="mt-3 text-center text-[10px] text-amber-300">{historyError}</p>}</div> : <p className="mt-2 text-sm text-zinc-500">Waiting for a room admin to cast media...</p>}
               {connectionState === 'error' && <p className="mt-4 text-[10px] text-amber-400">Realtime connection interrupted. Reconnect or refresh to sync with the host.</p>}
             </div>
           )}
