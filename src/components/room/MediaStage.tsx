@@ -11,7 +11,7 @@ import { findLink, hasYouTubeVideo, normalizeCastUrl, youtubePlaylistId } from '
 import SiteLinks from '@/components/room/SiteLinks';
 import { fetchPlaylist, importPlaylist, queueLink, registerLink, type LinkOutcome } from '@/lib/watch-links';
 import WatchQueuePanel from '@/components/room/WatchQueuePanel';
-import WatchSearchPanel from '@/components/room/WatchSearchPanel';
+import WatchSearchPanel, { type SearchTab } from '@/components/room/WatchSearchPanel';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
@@ -131,6 +131,9 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [searchTab, setSearchTab] = useState<SearchTab>('all');
+  // The YouTube and Twitch logos open search on that site inside the room.
+  const openSearch = (tab: SearchTab) => { setSearchTab(tab); setShowSearch(true); setShowQueue(false); setShowHistory(false); };
   // A link pasted or dropped anywhere in the room, or shared into it (?link=).
   const [found, setFound] = useState<string | null>(null);
   // Work and messages are tied to the link they belong to, so pasting another
@@ -851,6 +854,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
               onSeek={(seconds) => { safeSeekTo(seconds); broadcastPlayback('seek', seconds, playing); }}
               onChanged={(kind) => broadcastEvent(kind === 'queue' ? 'queue_changed' : 'clips_changed', { version: Date.now() })}
               onClose={() => setShowQueue(false)}
+              onOpenSearch={openSearch}
             />
           </div>
         )}
@@ -858,6 +862,9 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
         {showSearch && canCast && (
           <div data-media-history className="absolute right-4 top-16 z-40 flex max-h-[78%] w-[min(28rem,calc(100%-2rem))] flex-col overflow-hidden">
             <WatchSearchPanel
+              key={searchTab}
+              initialTab={searchTab}
+              hasMedia={Boolean(playbackUrl)}
               onPlay={(result) => castLink(result.url, result.title)}
               onQueue={(result, place) => queueFromLink(result.url, result.title, place)}
               onClose={() => setShowSearch(false)}
@@ -951,7 +958,9 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
                 controls
                 width="100%"
                 height={isAudioCast ? '64px' : '100%'}
-                crossOrigin="anonymous"
+                // Only subtitle tracks need CORS; hosts that send no CORS
+                // headers (the Internet Archive) would fail to load with it.
+                crossOrigin={playbackSubtitleUrl ? 'anonymous' : undefined}
                 onLoadedMetadata={handleReady}
                 onTimeUpdate={handleTimeUpdate}
                 onPlay={handlePlay}
@@ -974,7 +983,7 @@ export default function MediaStage({ roomId, canControlMedia }: MediaStageProps)
             <div className="flex w-full max-w-xl flex-col items-center">
               <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-white/5"><svg viewBox="0 0 24 24" className="ml-0.5 h-7 w-7 text-white" fill="currentColor"><path d="M8 5.14v13.72L19.06 12 8 5.14z" /></svg></div>
               <h2 className="mb-2 text-lg font-bold text-white">Stage is empty</h2>
-              {canCast ? <div className="mt-4 w-full"><p className="text-center text-xs text-neutral-400">Paste a YouTube, Twitch, direct HTTPS media, or Kick HLS (.m3u8) URL to cast it immediately, or upload local media including FLAC for the room.</p><form onSubmit={startUrlCasting} className="mt-4 flex gap-2"><input type="url" value={castInput} onChange={(event) => setCastInput(event.target.value)} placeholder="Paste YouTube, Twitch, MP4, or media URL..." className="min-w-0 flex-1 rounded-lg border border-neutral-800 bg-[#121212] px-3 py-2 text-sm text-white transition focus:border-indigo-500 focus:outline-none" /><button type="submit" disabled={isCastingUrl || Boolean(localUpload)} className="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-60">Cast</button></form><SiteLinks className="mt-3 justify-center text-center" /><input type="file" ref={localFileRef} onChange={handleLocalFileUpload} className="hidden" accept="audio/flac,.flac,audio/*,video/*" />{localUpload ? <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-left" aria-live="polite"><div className="flex items-center justify-between gap-2 text-xs font-bold text-white"><span className="truncate" title={localUpload.fileName}>{localUpload.fileName} · {formatBytes(localUpload.total)}</span><span className="shrink-0 text-emerald-400">{localUpload.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-neutral-800"><div className="h-full rounded-full bg-emerald-500 transition-[width] duration-150" style={{ width: `${localUpload.percent}%` }} /></div><p className="mt-2 text-[10px] text-neutral-500">{localUpload.phase === 'saving' ? 'Finishing upload...' : `${formatBytes(localUpload.loaded)} of ${formatBytes(localUpload.total)}`}</p></div> : <button type="button" onClick={() => localFileRef.current?.click()} className="mx-auto mt-4 block cursor-pointer rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2 text-xs font-bold text-neutral-200 transition hover:border-neutral-600 hover:text-white">Upload local media including FLAC (under 50MB)</button>}{historyError && <p className="mt-3 text-center text-[10px] text-amber-300">{historyError}</p>}</div> : <p className="mt-2 text-sm text-zinc-500">Waiting for a room admin to cast media...</p>}
+              {canCast ? <div className="mt-4 w-full"><p className="text-center text-xs text-neutral-400">Paste a YouTube, Twitch, direct HTTPS media, or Kick HLS (.m3u8) URL to cast it immediately, or upload local media including FLAC for the room.</p><form onSubmit={startUrlCasting} className="mt-4 flex gap-2"><input type="url" value={castInput} onChange={(event) => setCastInput(event.target.value)} placeholder="Paste YouTube, Twitch, MP4, or media URL..." className="min-w-0 flex-1 rounded-lg border border-neutral-800 bg-[#121212] px-3 py-2 text-sm text-white transition focus:border-indigo-500 focus:outline-none" /><button type="submit" disabled={isCastingUrl || Boolean(localUpload)} className="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-60">Cast</button></form><SiteLinks className="mt-3 justify-center text-center" onSearch={openSearch} /><input type="file" ref={localFileRef} onChange={handleLocalFileUpload} className="hidden" accept="audio/flac,.flac,audio/*,video/*" />{localUpload ? <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-left" aria-live="polite"><div className="flex items-center justify-between gap-2 text-xs font-bold text-white"><span className="truncate" title={localUpload.fileName}>{localUpload.fileName} · {formatBytes(localUpload.total)}</span><span className="shrink-0 text-emerald-400">{localUpload.percent}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-neutral-800"><div className="h-full rounded-full bg-emerald-500 transition-[width] duration-150" style={{ width: `${localUpload.percent}%` }} /></div><p className="mt-2 text-[10px] text-neutral-500">{localUpload.phase === 'saving' ? 'Finishing upload...' : `${formatBytes(localUpload.loaded)} of ${formatBytes(localUpload.total)}`}</p></div> : <button type="button" onClick={() => localFileRef.current?.click()} className="mx-auto mt-4 block cursor-pointer rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-2 text-xs font-bold text-neutral-200 transition hover:border-neutral-600 hover:text-white">Upload local media including FLAC (under 50MB)</button>}{historyError && <p className="mt-3 text-center text-[10px] text-amber-300">{historyError}</p>}</div> : <p className="mt-2 text-sm text-zinc-500">Waiting for a room admin to cast media...</p>}
               {connectionState === 'error' && <p className="mt-4 text-[10px] text-amber-400">Realtime connection interrupted. Reconnect or refresh to sync with the host.</p>}
             </div>
           )}

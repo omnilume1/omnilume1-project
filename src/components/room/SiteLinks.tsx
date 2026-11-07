@@ -1,5 +1,7 @@
-// Logos that open the sites people watch from, in a new tab, so they can find
-// something and paste its link back here. Kick plays only from .m3u8 links.
+// Logos for the sites people watch from. YouTube and Twitch open the room's
+// own search when the parent passes onSearch; otherwise (and always for Kick)
+// they open the site in a new tab so a link can be pasted back here. Kick
+// plays only from .m3u8 links.
 const SITES = [
   {
     name: 'YouTube',
@@ -24,16 +26,30 @@ const SITES = [
   },
 ] as const;
 
-export default function SiteLinks({ className = '' }: { className?: string }) {
+// Sites the room can search itself; with onSearch their logos open that
+// search inside the room instead of a new tab.
+const SEARCHABLE: Partial<Record<(typeof SITES)[number]['name'], 'youtube' | 'twitch'>> = { YouTube: 'youtube', Twitch: 'twitch' };
+
+export default function SiteLinks({ className = '', onSearch }: { className?: string; onSearch?: (source: 'youtube' | 'twitch') => void }) {
   return (
     <nav aria-label="Find something to watch" className={`site-links ${className}`}>
       <span className="site-links-label">Find something on</span>
-      {SITES.map((site) => (
-        <a key={site.name} href={site.href} target="_blank" rel="noopener noreferrer" className="site-link" title={site.hint} aria-label={`Open ${site.name} in a new tab`}>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill={site.color} aria-hidden="true"><path d={site.path} /></svg>
-          <span>{site.name}</span>
-        </a>
-      ))}
+      {SITES.map((site) => {
+        const logo = <svg viewBox="0 0 24 24" width="16" height="16" fill={site.color} aria-hidden="true"><path d={site.path} /></svg>;
+        const source = SEARCHABLE[site.name];
+        if (onSearch && source) {
+          return (
+            <button key={site.name} type="button" className="site-link" title={`Search ${site.name} here and play a result for everyone.`} aria-label={`Search ${site.name} in the room`} onClick={() => onSearch(source)}>
+              {logo}<span>{site.name}</span>
+            </button>
+          );
+        }
+        return (
+          <a key={site.name} href={site.href} target="_blank" rel="noopener noreferrer" className="site-link" title={site.hint} aria-label={`Open ${site.name} in a new tab`}>
+            {logo}<span>{site.name}</span>
+          </a>
+        );
+      })}
     </nav>
   );
 }

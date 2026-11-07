@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { cleanQuery, MEDIA_SEARCH_SOURCES, parseTwitchSearch, parseYouTubeSearch, type MediaSearchResult, type MediaSearchSource } from '@/lib/media-search';
+import { cleanQuery, MEDIA_SEARCH_SOURCES, parseArchiveItem, parseArchiveSearch, parseTwitchSearch, parseVimeoSearch, parseYouTubeSearch, SOURCE_NAME, type MediaSearchResult, type MediaSearchSource } from '@/lib/media-search';
 import { createClient } from '@/utils/supabase/server';
 
 const noStore = { 'Cache-Control': 'private, no-store' };
@@ -23,7 +23,41 @@ async function getTwitchToken(clientId: string, secret: string) {
   return twitchToken.value;
 }
 
+// Internet Archive needs no key: search movie items by title (most watched
+// first), then keep only items that have a browser-playable MP4 to stream.
+async function searchArchive(query: string): Promise<MediaSearchResult[]> {
+  // Letters and digits only, lower-cased, so nothing in the query is read as
+  // search syntax (AND/OR/NOT, -, quotes, brackets).
+  const terms = query.replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!terms) return [];
+  const params = new URLSearchParams({ q: `title:(${terms}) AND mediatype:(movies) AND -access-restricted-item:true`, rows: '12', output: 'json', 'sort[]': 'downloads desc' });
+  for (const field of ['identifier', 'title', 'creator', 'year']) params.append('fl[]', field);
+  const response = await fetch(`https://archive.org/advancedsearch.php?${params}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+  if (!response.ok) throw new Error(`archive ${response.status}`);
+  const docs = parseArchiveSearch(await response.json());
+  const found = await Promise.all(docs.map(async (doc): Promise<MediaSearchResult | null> => {
+    try {
+      const meta = await fetch(`https://archive.org/metadata/${doc.id}`, { cache: 'no-store', signal: AbortSignal.timeout(6000) });
+      const file = meta.ok ? parseArchiveItem(doc.id, await meta.json()) : null;
+      return file && { source: 'archive', id: doc.id, title: doc.title, channel: doc.channel, thumbnail: `https://archive.org/services/img/${doc.id}`, url: file.url, live: false };
+    } catch {
+      return null;
+    }
+  }));
+  return found.filter((result): result is MediaSearchResult => result !== null);
+}
+
 async function search(source: MediaSearchSource, query: string): Promise<MediaSearchResult[] | 'not-configured' | 'quota'> {
+  if (source === 'archive') return searchArchive(query);
+  if (source === 'vimeo') {
+    const token = process.env.VIMEO_ACCESS_TOKEN;
+    if (!token) return 'not-configured';
+    const params = new URLSearchParams({ query, per_page: '15', fields: 'uri,name,user.name,pictures.sizes,privacy.embed' });
+    const response = await fetch(`https://api.vimeo.com/videos?${params}`, { headers: { Authorization: `bearer ${token}`, Accept: 'application/vnd.vimeo.*+json;version=3.4' }, cache: 'no-store' });
+    if (response.status === 429) return 'quota';
+    if (!response.ok) throw new Error(`vimeo ${response.status}`);
+    return parseVimeoSearch(await response.json());
+  }
   if (source === 'youtube') {
     const key = process.env.YOUTUBE_API_KEY;
     if (!key) return 'not-configured';
@@ -45,15 +79,16 @@ async function search(source: MediaSearchSource, query: string): Promise<MediaSe
 }
 
 /**
- * GET /api/media/search?source=youtube|twitch&q=… → videos or channels to cast.
+ * GET /api/media/search?source=youtube|twitch|archive|vimeo&q=… → things to cast.
  * Signed-in users only, so the API quota is not open to the internet. The only
- * outbound hosts are the fixed YouTube and Twitch APIs.
+ * outbound hosts are the fixed YouTube, Twitch, Internet Archive and Vimeo APIs
+ * (archive item ids are validated before they go into a metadata URL).
  */
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const source = params.get('source') as MediaSearchSource;
   const query = cleanQuery(params.get('q'));
-  if (!MEDIA_SEARCH_SOURCES.includes(source)) return fail('Choose YouTube or Twitch.', 400);
+  if (!MEDIA_SEARCH_SOURCES.includes(source)) return fail('Choose where to search.', 400);
   if (!query) return fail('Type something to search for.', 400);
 
   const supabase = await createClient();
@@ -66,8 +101,8 @@ export async function GET(request: Request) {
 
   try {
     const results = await search(source, query);
-    if (results === 'not-configured') return fail(`${source === 'youtube' ? 'YouTube' : 'Twitch'} search is not set up yet.`, 503);
-    if (results === 'quota') return fail('YouTube search has reached today’s limit. Paste a link instead, or try again tomorrow.', 503);
+    if (results === 'not-configured') return fail(`${SOURCE_NAME[source]} search is not set up yet.`, 503);
+    if (results === 'quota') return fail(source === 'youtube' ? 'YouTube search has reached today’s limit. Paste a link instead, or try again tomorrow.' : `${SOURCE_NAME[source]} search is busy. Try again in a few minutes.`, 503);
     if (cache.size > 300) cache.delete(cache.keys().next().value as string);
     cache.set(cacheKey, { at: Date.now(), results });
     return NextResponse.json({ results }, { headers: noStore });
