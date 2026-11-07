@@ -81,7 +81,7 @@ export const TAB_SHARE_CONSTRAINTS = {
   video: { frameRate: { ideal: 30, max: 30 }, width: { max: 1920 }, height: { max: 1080 }, displaySurface: 'browser' },
   audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
   selfBrowserSurface: 'exclude',
-  surfaceSwitching: 'include',
+  surfaceSwitching: 'exclude',
   systemAudio: 'include',
 } as DisplayMediaStreamOptions;
 
