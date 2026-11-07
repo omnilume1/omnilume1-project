@@ -31,6 +31,8 @@ interface WatchQueuePanelProps {
   onSeek: (seconds: number) => void;
   onChanged: (kind: 'queue' | 'clips') => void;
   onClose: () => void;
+  // Opens the room's search on that site (the YouTube and Twitch logos).
+  onOpenSearch?: (source: 'youtube' | 'twitch') => void;
 }
 
 const CLIP_LENGTHS = [
@@ -45,7 +47,7 @@ const CLIP_LENGTHS = [
 // others' items needs watch_control. The server enforces all of it.
 export default function WatchQueuePanel({
   roomId, currentUserId, canControl, currentMediaId, queueVersion, clipsVersion, connectionGeneration,
-  getCurrentTime, onPlayMedia, onSeek, onChanged, onClose,
+  getCurrentTime, onPlayMedia, onSeek, onChanged, onClose, onOpenSearch,
 }: WatchQueuePanelProps) {
   const [tab, setTab] = useState<'queue' | 'clips'>('queue');
   const [queue, setQueue] = useState<QueueEntry[]>([]);
@@ -198,7 +200,7 @@ export default function WatchQueuePanel({
               <button type="submit" className="omni-button omni-button-primary omni-button-sm" disabled={busy !== null || !link.trim()}>{busy === 'link' ? 'Adding…' : 'Add'}</button>
             </form>
           )}
-          {canControl && <SiteLinks className="mb-2" />}
+          {canControl && <SiteLinks className="mb-2" onSearch={onOpenSearch} />}
           {queue.length === 0 ? (
             <div className="watch-panel-empty"><p>The queue is empty.</p><p className="watch-panel-hint">Add items from Cast history with “Queue”.</p></div>
           ) : (
