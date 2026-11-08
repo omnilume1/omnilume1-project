@@ -78,7 +78,8 @@ test('the boot script sets exactly what the app sets after hydration', () => {
 
 test('app-themes.css is generated from app-theme.ts and up to date', () => {
   assert.equal(
-    read('src/app/app-themes.css'),
+    // Git may check the file out with CRLF line endings on Windows.
+    read('src/app/app-themes.css').replace(/\r\n/g, '\n'),
     renderThemeCss(),
     'Run `npm run test:unit` (compiles the theme module), then `node scripts/write-app-themes-css.mjs`.',
   );
