@@ -48,14 +48,32 @@ export function TabShareNotice() {
   return <span className="tab-share-notice">{names.get(first) ?? 'A member'} is sharing a tab. It shows here when the stage is free.</span>;
 }
 
-function ShareVideo({ stream, label }: { stream: MediaStream; label: string }) {
+// `onPicture` reports whether frames are actually arriving. A remote stream
+// exists as soon as the offer lands, long before (or without) any video, so
+// its mere presence would show a black frame.
+function ShareVideo({ stream, label, onPicture }: { stream: MediaStream; label: string; onPicture?: (ready: boolean) => void }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
     if (element.srcObject !== stream) element.srcObject = stream;
     void element.play().catch(() => undefined);
-  }, [stream]);
+    if (!onPicture) return;
+    const [track] = stream.getVideoTracks();
+    const update = () => onPicture(Boolean(track && track.readyState === 'live' && !track.muted && element.videoWidth > 0));
+    update();
+    const events = ['loadeddata', 'resize', 'playing', 'emptied'] as const;
+    events.forEach((event) => element.addEventListener(event, update));
+    track?.addEventListener('mute', update);
+    track?.addEventListener('unmute', update);
+    track?.addEventListener('ended', update);
+    return () => {
+      events.forEach((event) => element.removeEventListener(event, update));
+      track?.removeEventListener('mute', update);
+      track?.removeEventListener('unmute', update);
+      track?.removeEventListener('ended', update);
+    };
+  }, [stream, onPicture]);
   // Muted: the sound plays from VoiceRoom, so it continues if the stage closes.
   return <video ref={ref} autoPlay playsInline muted className="tab-share-video" aria-label={label} />;
 }
@@ -98,7 +116,9 @@ export default function TabShareStage() {
 
   const sharerId = picked && voice.liveSharers.includes(picked) ? picked : voice.liveSharers[0] ?? null;
   const peer = sharerId ? voice.peers.find((item) => item.id === sharerId) : undefined;
-  const waiting = Boolean(!voice.sharingScreen && sharerId && voice.joined && !peer?.screen);
+  const [picture, setPicture] = useState(false);
+  const failed = peer?.state === 'failed';
+  const waiting = Boolean(!voice.sharingScreen && sharerId && voice.joined && !(peer?.screen && picture));
   const idleTimer = useRef<number | undefined>(undefined);
   useScreenWakeLock(Boolean(!voice.sharingScreen && voice.joined && peer?.screen));
   useEffect(() => () => window.clearTimeout(idleTimer.current), []);
@@ -189,9 +209,16 @@ export default function TabShareStage() {
       ) : peer?.screen ? (
         <>
           <div {...frameProps}>
-            <ShareVideo stream={peer.screen} label={`${name(sharerId)}'s shared tab`} />
-            <span className="tab-share-badge"><span className="tab-share-dot" aria-hidden="true" />Live · {name(sharerId)}&apos;s tab</span>
-            {voice.shareSoundBlocked && <button type="button" className="tab-share-sound" onClick={voice.resumeShareSound}>Turn on sound</button>}
+            <ShareVideo stream={peer.screen} label={`${name(sharerId)}'s shared tab`} onPicture={setPicture} />
+            {picture ? (
+              <span className="tab-share-badge"><span className="tab-share-dot" aria-hidden="true" />Live · {name(sharerId)}&apos;s tab</span>
+            ) : (
+              <div className="tab-share-pending" role="status">
+                <p className="tab-share-title">{failed ? `Couldn't connect to ${name(sharerId)}'s tab` : `Connecting to ${name(sharerId)}'s tab…`}</p>
+                {(failed || slow === sharerId) && <p className="tab-share-hint">{failed ? 'Your network or theirs is blocking the connection. Retrying…' : 'Still connecting. Some school, office or mobile networks block direct connections between people.'}</p>}
+              </div>
+            )}
+            {picture && voice.shareSoundBlocked && <button type="button" className="tab-share-sound" onClick={voice.resumeShareSound}>Turn on sound</button>}
           </div>
           <div className="tab-share-bar">
             <div className="tab-share-controls">
