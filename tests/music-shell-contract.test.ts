@@ -27,7 +27,8 @@ test('music CSS is scoped to .music-app and globals.css is untouched', () => {
   assert.match(css, /saturate\(2\.2\) blur\(16px\)/);
   // Lightning CSS merges a hand-written -webkit- copy with the standard one and keeps only the prefix (Chrome then shows no blur).
   assert.doesNotMatch(css, /-webkit-backdrop-filter/);
-  assert.match(css, /--mu-key: #b9a8ff/);
+  // The purple accent (#b9a8ff), as a palette variable so the app theme reaches Music too.
+  assert.match(css, /--mu-key: rgb\(var\(--pal-b9a8ff\)\)/);
   for (const shared of ['src/app/globals.css', 'src/app/app.css']) assert.doesNotMatch(read(shared), /music-app|--mu-/);
 });
 

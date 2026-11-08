@@ -1,6 +1,7 @@
 'use server';
 
 import { actionResult } from '@/lib/action-result';
+import { parseProfileColor } from '@/lib/app-theme';
 import {
   assertPostVisibility,
   assertUuid,
@@ -57,7 +58,7 @@ async function getMyProfileBundleImpl() {
   const [profile, posts, followers, following, friendships, requests] = await Promise.all([
     supabase
       .from('profiles')
-      .select('id, display_name, username, date_of_birth, gender, avatar_url, bio, is_private, profile_completed, profile_details_completed, created_at, updated_at')
+      .select('id, display_name, username, date_of_birth, gender, avatar_url, bio, is_private, profile_completed, profile_details_completed, profile_color, created_at, updated_at')
       .eq('id', user.id)
       .maybeSingle(),
     supabase
@@ -143,7 +144,7 @@ async function getPublicProfileBundleImpl(profileId: string) {
   const [profile, posts, followers, following, outgoingFollow, incomingFollow, friendship, outgoingFriendRequest, incomingFriendRequest] = await Promise.all([
     supabase
       .from('public_profiles')
-      .select('id, username, display_name, avatar_url, bio, is_private, created_at, updated_at')
+      .select('id, username, display_name, avatar_url, bio, is_private, profile_color, created_at, updated_at')
       .eq('id', profileId)
       .maybeSingle(),
     supabase
@@ -196,7 +197,7 @@ async function updateMyProfileImpl(input: ProfileInput) {
   const { data, error } = await supabase
     .from('profiles')
     .upsert({ id: user.id, ...parsed.data, profile_completed: true }, { onConflict: 'id' })
-    .select('id, display_name, username, date_of_birth, gender, avatar_url, bio, is_private, profile_completed, profile_details_completed, created_at, updated_at')
+    .select('id, display_name, username, date_of_birth, gender, avatar_url, bio, is_private, profile_completed, profile_details_completed, profile_color, created_at, updated_at')
     .single();
 
   if (error) throw safeMutationError('Unable to save your profile.', error);
@@ -204,6 +205,20 @@ async function updateMyProfileImpl(input: ProfileInput) {
 }
 export async function updateMyProfile(input: ProfileInput) {
   return actionResult(() => updateMyProfileImpl(input));
+}
+
+// The colour a profile shows to people using the "Section colours" theme.
+// The column's check constraint repeats this list; RLS limits the write to the owner's row.
+async function setMyProfileColorImpl(color: string) {
+  const profileColor = parseProfileColor(color);
+  if (!profileColor) throw new Error('Choose one of the profile colours.');
+  const { supabase, user } = await requireUser();
+  const { error } = await supabase.from('profiles').update({ profile_color: profileColor }).eq('id', user.id);
+  if (error) throw new Error('Unable to save your profile colour.');
+  return { profileColor };
+}
+export async function setMyProfileColor(color: string) {
+  return actionResult(() => setMyProfileColorImpl(color));
 }
 
 async function getPublicProfileImpl(profileId: string) {

@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import AccountControlActions from '@/components/profile/AccountControlActions';
+import AppearanceSettings from '@/components/profile/AppearanceSettings';
 import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
 import { OmniIcon } from '@/components/ui/OmniIcon';
@@ -14,11 +15,12 @@ export default function AccountSettingsSurface() {
       <InternalTopbar
         eyebrow="Account"
         title="Settings"
-        description="Manage your profile, privacy and account lifecycle from one protected space."
+        description="Choose your theme and manage your profile, privacy and account."
         actions={<button type="button" onClick={() => router.back()} className="omni-button omni-button-ghost"><OmniIcon name="arrow" size={15} /> Back</button>}
       />
       <main className="omni-main-content account-settings-content">
         <section className="account-settings-grid !grid-cols-1">
+          <AppearanceSettings />
           <div className="glass-panel settings-card">
             <p className="section-kicker">Account controls</p>
             <h2 className="section-title">Your account, your call.</h2>

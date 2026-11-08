@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "./app-themes.css";
 import GlobalFocusTrap from "@/components/GlobalFocusTrap";
 import AmbientBackground from "@/components/ui/AmbientBackground";
+import AppThemeSync from "@/components/ui/AppThemeSync";
+import { THEME_BOOT_SCRIPT } from "@/lib/app-theme";
 import GlassPointerLight from "@/components/ui/GlassPointerLight";
 import OmniMarkSprite from "@/components/ui/OmniMarkSprite";
 import AppProviders from "@/components/AppProviders";
@@ -35,9 +38,14 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
     >
+      <head>
+        {/* Sets the section and the saved theme before the first paint (see app-theme.ts). */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      </head>
       <body className="min-h-full bg-background font-sans text-foreground">
         <OmniMarkSprite />
         <AmbientBackground />
+        <AppThemeSync />
         <GlassPointerLight />
         {/* Global Trap that enforces the URL redirect */}
         <GlobalFocusTrap />

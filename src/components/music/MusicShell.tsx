@@ -3,9 +3,10 @@
 import Form from 'next/form';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { MusicLibraryProvider, useMusicLibrary } from '@/hooks/useMusicLibrary';
 import { useMusicPlayer } from '@/hooks/useMusicPlayer';
+import { coverThemeCss } from '@/lib/app-theme';
 import { musicShortcutFor } from '@/lib/music-shortcuts';
 import { MusicIcon, type MusicIconName } from './MusicIcon';
 import { FixTagsDialog, ShareDialog } from './MusicLibraryParts';
@@ -47,11 +48,25 @@ export default function MusicShell(props: { fontClass: string; children: ReactNo
   return <MusicLibraryProvider><Shell {...props} /></MusicLibraryProvider>;
 }
 
+// With the "Section colours" theme, Music takes the playing song's cover colour (the hue
+// sampled from the cover at upload). The rule only matches on /music with that theme on.
+function useCoverTheme(hue: number | undefined) {
+  useLayoutEffect(() => {
+    if (hue === undefined || !Number.isFinite(hue)) return;
+    const style = document.createElement('style');
+    style.dataset.coverTheme = '';
+    style.textContent = coverThemeCss(hue);
+    document.head.append(style);
+    return () => style.remove();
+  }, [hue]);
+}
+
 function Shell({ fontClass, children }: { fontClass: string; children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const player = useMusicPlayer();
   const playerRef = useRef(player);
+  useCoverTheme(player.queue.current?.hue);
   const [panel, setPanel] = useState<SidePanelKind>('queue');
   const [panelOpen, setPanelOpen] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
