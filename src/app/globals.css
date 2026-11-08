@@ -37,19 +37,23 @@
   --omni-radius: 18px;
   --omni-shadow: 0 22px 70px rgb(var(--pal-06040e) / .38);
   --omni-dock-clearance: 120px;
-  /* Dark frosted glass: the page colour at half strength, blurred, an ink sheen fading down
-     from a lit top edge, and a deep soft shadow. */
-  --omni-blur: 30px;
+  /* Dark frosted glass. The fills are the live default colours and must not change (the
+     page colour at .5, strong .78, with the same faint ink fade). The glass comes only from
+     the edges and the blur: a bright lit top edge, lit left side, faint right and bottom
+     rims, and a deep shadow. Nothing brightens the inside of a card. */
+  --omni-blur: 40px;
+  --omni-glass-filter: blur(var(--omni-blur)) saturate(150%);
   --omni-frost: linear-gradient(180deg, rgb(var(--omni-ink) / .075), rgb(var(--omni-ink) / .02) 50%, rgb(var(--omni-ink) / .012)), rgb(var(--pal-0e0b14) / .5);
   --omni-frost-strong: linear-gradient(180deg, rgb(var(--omni-ink) / .085), rgb(var(--omni-ink) / .025) 50%, rgb(var(--omni-ink) / .015)), rgb(var(--pal-0e0b14) / .78);
   --omni-frost-solid: linear-gradient(180deg, rgb(var(--omni-ink) / .06), rgb(var(--omni-ink) / .015) 60%), rgb(var(--pal-17131f));
-  --omni-edge: rgb(var(--omni-ink) / .2);
-  --omni-glass-shadow: inset 0 1px 0 rgb(var(--omni-ink) / .08), 0 1px 2px rgba(0,0,0,.35);
-  --omni-glass-depth: inset 0 1px 0 rgb(var(--omni-ink) / .07), 0 1px 2px rgba(0,0,0,.4), 0 30px 70px -22px rgba(0,0,0,.75);
+  --omni-rim: rgb(var(--omni-ink) / .17);
+  --omni-edge: rgb(var(--omni-ink) / .5);
+  --omni-glass-shadow: inset 0 1px 0 rgb(var(--omni-ink) / .24), 0 1px 2px rgba(0,0,0,.4);
+  --omni-glass-depth: inset 0 1px 0 rgb(var(--omni-ink) / .3), inset 1px 0 0 rgb(var(--omni-ink) / .1), inset -1px 0 0 rgb(var(--omni-ink) / .04), inset 0 -1px 0 rgb(var(--omni-ink) / .06), 0 1px 2px rgba(0,0,0,.45), 0 40px 90px -28px rgba(0,0,0,.85);
   --omni-gradient: linear-gradient(180deg, rgb(var(--pal-c9bcff)), rgb(var(--pal-a893ff)));
   --omni-ease: cubic-bezier(.22, 1, .36, 1);
 }
-@media (max-width: 768px) { :root { --omni-blur: 12px; } }
+@media (max-width: 768px) { :root { --omni-blur: 22px; } }
 
 * { box-sizing: border-box; }
 html { min-width: 320px; min-height: 100%; background: var(--omni-bg); }
@@ -61,17 +65,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .mono { font-family: var(--font-geist-mono), ui-monospace, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; }
 
 /* Ambient light (fixed, behind everything): a faint wash from the top, a dawn glow top left,
-   a deeper one bottom right, a vignette at the edges and a fine grain over the page. */
+   a deeper one bottom right, a vignette at the edges and a fine grain over the page.
+   These are the live default colours: keep them as they are. */
 .omni-ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; background: radial-gradient(1300px 560px at 50% -180px, rgb(var(--pal-b9a8ff) / .045), transparent 70%), var(--omni-bg); }
 .omni-orb { position: absolute; border-radius: 50%; }
 .omni-orb-1 { left: -260px; top: -600px; width: 1200px; height: 1200px; background: radial-gradient(closest-side, rgb(var(--pal-b9a8ff) / .15), transparent); }
 .omni-orb-2 { right: -300px; bottom: -500px; width: 950px; height: 950px; background: radial-gradient(closest-side, rgb(var(--pal-7c5cff) / .11), transparent); }
 .omni-ambient::before { content: ""; position: absolute; inset: 0; z-index: 1; background: radial-gradient(ellipse 80% 78% at 50% 44%, transparent 56%, rgba(0,0,0,.6)); }
+/* Phones: the glows shrink with the screen, so a phone is as black as a desktop. */
+@media (max-width: 768px) {
+  .omni-orb-1 { left: -150px; top: -260px; width: 420px; height: 420px; }
+  .omni-orb-2 { right: -130px; bottom: -200px; width: 340px; height: 340px; }
+}
 .omni-ambient::after { content: ""; position: absolute; inset: 0; opacity: .05; mix-blend-mode: overlay; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 
 /* Glass primitives. Blur only where something sits behind the surface. */
-.glass, .glass-card, .glass-panel, .glass-card-ambient { border: 1px solid var(--omni-line); border-top-color: var(--omni-edge); border-radius: var(--omni-radius); background: var(--omni-frost); box-shadow: var(--omni-glass-depth); backdrop-filter: blur(var(--omni-blur)) saturate(150%); }
-.glass-strong { border: 1px solid rgb(var(--omni-ink) / .14); border-top-color: var(--omni-edge); background: var(--omni-frost-strong); box-shadow: inset 0 1px 0 rgb(var(--omni-ink) / .1), 0 1px 2px rgba(0,0,0,.4), 0 30px 70px -18px rgba(0,0,0,.8); backdrop-filter: blur(var(--omni-blur)) saturate(150%); }
+.glass, .glass-card, .glass-panel, .glass-card-ambient { border: 1px solid var(--omni-rim); border-top-color: var(--omni-edge); border-radius: var(--omni-radius); background: var(--omni-frost); box-shadow: var(--omni-glass-depth); backdrop-filter: var(--omni-glass-filter); }
+.glass-strong { border: 1px solid var(--omni-rim); border-top-color: var(--omni-edge); background: var(--omni-frost-strong); box-shadow: var(--omni-glass-depth); backdrop-filter: var(--omni-glass-filter); }
 @supports not (backdrop-filter: blur(1px)) {
   .glass, .glass-card, .glass-panel, .glass-card-ambient, .glass-strong, .messages-list, .messages-pane { background: var(--omni-frost-solid); }
 }
