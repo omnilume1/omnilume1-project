@@ -1,15 +1,33 @@
 import { NextResponse } from 'next/server';
 import { cleanQuery, MEDIA_SEARCH_SOURCES, parseArchiveItem, parseArchiveSearch, parseTwitchSearch, parseVimeoSearch, parseYouTubeSearch, SOURCE_NAME, type MediaSearchResult, type MediaSearchSource } from '@/lib/media-search';
+import { createAdminClient } from '@/utils/supabase/admin';
 import { createClient } from '@/utils/supabase/server';
 
 const noStore = { 'Cache-Control': 'private, no-store' };
 const fail = (error: string, status: number) => NextResponse.json({ error }, { status, headers: noStore });
 
-// shortcut: per-server-instance cache (YouTube allows ~100 searches a day on
-// the free quota, so repeats must not spend it); move to a shared cache table
-// if search gets busy.
-const CACHE_MS = 60 * 60 * 1000;
-const cache = new Map<string, { at: number; results: MediaSearchResult[] }>();
+// YouTube allows ~100 searches a day on the free quota, so repeats must not
+// spend it. Results are cached in public.media_search_cache, shared by every
+// server instance. The cache is best-effort: if it is unreachable, search still
+// works, just without caching.
+const CACHE_SECONDS = 60 * 60;
+
+async function readCache(key: string): Promise<MediaSearchResult[] | null> {
+  try {
+    const { data, error } = await createAdminClient().rpc('get_media_search_cache', { p_key: key, p_max_age_seconds: CACHE_SECONDS });
+    return !error && Array.isArray(data) ? data as MediaSearchResult[] : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCache(key: string, results: MediaSearchResult[]) {
+  try {
+    await createAdminClient().rpc('put_media_search_cache', { p_key: key, p_results: results });
+  } catch {
+    // best-effort
+  }
+}
 
 let twitchToken: { value: string; until: number } | null = null;
 async function getTwitchToken(clientId: string, secret: string) {
@@ -96,15 +114,14 @@ export async function GET(request: Request) {
   if (!user) return fail('Sign in first.', 401);
 
   const cacheKey = `${source}:${query.toLowerCase()}`;
-  const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.at < CACHE_MS) return NextResponse.json({ results: cached.results }, { headers: noStore });
+  const cached = await readCache(cacheKey);
+  if (cached) return NextResponse.json({ results: cached }, { headers: noStore });
 
   try {
     const results = await search(source, query);
     if (results === 'not-configured') return fail(`${SOURCE_NAME[source]} search is not set up yet.`, 503);
     if (results === 'quota') return fail(source === 'youtube' ? 'YouTube search has reached today’s limit. Paste a link instead, or try again tomorrow.' : `${SOURCE_NAME[source]} search is busy. Try again in a few minutes.`, 503);
-    if (cache.size > 300) cache.delete(cache.keys().next().value as string);
-    cache.set(cacheKey, { at: Date.now(), results });
+    await writeCache(cacheKey, results);
     return NextResponse.json({ results }, { headers: noStore });
   } catch {
     return fail('Search is not available right now. Try again in a moment.', 502);

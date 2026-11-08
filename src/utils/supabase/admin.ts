@@ -14,6 +14,14 @@ type AdminDatabase = {
     // file itself; Action 16 registers a music upload after the server sniffed
     // its first bytes, and finalises deletes after removing the objects.
     Functions: {
+      get_media_search_cache: {
+        Args: { p_key: string; p_max_age_seconds: number };
+        Returns: unknown;
+      };
+      put_media_search_cache: {
+        Args: { p_key: string; p_results: unknown };
+        Returns: undefined;
+      };
       cache_temporary_media_metadata: {
         Args: { p_media_id: string; p_room_id: string; p_metadata: Record<string, unknown> };
         Returns: boolean;
