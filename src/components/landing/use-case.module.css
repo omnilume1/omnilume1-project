@@ -1,0 +1,32 @@
+/* Use-case landing pages (/study-together, /watch-together, /listen-together). */
+.page { min-height: 100vh; color: var(--omni-text); background: radial-gradient(900px 600px at 15% -10%, rgba(124,92,255,.22), transparent 60%), var(--omni-bg); }
+.wrap { width: min(1080px, calc(100% - 48px)); margin: 0 auto; }
+.nav { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+.logo { display: inline-flex; align-items: center; gap: 10px; color: var(--omni-text); font-size: 17px; font-weight: 600; letter-spacing: -.025em; text-decoration: none; }
+.navLink { color: var(--omni-text-2); font-size: 14px; text-decoration: none; }
+.navLink:hover { color: var(--omni-text); }
+
+.hero { max-width: 720px; padding: 72px 0 56px; }
+.h1 { margin: 0 0 16px; font-size: 48px; line-height: 1.06; font-weight: 500; letter-spacing: -.03em; }
+.lede { margin: 0 0 24px; color: #cdc6dc; font-size: 18px; line-height: 28px; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.assure { margin: 14px 0 0; color: var(--omni-muted); font-size: 14px; line-height: 20px; }
+
+.h2 { margin: 0 0 20px; font-size: 22px; font-weight: 500; letter-spacing: -.01em; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin: 0 0 64px; padding: 0; list-style: none; }
+.card { padding: 20px; border: 1px solid rgba(255,255,255,.12); border-radius: 14px; background: rgba(255,255,255,.035); color: #c9bcff; }
+.card h3 { margin: 12px 0 6px; color: var(--omni-text); font-size: 17px; font-weight: 500; }
+.card p { margin: 0; color: var(--omni-text-2); font-size: 15px; line-height: 22px; }
+.no { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 999px; background: rgba(168,147,255,.16); font-size: 13px; }
+
+.footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 28px 0 40px; border-top: 1px solid rgba(255,255,255,.12); color: var(--omni-muted); font-size: 14px; }
+.more { display: flex; flex-wrap: wrap; gap: 20px; }
+.more a { color: var(--omni-text-2); text-decoration: none; }
+.more a:hover { color: var(--omni-text); }
+
+@media (max-width: 767px) {
+  .wrap { width: calc(100% - 32px); }
+  .hero { padding: 40px 0 40px; }
+  .h1 { font-size: 34px; }
+  .lede { font-size: 16px; line-height: 25px; }
+}

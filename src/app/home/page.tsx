@@ -1,6 +1,9 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import HomeDashboard from '@/components/home/HomeDashboard';
 import { getCurrentAccount } from '@/lib/current-account';
+
+export const metadata: Metadata = { title: 'Join Your Shared Room Online | Omnilume' };
 
 export default async function HomePage() {
   const account = await getCurrentAccount();
