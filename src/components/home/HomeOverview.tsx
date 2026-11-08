@@ -2,16 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  listMyBookmarks, listMyOpenTasks, listMyRoomOverview, listMyUpcomingEvents, setBookmark, setEventRsvp,
-  type Bookmark, type OpenTask, type UpcomingEvent,
-} from '@/lib/management-data';
+import { listMyBookmarks, listMyOpenTasks, setBookmark, type Bookmark, type OpenTask } from '@/lib/management-data';
 import styles from '@/components/home/home.module.css';
-import { organizeRooms, relativeTime, RSVP_LABELS, type OverviewRoom, type RsvpResponse } from '@/lib/room-management-model';
+import { organizeRooms, relativeTime, type OverviewRoom } from '@/lib/room-management-model';
 
-type Loaded<T> = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; data: T };
+export type Loaded<T> = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; data: T };
 
-function useLoaded<T>(load: () => Promise<{ ok: true; data: T } | { ok: false; error: string }>) {
+export function useLoaded<T>(load: () => Promise<{ ok: true; data: T } | { ok: false; error: string }>) {
   const [value, setValue] = useState<Loaded<T>>({ state: 'loading' });
   const run = useCallback(() => {
     void load().then((result) => setValue(result.ok ? { state: 'ready', data: result.data } : { state: 'error', message: result.error }));
@@ -24,47 +21,32 @@ function useLoaded<T>(load: () => Promise<{ ok: true; data: T } | { ok: false; e
   return [value, retry, setValue] as const;
 }
 
-function Block({ kicker, title, tile, index, children }: { kicker: string; title: string; tile: string; index: number; children: React.ReactNode }) {
+export function Tile({ title, aside, className, index, label, children }: { title: string; aside?: React.ReactNode; className: string; index: number; label?: string; children: React.ReactNode }) {
   return (
-    <section className={`glass-card ${styles.tile} ${tile}`} style={{ ['--i' as string]: index }}>
-      <p className="section-kicker">{kicker}</p>
-      <h2 className="section-title">{title}</h2>
-      <div className="mt-3">{children}</div>
+    <section className={`glass-card ${styles.tile} ${className}`} style={{ ['--i' as string]: index }} aria-label={label ?? title}>
+      <div className={styles.tileHead}><h2>{title}</h2>{aside}</div>
+      {children}
     </section>
   );
 }
 
-function Fallback<T>({ value, retry, empty, children }: { value: Loaded<T>; retry: () => void; empty: string; children: (data: T) => React.ReactNode }) {
+export function Fallback<T>({ value, retry, empty, children }: { value: Loaded<T>; retry: () => void; empty: React.ReactNode; children: (data: T) => React.ReactNode }) {
   if (value.state === 'loading') return <div className="room-dashboard-skeleton" aria-busy="true" />;
-  if (value.state === 'error') return <p className="text-sm text-neutral-400" role="alert">{value.message} <button type="button" className="underline" onClick={retry}>Retry</button></p>;
+  if (value.state === 'error') return <p className={styles.empty} role="alert">{value.message} <button type="button" className="underline" onClick={retry}>Retry</button></p>;
   const data = value.data;
-  if (Array.isArray(data) && data.length === 0) return <p className="text-sm text-neutral-500">{empty}</p>;
+  if (Array.isArray(data) && data.length === 0) return <p className={styles.empty}>{empty}</p>;
   return <>{children(data)}</>;
 }
 
-const loadOverview = () => listMyRoomOverview();
-const loadEvents = () => listMyUpcomingEvents(8);
 const loadTasks = () => listMyOpenTasks(8);
 const loadSaved = () => listMyBookmarks(30);
 
-// Cross-room personal dashboard (Action 13): every list comes from an RPC that
+// Cross-room personal lists (Action 13): every list comes from an RPC that
 // returns only rooms and items this account may see right now.
-export default function HomeOverview() {
-  const [rooms, retryRooms] = useLoaded<OverviewRoom[]>(loadOverview);
-  const [events, retryEvents, setEvents] = useLoaded<UpcomingEvent[]>(loadEvents);
+export default function HomeOverview({ rooms, retryRooms }: { rooms: Loaded<OverviewRoom[]>; retryRooms: () => void }) {
   const [tasks, retryTasks] = useLoaded<OpenTask[]>(loadTasks);
   const [saved, retrySaved, setSaved] = useLoaded<Bookmark[]>(loadSaved);
   const [notice, setNotice] = useState<string | null>(null);
-
-  const respond = async (event: UpcomingEvent, response: RsvpResponse) => {
-    const next = event.my_response === response ? null : response;
-    const result = await setEventRsvp(event.event_id, next);
-    if (!result.ok) { setNotice(result.error); return; }
-    setNotice(null);
-    setEvents((current) => current.state === 'ready'
-      ? { state: 'ready', data: current.data.map((item) => item.event_id === event.event_id ? { ...item, my_response: next } : item) }
-      : current);
-  };
 
   const unsave = async (bookmark: Bookmark) => {
     const result = await setBookmark(bookmark.room_id, bookmark.kind, bookmark.entity_id, false);
@@ -75,7 +57,7 @@ export default function HomeOverview() {
 
   return (
     <>
-      <Block kicker="Your rooms" tile={styles.tileRooms} index={0} title="Organized for you">
+      <Tile title="Your rooms" className={styles.tileRooms} index={5} aside={rooms.state === 'ready' ? <small className="mono">{rooms.data.length}</small> : null}>
         <Fallback value={rooms} retry={retryRooms} empty="You have not joined any rooms yet. Find one in Explore.">
           {(data) => (
             <div className="overview-buckets">
@@ -101,32 +83,9 @@ export default function HomeOverview() {
             </div>
           )}
         </Fallback>
-      </Block>
+      </Tile>
 
-      <Block kicker="Your calendar" tile={styles.tileEvents} index={5} title="Upcoming events">
-        <Fallback value={events} retry={retryEvents} empty="No upcoming events in your rooms.">
-          {(data) => (
-            <ul className="overview-list">
-              {data.map((event) => (
-                <li key={event.event_id} className="overview-event">
-                  <span className="overview-cal" aria-hidden="true">{new Date(event.starts_at).toLocaleDateString([], { weekday: 'short' })}<b>{new Date(event.starts_at).getDate()}</b></span>
-                  <Link href={`/room/${event.room_id}`} className="overview-event-main">
-                    <strong className="block truncate text-sm text-white">{event.title}</strong>
-                    <small className="text-xs text-neutral-500">{event.room_name} · <time dateTime={event.starts_at}>{new Date(event.starts_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time></small>
-                  </Link>
-                  <div className="rsvp-row" role="group" aria-label={`Your response to ${event.title}`}>
-                    {(Object.keys(RSVP_LABELS) as RsvpResponse[]).map((response) => (
-                      <button key={response} type="button" className={`rsvp-button ${event.my_response === response ? 'is-selected' : ''}`} aria-pressed={event.my_response === response} onClick={() => void respond(event, response)}>{RSVP_LABELS[response]}</button>
-                    ))}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Fallback>
-      </Block>
-
-      <Block kicker="To do" tile={styles.tileTasks} index={6} title="Assigned to you">
+      <Tile title="Assigned to you" className={styles.tileTasks} index={6}>
         <Fallback value={tasks} retry={retryTasks} empty="Nothing assigned to you right now.">
           {(data) => (
             <ul className="overview-list">
@@ -138,9 +97,9 @@ export default function HomeOverview() {
             </ul>
           )}
         </Fallback>
-      </Block>
+      </Tile>
 
-      <Block kicker="Saved" tile={styles.tileSaved} index={7} title="Saved rooms and content">
+      <Tile title="Saved" className={styles.tileSaved} index={7}>
         <Fallback value={saved} retry={retrySaved} empty="Save rooms, messages and files to find them here.">
           {(data) => (
             <ul className="overview-list">
@@ -156,8 +115,8 @@ export default function HomeOverview() {
             </ul>
           )}
         </Fallback>
-      </Block>
-      {notice && <p role="alert" className="form-error">{notice}</p>}
+        {notice && <p role="alert" className="form-error">{notice}</p>}
+      </Tile>
     </>
   );
 }

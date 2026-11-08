@@ -56,7 +56,16 @@ test('each app path maps to its section, and nothing else does', () => {
 
 test('only known themes are accepted; anything else is the default purple', () => {
   for (const theme of APP_THEMES) assert.equal(parseAppTheme(theme), theme);
-  for (const value of [null, undefined, '', 'Purple', 'dark', 'sections ', 42, {}]) assert.equal(parseAppTheme(value), 'purple');
+  for (const value of [null, undefined, '', 'Purple', 'dark', 'sections ', 42, {}, '__proto__', 'constructor', 'hasOwnProperty']) assert.equal(parseAppTheme(value), 'purple');
+});
+
+test('a device that saved a replaced theme gets its replacement', () => {
+  assert.equal(parseAppTheme('graphite'), 'mono');
+  assert.equal(parseAppTheme('ocean'), 'carbon');
+  assert.equal(parseAppTheme('moonlight'), 'carbon');
+  assert.equal(parseAppTheme('midnight'), 'harbor');
+  assert.equal(parseAppTheme('mint'), 'jade');
+  assert.equal(parseAppTheme('coral'), 'ember');
 });
 
 test('the default theme and pages outside the app carry no theme attribute', () => {
@@ -69,7 +78,7 @@ test('the default theme and pages outside the app carry no theme attribute', () 
 
 test('the boot script sets exactly what the app sets after hydration', () => {
   const paths = ['/', '/home', '/music/album/1', '/explore', '/login', '/constructor', '/room/x', '/settings'];
-  const stored = [null, 'purple', 'sections', 'amber', 'graphite', 'bogus', '__proto__'];
+  const stored = [null, 'purple', 'sections', 'amber', 'mono', 'graphite', 'midnight', 'bogus', '__proto__', 'constructor'];
   for (const path of paths) {
     for (const value of [...stored, 'THROWS']) {
       const attributes = new Map<string, string>([['data-section', 'stale'], ['data-app-theme', 'stale']]);
@@ -122,8 +131,19 @@ test('no purple is written as a plain colour in the app stylesheets, so every th
   assert.deepEqual(offenders, [], 'Write purple colours as rgb(var(--pal-<hex>)) and list the hex in PALETTE_COLORS.');
 });
 
-test('the default theme is the dark purple, a step darker than before', () => {
-  for (const hex of PALETTE_COLORS) assert.equal(paletteColor(hex, null), `#${hex}`);
+test('the default theme is near-black dark purple: accents and text as designed, bases darker', () => {
+  for (const hex of PALETTE_COLORS) {
+    const [lightness, chroma] = rgbToLch(hexToRgb(hex));
+    const [nextLightness, nextChroma] = rgbToLch(hexToRgb(paletteColor(hex, null)));
+    if (lightness >= 0.5) assert.equal(paletteColor(hex, null), `#${hex}`, `${hex} stays as designed`);
+    // Near black, 8-bit rounding adds a little chroma, so colourfulness is only checked where it shows.
+    else assert.ok(nextLightness <= lightness + 1e-3 && (nextLightness < 0.08 || nextChroma <= chroma + 1e-3), `${hex} only gets darker and less colourful`);
+  }
+  const [baseLightness, baseChroma] = rgbToLch(hexToRgb(paletteColor('0e0b14', null)));
+  assert.ok(baseLightness < 0.115 && baseChroma < 0.02, `base ${paletteColor('0e0b14', null)} is near-black`);
+  // Surfaces stay in order: base below raised below glass.
+  const lightness = (hex: string) => rgbToLch(hexToRgb(paletteColor(hex, null)))[0];
+  assert.ok(lightness('0e0b14') < lightness('17131f') && lightness('17131f') < lightness('231d36'));
   const globals = read('src/app/globals.css');
   assert.match(globals, /--omni-bg: rgb\(var\(--pal-0e0b14\)\);/);
   assert.match(globals, /--omni-bg-raised: rgb\(var\(--pal-17131f\)\);/);
@@ -160,14 +180,16 @@ test('every cover colour keeps text and accents readable', () => {
   assert.equal(coverThemeCss(390), coverThemeCss(30));
 });
 
-test('palettes differ only in hue: bases stay as deep and accents as light as the purple', () => {
-  const purpleBase = rgbToLch(hexToRgb('0e0b14'))[0];
-  const accents = PALETTES.filter((palette) => palette !== 'graphite').map((palette) => rgbToLch(hexToRgb(paletteColor('b9a8ff', palette))));
+test('palettes keep the default depth: bases as deep (Mono deeper) and accents about as light as the purple', () => {
+  const purpleBase = rgbToLch(hexToRgb(paletteColor('0e0b14', null)))[0];
+  const accents = PALETTES.filter((palette) => palette !== 'mono').map((palette) => rgbToLch(hexToRgb(paletteColor('b9a8ff', palette))));
   for (const palette of PALETTES) {
     const base = rgbToLch(hexToRgb(paletteColor('0e0b14', palette)))[0];
-    assert.ok(Math.abs(base - purpleBase) <= (palette === 'midnight' ? 0.03 : 0.005), `${palette} base depth`);
+    if (palette === 'mono') assert.ok(base < 0.02, `mono base ${paletteColor('0e0b14', palette)} is black`);
+    else assert.ok(Math.abs(base - purpleBase) <= 0.005, `${palette} base depth`);
   }
-  for (const [lightness] of accents) assert.ok(lightness > 0.74 && lightness < 0.9, 'accent lightness');
+  // Carbon keeps GitHub's blue, a little deeper than the other accents.
+  for (const [lightness] of accents) assert.ok(lightness > 0.7 && lightness < 0.9, 'accent lightness');
   // Every colourful palette sits at least 20 degrees from the others and from purple.
   const hues = [rgbToLch(hexToRgb('b9a8ff'))[2], ...accents.map(([, , hue]) => hue)];
   for (let i = 0; i < hues.length; i += 1) {
@@ -176,7 +198,8 @@ test('palettes differ only in hue: bases stay as deep and accents as light as th
       assert.ok(gap >= 20, `hues ${i} and ${j} are ${gap.toFixed(1)} degrees apart`);
     }
   }
-  assert.ok(rgbToLch(hexToRgb(paletteColor('b9a8ff', 'graphite')))[1] < 0.03, 'graphite has almost no colour');
+  assert.ok(rgbToLch(hexToRgb(paletteColor('b9a8ff', 'mono')))[1] < 0.01, 'mono has no colour');
+  assert.ok(rgbToLch(hexToRgb(paletteColor('0e0b14', 'mono')))[1] < 0.005, 'mono is a neutral black');
 });
 
 test('cover colours follow the cover hue', () => {

@@ -1,49 +1,34 @@
 'use client';
 
 import { unwrapAction } from '@/lib/action-result';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getMyFriends } from '@/actions/profiles';
 import { getPublicRooms } from '@/actions/rooms';
 import type { CurrentAccount } from '@/lib/current-account';
+import { listMyRoomOverview } from '@/lib/management-data';
+import type { OverviewRoom } from '@/lib/room-management-model';
+import { useFriendsListening } from '@/hooks/useFriendsListening';
 import { createClient } from '@/utils/supabase/client';
 import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
-import HomeOverview from '@/components/home/HomeOverview';
+import HomeOverview, { useLoaded } from '@/components/home/HomeOverview';
+import { Avatar, ComingUpTile, ContinueTile, ExploreTile, FriendsTile, NowPlayingTile, type Friend, type PublicRoom } from '@/components/home/HomeTiles';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import styles from '@/components/home/home.module.css';
-import RoomArt, { roomArtFor } from '@/components/ui/RoomArt';
 
-// Children rise in one after another (concept video: 45ms apart).
-const stagger = (index: number) => ({ ['--i' as string]: index });
+// The greeting and date depend on the visitor's clock, so they are only known in the browser.
+// They fill in before the greeting has finished fading in.
+const everyMinute = (onChange: () => void) => { const timer = window.setInterval(onChange, 60_000); return () => window.clearInterval(timer); };
+const currentMinute = () => Math.floor(Date.now() / 60_000);
+const noMinuteOnServer = () => null;
 
-interface Friend {
-  user_id: string;
-  display_name: string | null;
-  username: string | null;
-  avatar_url: string | null;
+function greeting(hour: number) {
+  return hour >= 5 && hour < 12 ? 'Good morning' : hour >= 12 && hour < 17 ? 'Good afternoon' : 'Good evening';
 }
 
-interface PublicRoom {
-  id: string;
-  name: string;
-  username: string | null;
-  room_members: Array<{ count: number }>;
-}
-
-function initials(value: string) {
-  const parts = value.trim().split(/\s+/).filter(Boolean);
-  return (parts.slice(0, 2).map((part) => part[0]).join('') || 'O').toUpperCase();
-}
-
-function DashboardAvatar({ name, src, compact = false }: { name: string; src?: string | null; compact?: boolean }) {
-  return (
-    <span className={`dashboard-profile-avatar ${compact ? '!h-9 !w-9 !text-xs' : ''}`}>
-      {src ? <img src={src} alt="" /> : initials(name)}
-    </span>
-  );
-}
+const loadOverview = () => listMyRoomOverview();
 
 export default function HomeDashboard({ account }: { account: CurrentAccount }) {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -53,6 +38,9 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
   const [publicRooms, setPublicRooms] = useState<PublicRoom[]>([]);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [dashboardUnavailable, setDashboardUnavailable] = useState(false);
+  const [rooms, retryRooms] = useLoaded<OverviewRoom[]>(loadOverview);
+  const listening = useFriendsListening();
+  const minute = useSyncExternalStore(everyMinute, currentMinute, noMinuteOnServer);
   const router = useRouter();
   const supabase = createClient();
   const shortName = account.displayName.split(/\s+/)[0] || account.displayName;
@@ -100,28 +88,37 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
     router.replace('/login?next=%2Fhome&switch=1');
   };
 
+  const now = minute === null ? null : new Date(minute * 60_000);
+  const waiting = rooms.state === 'ready' ? rooms.data.filter((room) => room.unread_count > 0).length : 0;
+  const summary = [
+    now?.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }),
+    !dashboardLoading && `${friends.length} friend${friends.length === 1 ? '' : 's'}${listening.length ? `, ${listening.length} listening` : ''}`,
+    waiting > 0 && `${waiting} room${waiting === 1 ? '' : 's'} waiting for you`,
+  ].filter(Boolean).join(' · ');
+
   return (
     <div className="omni-internal omni-dashboard">
       <InternalTopbar
-        eyebrow="Your shared spaces"
         title="Home"
-        description="A calm place to find your rooms, people and next moment of progress."
-        actions={<Link href="/explore" className="omni-button omni-button-ghost">Explore spaces <OmniIcon name="arrow" size={15} /></Link>}
+        actions={<>
+          <Link href="/explore" className="omni-button omni-button-ghost">Explore <OmniIcon name="arrow" size={15} /></Link>
+          <button type="button" onClick={() => setIsProfileOpen(true)} className="icon-button" aria-label="Open account menu" aria-expanded={isProfileOpen}><OmniIcon name="more" size={17} /></button>
+        </>}
       />
 
       {isProfileOpen && <div className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm" onClick={() => setIsProfileOpen(false)} />}
 
-      <aside className={`fixed top-0 right-0 z-40 flex h-full w-80 flex-col justify-between glass-strong rounded-none border-y-0 border-r-0 p-6 transition-transform duration-300 ${isProfileOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+      <aside className={`fixed top-0 right-0 z-40 flex h-full w-80 flex-col justify-between glass-strong rounded-none border-y-0 border-r-0 p-6 transition-transform duration-300 ${isProfileOpen ? 'translate-x-0' : 'translate-x-full'}`} aria-hidden={!isProfileOpen} inert={!isProfileOpen}>
         <div>
           <div className="mb-8 flex items-center justify-between">
-            <h2 className="text-lg font-bold text-white">Profile menu</h2>
-            <button onClick={() => setIsProfileOpen(false)} className="icon-button" aria-label="Close profile menu"><OmniIcon name="close" size={17} /></button>
+            <h2 className="text-lg font-bold text-white">Account</h2>
+            <button onClick={() => setIsProfileOpen(false)} className="icon-button" aria-label="Close account menu"><OmniIcon name="close" size={17} /></button>
           </div>
           <div className="glass-card-ambient mb-6 flex items-center gap-3 p-3">
-            <DashboardAvatar name={account.displayName} src={account.avatarUrl} compact />
+            <Avatar name={account.displayName} src={account.avatarUrl} size={36} />
             <div className="min-w-0"><p className="truncate font-semibold text-white">{account.displayName}</p><p className="truncate text-xs text-neutral-500">{account.username ? `@${account.username}` : account.email}</p></div>
           </div>
-          <nav className="grid gap-1" aria-label="Profile shortcuts">
+          <nav className="grid gap-1" aria-label="Account shortcuts">
             <Link href="/profile" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-neutral-300 transition hover:bg-white/5"><OmniIcon name="user" size={16} />Profile</Link>
             <Link href="/settings" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-neutral-300 transition hover:bg-white/5"><OmniIcon name="settings" size={16} />Settings</Link>
           </nav>
@@ -133,58 +130,19 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
       </aside>
 
       <main className="omni-main-content">
+        <div className={styles.greet}>
+          <h2>{now ? greeting(now.getHours()) : 'Welcome back'}, {shortName}</h2>
+          <p className="mono">{summary || ' '}</p>
+          {dashboardUnavailable && <p className={styles.empty} role="status">Some of your dashboard is unavailable right now. You can still explore rooms.</p>}
+        </div>
+
         <div className={styles.bento}>
-          <div className={styles.greet}>
-            <div>
-              <p className="section-kicker">Good to see you</p>
-              <h2>Welcome back, {shortName}.</h2>
-              <p>Keep your momentum close. Find a room, start a focus session or pick up where you left off.</p>
-            </div>
-            <div className={styles.greetActions}>
-              <Link href="/explore" className="omni-button omni-button-primary">Find a room <OmniIcon name="arrow" size={16} /></Link>
-              <Link href="/create-room" className="omni-button omni-button-ghost"><OmniIcon name="plus" size={16} /> Create room</Link>
-            </div>
-          </div>
-
-          <section className={`glass-card ${styles.tile} ${styles.tileExplore}`} style={stagger(4)} aria-labelledby="home-discover">
-            <div className={styles.label}><h2 id="home-discover">Public rooms to explore <span className="section-kicker">Discover</span></h2><Link href="/explore">View all</Link></div>
-            {dashboardLoading ? <div className={styles.rcards}>{[0, 1, 2].map((index) => <div key={index} className={`glass-card ${styles.rcard} ${styles.rcardSkeleton}`} aria-hidden="true" />)}</div> : publicRooms.length === 0 ? <p className="home-empty">There are no public rooms to show right now.</p> : <div className={styles.rcards}>{publicRooms.slice(0, 3).map((room) => {
-              const memberCount = room.room_members[0]?.count ?? 0;
-              return (
-                <article key={room.id} className={`glass-card home-rcard lift ${styles.rcard}`}>
-                  <div className="home-rprev"><RoomArt kind={roomArtFor(room.id)} /><span className="home-live">Public</span></div>
-                  <div className="home-rbody">
-                    <h3>{room.name}</h3>
-                    {room.username ? <p className="home-rmeta">@{room.username}</p> : <p className="home-rmeta">Public room</p>}
-                    <div className="home-rfoot"><span><OmniIcon name="users" size={14} /> {memberCount} joined</span><Link href="/explore">Explore</Link></div>
-                  </div>
-                </article>
-              );
-            })}</div>}
-          </section>
-
-          <section className={`glass-card ${styles.tile} ${styles.tileFriends}`} style={stagger(1)} aria-labelledby="home-friends">
-            <div className={styles.label}><h2 id="home-friends">Friends</h2><span>{dashboardLoading ? '' : friends.length}</span></div>
-            {dashboardLoading ? <p className="home-muted">Loading friends...</p> : friends.length === 0 ? <p className="home-muted">No friends yet. Connect from a profile when you are ready.</p> : <div className={styles.friends}>{friends.slice(0, 5).map((friend) => <Link key={friend.user_id} href={`/profile/${friend.user_id}`} className="home-fr"><DashboardAvatar name={friend.display_name || friend.username || 'OmniLume member'} src={friend.avatar_url} compact /><span className="min-w-0"><strong>{friend.display_name || friend.username || 'OmniLume member'}</strong><small>{friend.username ? `@${friend.username}` : 'Friend'}</small></span><OmniIcon name="chevronRight" size={16} className="home-go" /></Link>)}</div>}
-          </section>
-
-          <section className={`glass-card ${styles.tile} ${styles.tileProfile} ${styles.profile}`} style={stagger(2)} aria-label="Your profile">
-            <button onClick={() => setIsProfileOpen(true)} className={`dashboard-profile-menu-button icon-button ${styles.profileMenu}`} aria-label="Open profile menu"><OmniIcon name="more" size={17} /></button>
-            <DashboardAvatar name={account.displayName} src={account.avatarUrl} />
-            <h3>{account.displayName}</h3><p>{account.username ? `@${account.username}` : account.email}</p>
-            {dashboardUnavailable && <p className={`home-muted ${styles.note}`}>Some dashboard information is temporarily unavailable. You can still explore rooms.</p>}
-            <div className={styles.profileStats}><div><strong className="mono">{dashboardLoading ? '—' : friends.length}</strong><span>Friends</span></div><div><strong className="mono">{dashboardLoading ? '—' : publicRooms.length}</strong><span>Public rooms</span></div><div><strong>{account.profileDetailsCompleted ? '✓' : '—'}</strong><span>Profile</span></div></div>
-          </section>
-
-          <div className={`glass-card ${styles.tile} ${styles.tileStats}`} style={stagger(3)} aria-label="Your OmniLume overview">
-            <div className={styles.stats}>
-              <div><span className="section-kicker">Friends</span><strong className="mono">{dashboardLoading ? '—' : friends.length}</strong></div>
-              <div><span className="section-kicker">Public rooms</span><strong className="mono">{dashboardLoading ? '—' : publicRooms.length}</strong></div>
-              <div><span className="section-kicker">Profile</span><strong>{account.profileDetailsCompleted ? 'Ready' : 'Set up'}</strong></div>
-            </div>
-          </div>
-
-          <HomeOverview />
+          <ContinueTile rooms={rooms} />
+          <FriendsTile friends={friends} listening={listening} loading={dashboardLoading} />
+          <ComingUpTile />
+          <NowPlayingTile listening={listening} />
+          <ExploreTile rooms={publicRooms} loading={dashboardLoading} />
+          <HomeOverview rooms={rooms} retryRooms={retryRooms} />
         </div>
       </main>
       <FloatingDock />
