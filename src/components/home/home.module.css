@@ -1,70 +1,101 @@
-/* Home: bento. Mobile first, one column; tiles are placed explicitly from 1100px. */
+/* Home: the bento from the concept video (docs/section-identity), on the near-black theme.
+   Mobile first: one column, two from 760px, three from 1100px (continue spans two). */
+.greet { padding: 14px 0 26px; animation: rise 500ms var(--omni-ease) both; }
+.greet h2 { margin: 0; font-size: clamp(34px, 4.4vw, 52px); font-weight: 420; line-height: 1.06; letter-spacing: -.04em; }
+.greet p { margin: 12px 0 0; color: var(--omni-muted); font-size: 13px; }
+.greet .empty { margin-top: 10px; }
+
 .bento { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
 
-.greet { display: flex; flex-direction: column; gap: 18px; padding: 8px 0 18px; animation: rise 500ms var(--omni-ease) both; }
-.greet h2 { margin: 0; font-size: clamp(34px, 5vw, 56px); line-height: 1.04; font-weight: 500; letter-spacing: -.04em; }
-.greet p:not(:global(.section-kicker)) { max-width: 540px; margin: 12px 0 0; color: var(--omni-text-2); font-size: 16px; line-height: 1.5; }
-.greetActions { display: flex; flex-wrap: wrap; gap: 10px; }
-
-/* Tile: glass card that rises in, with one faint sheen along its top edge. */
-.tile { position: relative; overflow: hidden; min-width: 0; padding: 20px; animation: rise 500ms var(--omni-ease) calc(120ms + var(--i, 0) * 70ms) both; }
-.tile::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 72px; background: linear-gradient(180deg, rgba(255,255,255,.05), transparent); pointer-events: none; }
-.tile::after { content: ""; position: absolute; top: 0; left: 0; width: 38%; height: 1px; background: linear-gradient(90deg, transparent, rgb(var(--pal-b9a8ff) / .85), transparent); opacity: 0; pointer-events: none; animation: sheen 1100ms var(--omni-ease) calc(320ms + var(--i, 0) * 70ms) both; }
+/* Tile: glass card that rises in, one after another, with a sheen along its top edge. */
+.tile { position: relative; overflow: hidden; min-width: 0; padding: 22px 24px; animation: rise 500ms var(--omni-ease) calc(120ms + var(--i, 0) * 70ms) both; }
+.tile::after { content: ""; position: absolute; top: 0; left: 0; width: 34%; height: 1px; background: linear-gradient(90deg, transparent, rgb(var(--pal-dcd0ff) / .9), transparent); opacity: 0; pointer-events: none; animation: sheen 1100ms var(--omni-ease) calc(320ms + var(--i, 0) * 70ms) both; }
 .tile > * { position: relative; }
+.tileHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.tileHead h2 { margin: 0; color: var(--omni-text-2); font-size: 14px; font-weight: 500; }
+.tileHead a, .tileHead small { color: var(--omni-muted); font-size: 12px; text-decoration: none; }
+.tileHead a:hover { color: var(--omni-text); }
+.empty { margin: 0; color: var(--omni-muted); font-size: 13px; line-height: 1.5; }
+.dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--omni-ok); box-shadow: 0 0 8px rgba(111,207,154,.55); }
 
-.tileRooms { order: 1; }
-.tileFriends { order: 2; }
-.tileProfile { order: 3; }
-.tileStats { order: 4; }
-.tileExplore { order: 5; }
-.tileEvents { order: 6; }
-.tileTasks { order: 7; }
-.tileSaved { order: 8; }
+/* Continue where you left off: the room on the left, a small picture of it on the right. */
+.tileContinue { display: flex; gap: 26px; }
+.continueText { display: flex; flex: 1; flex-direction: column; gap: 14px; min-width: 0; }
+.kicker { margin: 0; color: var(--omni-muted); font-size: 13px; }
+.continueText h3 { margin: 0; font-size: clamp(26px, 2.6vw, 32px); font-weight: 450; line-height: 1.15; letter-spacing: -.028em; overflow-wrap: anywhere; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin: 0; color: var(--omni-text-2); font-size: 14px; }
+.bar { width: 1px; height: 14px; background: var(--omni-line); }
+.metaItem { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.continueActions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: auto; padding-top: 6px; }
+.mini { display: none; }
+.mw { position: relative; overflow: hidden; padding-top: 12px; border: 1px solid var(--omni-line); border-radius: 9px; background: rgb(var(--omni-ink) / .035); }
+.mw::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 12px; border-bottom: 1px solid var(--omni-line-soft); background: rgb(var(--omni-ink) / .03); }
+.mwArt :global(svg) { position: absolute; left: 6px; top: 18px; display: block; width: calc(100% - 12px); height: calc(100% - 24px); border-radius: 6px; }
+.mwSide i { display: block; height: 6px; margin: 8px 8px 0; border-radius: 3px; background: rgb(var(--omni-ink) / .08); }
+.mwSide .s { width: 55%; }
+.mwSide .a { width: 70%; margin-left: auto; background: rgb(var(--pal-b9a8ff) / .3); }
+.mwBar { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 12px 14px 0; }
+.mwBar span { color: var(--omni-text); font-size: 22px; }
+.mwBar small { overflow: hidden; color: var(--omni-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
-.tileRooms :global(.overview-buckets) { max-height: 440px; overflow-y: auto; padding-right: 4px; overscroll-behavior: contain; }
+/* Rows: friends and rooms to explore. */
+.rows { display: grid; gap: 2px; margin: 0 -8px; }
+.row { display: flex; align-items: center; gap: 12px; min-height: 50px; padding: 6px 8px; border-radius: 10px; color: inherit; text-decoration: none; transition: background-color 160ms ease; }
+.row:hover { background: rgb(var(--omni-ink) / .05); }
+.rowText { display: block; flex: 1; min-width: 0; }
+.rowText strong, .rowText small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rowText strong { font-size: 14px; font-weight: 450; }
+.rowText small { margin-top: 2px; color: var(--omni-muted); font-size: 12px; }
+.avatar { display: inline-grid; flex: none; place-items: center; overflow: hidden; border-radius: 50%; background: linear-gradient(135deg, rgb(var(--pal-8b6cff)), rgb(var(--pal-c084fc))); color: #fff; font-size: 12px; font-weight: 600; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.thumb { position: relative; width: 34px; height: 34px; flex: none; overflow: hidden; border: 1px solid var(--omni-line-soft); border-radius: 10px; }
+.thumb :global(svg) { display: block; width: 100%; height: 100%; }
+.chev { flex: none; color: var(--omni-muted); }
 
-.label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
-.label h2 { margin: 0; font-size: 15px; font-weight: 500; }
-.label a, .label > span { color: var(--omni-muted); font-size: 13px; text-decoration: none; }
-.label a:hover { color: var(--omni-text); }
+/* Coming up: a timeline of the next events. */
+.timeline { position: relative; display: grid; gap: 14px; margin: 0; padding: 0 0 0 16px; list-style: none; }
+.timeline::before { content: ""; position: absolute; left: 3px; top: 6px; bottom: 6px; width: 1px; background: var(--omni-line); }
+.timeline li { position: relative; display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 4px; font-size: 14px; }
+.timeline li::before { content: ""; position: absolute; left: -16px; top: 6px; width: 7px; height: 7px; border-radius: 50%; background: rgb(var(--pal-b9a8ff)); box-shadow: 0 0 8px rgb(var(--pal-b9a8ff) / .7); }
+.timeline time { padding-top: 1px; color: rgb(var(--pal-b9a8ff)); font-size: 12.5px; }
+.timeline small { display: block; margin-top: 3px; color: var(--omni-muted); font-size: 12px; }
+.eventTitle { display: block; overflow: hidden; color: var(--omni-text); text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.eventTitle:hover { text-decoration: underline; }
+.rsvp { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 
-.rcards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
-.rcard { padding: 0 !important; border-radius: 12px; animation: none; }
-.rcard::before, .rcard::after { display: none; }
-.rcardSkeleton { height: 210px; }
+/* Now playing */
+.np { display: flex; align-items: center; gap: 16px; }
+.cover { display: grid; width: 96px; height: 96px; flex: none; place-items: center; overflow: hidden; border-radius: 12px; background: linear-gradient(135deg, rgb(var(--pal-3b2c63)), rgb(var(--pal-14101e))); color: rgb(var(--pal-b9a8ff)); box-shadow: 0 10px 24px rgba(0,0,0,.4); }
+.cover[style] { background: linear-gradient(135deg, hsl(var(--hue) 45% 42%), hsl(var(--hue) 50% 14%)); color: #fff; }
+.cover img { width: 100%; height: 100%; object-fit: cover; }
+.np b { display: block; overflow: hidden; font-size: 17px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.np small { display: block; margin-top: 3px; overflow: hidden; color: var(--omni-muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; margin-top: 10px; padding: 0 10px; border: 1px solid var(--omni-line); border-radius: 8px; background: rgb(var(--omni-ink) / .05); color: var(--omni-text-2); font-size: 12px; text-decoration: none; cursor: pointer; transition: color 160ms ease, border-color 160ms ease; }
+.chip:hover { border-color: rgb(var(--pal-b9a8ff) / .4); color: var(--omni-text); }
+.progress { position: relative; height: 4px; margin-top: 22px; overflow: hidden; border-radius: 2px; background: rgb(var(--omni-ink) / .1); }
+.progress i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: rgb(var(--pal-b9a8ff)); transition: width 400ms linear; }
+.times { display: flex; justify-content: space-between; margin-top: 8px; color: var(--omni-muted); font-size: 11.5px; }
 
-.friends { display: grid; gap: 2px; margin: 0 -8px; }
-.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; height: 100%; align-content: center; }
-.stats div { display: grid; gap: 6px; align-content: start; }
-.stats strong { display: block; font-size: clamp(26px, 3vw, 38px); font-weight: 500; letter-spacing: -.02em; line-height: 1; }
-.profile { display: flex; flex-direction: column; align-items: flex-start; }
-.profile h3 { margin: 14px 0 2px; font-size: 17px; font-weight: 500; }
-.profile > p { margin: 0; color: var(--omni-muted); font-size: 13px; }
-.profileMenu { position: absolute !important; top: 16px; right: 16px; }
-.profileStats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--omni-line-soft); text-align: center; }
-.profileStats strong { display: block; font-size: 18px; font-weight: 500; }
-.profileStats span { color: var(--omni-muted); font-size: 12px; }
-.profile > .note { margin: 12px 0 0; }
-.profile > h3 + p { margin-bottom: 16px; }
+/* Your rooms, tasks and saved scroll inside their tile. */
+.tileRooms :global(.overview-buckets), .tileTasks :global(.overview-list), .tileSaved :global(.overview-list) { max-height: 320px; overflow-y: auto; padding-right: 4px; overscroll-behavior: contain; }
 
-@media (min-width: 700px) {
+@media (min-width: 760px) {
   .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tileRooms, .tileExplore, .tileEvents, .tileStats { grid-column: 1 / -1; }
-  .rcards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .greet { flex-direction: row; align-items: flex-end; justify-content: space-between; grid-column: 1 / -1; }
+  .tileContinue, .tileRooms { grid-column: 1 / -1; }
+}
+
+@media (min-width: 900px) {
+  .mini { position: relative; display: grid; width: min(392px, 46%); flex: none; grid-template-columns: 2fr 1fr; grid-template-rows: minmax(140px, 1fr) 68px; gap: 10px; padding: 12px; border: 1px solid var(--omni-line-soft); border-radius: 14px; background: rgba(0,0,0,.28); }
 }
 
 @media (min-width: 1100px) {
-  .bento { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .tileRooms { grid-column: 1 / 3; grid-row: 2 / 4; order: 0; }
-  .tileFriends { grid-column: 3; grid-row: 2; order: 0; }
-  .tileProfile { grid-column: 4; grid-row: 2; order: 0; }
-  .tileStats { grid-column: 3 / 5; grid-row: 3; order: 0; }
-  .tileExplore { grid-column: 1 / -1; grid-row: 4; order: 0; }
-  .tileEvents { grid-column: 1 / 3; grid-row: 5; order: 0; }
-  .tileTasks { grid-column: 3; grid-row: 5; order: 0; }
-  .tileSaved { grid-column: 4; grid-row: 5; order: 0; }
-  .tileRooms :global(.overview-buckets) { max-height: 340px; }
+  .bento { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tileContinue { grid-column: span 2; min-height: 300px; }
+  .tileRooms { grid-column: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .greet, .tile, .tile::after { animation: none; }
 }
 
 @keyframes rise { from { opacity: 0; transform: translateY(22px); } }

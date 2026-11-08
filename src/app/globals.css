@@ -20,8 +20,10 @@
   --omni-bg-raised: rgb(var(--pal-17131f));
   --omni-raised: rgb(var(--pal-221c2e));
   --omni-surface: rgb(var(--pal-221a38) / .46);
-  --omni-line: rgba(255, 255, 255, 0.12);
-  --omni-line-soft: rgba(255, 255, 255, 0.07);
+  /* Ink: white turned a fifth of the way to the accent. Lines, glass sheen and edge light use it. */
+  --omni-ink: var(--pal-f1efff);
+  --omni-line: rgb(var(--omni-ink) / .115);
+  --omni-line-soft: rgb(var(--omni-ink) / .07);
   --omni-text: #f3f0fa;
   --omni-text-2: rgb(var(--pal-bdb5d0));
   /* text-3 and dim sit a step lighter than the concept so small text stays AA on glass */
@@ -35,12 +37,15 @@
   --omni-radius: 18px;
   --omni-shadow: 0 22px 70px rgb(var(--pal-06040e) / .38);
   --omni-dock-clearance: 120px;
-  /* Frosted purple glass: tinted, blurred, a soft top sheen. Visible through, never see-through. */
+  /* Dark frosted glass: the page colour at half strength, blurred, an ink sheen fading down
+     from a lit top edge, and a deep soft shadow. */
   --omni-blur: 30px;
-  --omni-frost: linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.02) 60%), rgb(var(--pal-2a2146) / .34);
-  --omni-frost-strong: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02) 60%), rgb(var(--pal-221a38) / .46);
-  --omni-frost-solid: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.015) 60%), rgb(var(--pal-231d36));
-  --omni-glass-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 12px 32px rgb(var(--pal-06040e) / .22);
+  --omni-frost: linear-gradient(180deg, rgb(var(--omni-ink) / .075), rgb(var(--omni-ink) / .02) 50%, rgb(var(--omni-ink) / .012)), rgb(var(--pal-0e0b14) / .5);
+  --omni-frost-strong: linear-gradient(180deg, rgb(var(--omni-ink) / .085), rgb(var(--omni-ink) / .025) 50%, rgb(var(--omni-ink) / .015)), rgb(var(--pal-0e0b14) / .78);
+  --omni-frost-solid: linear-gradient(180deg, rgb(var(--omni-ink) / .06), rgb(var(--omni-ink) / .015) 60%), rgb(var(--pal-17131f));
+  --omni-edge: rgb(var(--omni-ink) / .2);
+  --omni-glass-shadow: inset 0 1px 0 rgb(var(--omni-ink) / .08), 0 1px 2px rgba(0,0,0,.35);
+  --omni-glass-depth: inset 0 1px 0 rgb(var(--omni-ink) / .07), 0 1px 2px rgba(0,0,0,.4), 0 30px 70px -22px rgba(0,0,0,.75);
   --omni-gradient: linear-gradient(180deg, rgb(var(--pal-c9bcff)), rgb(var(--pal-a893ff)));
   --omni-ease: cubic-bezier(.22, 1, .36, 1);
 }
@@ -55,18 +60,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 ::selection { background: rgb(var(--pal-b9a8ff) / .3); color: white; }
 .mono { font-family: var(--font-geist-mono), ui-monospace, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; }
 
-/* Ambient light (fixed, behind everything) and a fine grain over the page. */
-.omni-ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; background: var(--omni-bg); }
+/* Ambient light (fixed, behind everything): a faint wash from the top, a dawn glow top left,
+   a deeper one bottom right, a vignette at the edges and a fine grain over the page. */
+.omni-ambient { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; background: radial-gradient(1300px 560px at 50% -180px, rgb(var(--pal-b9a8ff) / .045), transparent 70%), var(--omni-bg); }
 .omni-orb { position: absolute; border-radius: 50%; }
-.omni-orb-1 { left: -260px; top: -420px; width: 1050px; height: 1050px; background: radial-gradient(closest-side, rgb(var(--pal-7c5cff) / .36), transparent); }
-.omni-orb-2 { right: -320px; top: 40px; width: 900px; height: 900px; background: radial-gradient(closest-side, rgb(var(--pal-c46edc) / .17), transparent); }
-.omni-orb-3 { left: 260px; top: 520px; width: 1100px; height: 820px; background: radial-gradient(closest-side, rgb(var(--pal-5840e6) / .29), transparent); }
-.omni-orb-4 { left: 880px; top: 260px; width: 520px; height: 520px; background: radial-gradient(closest-side, rgb(var(--pal-78aaff) / .07), transparent); }
+.omni-orb-1 { left: -260px; top: -600px; width: 1200px; height: 1200px; background: radial-gradient(closest-side, rgb(var(--pal-b9a8ff) / .15), transparent); }
+.omni-orb-2 { right: -300px; bottom: -500px; width: 950px; height: 950px; background: radial-gradient(closest-side, rgb(var(--pal-7c5cff) / .11), transparent); }
+.omni-ambient::before { content: ""; position: absolute; inset: 0; z-index: 1; background: radial-gradient(ellipse 80% 78% at 50% 44%, transparent 56%, rgba(0,0,0,.6)); }
 .omni-ambient::after { content: ""; position: absolute; inset: 0; opacity: .05; mix-blend-mode: overlay; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 
 /* Glass primitives. Blur only where something sits behind the surface. */
-.glass, .glass-card, .glass-panel, .glass-card-ambient { border: 1px solid var(--omni-line); border-radius: var(--omni-radius); background: var(--omni-frost); box-shadow: var(--omni-glass-shadow); backdrop-filter: blur(var(--omni-blur)) saturate(170%); }
-.glass-strong { border: 1px solid rgba(255,255,255,.14); background: var(--omni-frost-strong); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 28px 64px rgb(var(--pal-080512) / .42); backdrop-filter: blur(var(--omni-blur)) saturate(170%); }
+.glass, .glass-card, .glass-panel, .glass-card-ambient { border: 1px solid var(--omni-line); border-top-color: var(--omni-edge); border-radius: var(--omni-radius); background: var(--omni-frost); box-shadow: var(--omni-glass-depth); backdrop-filter: blur(var(--omni-blur)) saturate(150%); }
+.glass-strong { border: 1px solid rgb(var(--omni-ink) / .14); border-top-color: var(--omni-edge); background: var(--omni-frost-strong); box-shadow: inset 0 1px 0 rgb(var(--omni-ink) / .1), 0 1px 2px rgba(0,0,0,.4), 0 30px 70px -18px rgba(0,0,0,.8); backdrop-filter: blur(var(--omni-blur)) saturate(150%); }
 @supports not (backdrop-filter: blur(1px)) {
   .glass, .glass-card, .glass-panel, .glass-card-ambient, .glass-strong, .messages-list, .messages-pane { background: var(--omni-frost-solid); }
 }

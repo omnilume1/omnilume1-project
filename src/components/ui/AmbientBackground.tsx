@@ -5,8 +5,6 @@ export default function AmbientBackground() {
     <div className="omni-ambient" aria-hidden="true">
       <span className="omni-orb omni-orb-1" />
       <span className="omni-orb omni-orb-2" />
-      <span className="omni-orb omni-orb-3" />
-      <span className="omni-orb omni-orb-4" />
     </div>
   );
 }
