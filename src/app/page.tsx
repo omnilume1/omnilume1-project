@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Suspense, type CSSProperties, type ReactNode } from 'react';
@@ -38,6 +39,8 @@ const THUMBS = [
   { src: '/landing/explore.jpg', label: 'Find your next room' },
 ];
 
+export const metadata: Metadata = { title: 'Shared Rooms for Study, Watch and Listen | Omnilume' };
+
 // Static: no per-request work, so the CDN serves it. Member links go to app pages, where the proxy
 // sends anyone without a finished profile to setup and anyone signed out to sign in.
 export default function Home() {
@@ -70,12 +73,13 @@ export default function Home() {
           <div className={styles.heroHead}>
             <h1 className={styles.h1}>Rooms where friends study, watch and listen together</h1>
             <div>
-              <p className={styles.lede}>Open a room and everyone stays in step: one focus timer, one synced video, the same song at the same second, with chat on the side.</p>
+              <p className={styles.lede}>Made for study groups, friend groups and friends who live far apart. Open a room and everyone stays in step: one focus timer, one synced video, the same song at the same second, with chat on the side.</p>
               <div className={styles.actions}>
                 <Link href="/login" className={`${styles.btn} ${styles.btnPrimary} ${styles.guestOnly}`}>Get started <OmniIcon name="arrow" size={16} /></Link>
                 <Link href="/home" className={`${styles.btn} ${styles.btnPrimary} ${styles.memberOnly}`}>Go to your space <OmniIcon name="arrow" size={16} /></Link>
                 <Link href="/explore" className={`${styles.btn} ${styles.btnSecondary}`}>Explore rooms</Link>
               </div>
+              <p className={styles.assure}>Free · Runs in your browser, nothing to install · Invite friends with a link</p>
             </div>
           </div>
 
@@ -84,6 +88,15 @@ export default function Home() {
             <Suspense><HeroDesk /></Suspense>
             <div className={`${styles.caption} mono`}><span>Live preview. Drag a window, or pick another page</span><span>Real OmniLume screens</span></div>
           </div>
+
+          <section className={styles.how} aria-labelledby="how-title" data-reveal>
+            <h2 id="how-title" className={styles.say}>How it works<span>Three steps to your first session together.</span></h2>
+            <ol className={styles.steps}>
+              <li><span className={`${styles.stepNo} mono`}>1</span><h3>Create a room</h3><p>Name it, pick how long it lasts and choose who can join.</p></li>
+              <li><span className={`${styles.stepNo} mono`}>2</span><h3>Share the link</h3><p>Send the invite link. Friends sign in and join from it.</p></li>
+              <li><span className={`${styles.stepNo} mono`}>3</span><h3>Start together</h3><p>Run the focus timer, play a video or queue a song. Everyone stays in sync.</p></li>
+            </ol>
+          </section>
         </main>
       </div>
 
@@ -268,7 +281,7 @@ export default function Home() {
           <div className={styles.wrap}>
             <div className={styles.foot} data-reveal>
               <div><h3>Product</h3><Link href="/explore">Rooms</Link><Link href="/explore">Explore</Link><Link href="/music">Music</Link><Link href="/messages">Messages</Link></div>
-              <div><h3>Core features</h3><a href="#cards">Watch together</a><a href="#cards">Study workspace</a><a href="#cards">Whiteboard</a><a href="#cards">Listen together</a><a href="#cards">Voice</a></div>
+              <div><h3>Core features</h3><Link href="/watch-together">Watch together</Link><Link href="/study-together">Study together</Link><a href="#cards">Whiteboard</a><Link href="/listen-together">Listen together</Link><a href="#cards">Voice</a></div>
               <div><h3>Coming soon</h3><a href="#ai">OmniLume AI</a><a href="#ai">Room flashcards</a><a href="#ai">Session planner</a></div>
               <div><h3>Account</h3><Link href="/login">Sign in</Link><Link href="/login">Create account</Link><Link href="/forgot-password">Forgot password</Link></div>
               <div><h3>OmniLume</h3><a href="#more">About</a><span>Privacy</span><span>Terms</span></div>
