@@ -1,4 +1,5 @@
 import { createClient } from '@/utils/supabase/client';
+import { uploadFileWithProgress } from '@/lib/storage';
 import { MAX_UPLOAD_BYTES } from '@/lib/upload-limits';
 
 // Action 12 collaboration data, read through RLS and written only through the
@@ -142,24 +143,28 @@ export const finishRecording = (recordingId: string, storagePath: string, durati
   rpc<null>('finish_room_recording', { p_recording_id: recordingId, p_storage_path: storagePath, p_duration_seconds: Math.max(0, Math.min(86_400, Math.round(durationSeconds))) }, 'Unable to save the recording.');
 export const cancelRecording = (recordingId: string) => rpc<null>('cancel_room_recording', { p_recording_id: recordingId }, 'Unable to cancel the recording.');
 export async function deleteRecording(recordingId: string): Promise<DataResult<null>> {
-  const result = await rpc<string | null>('delete_room_recording', { p_recording_id: recordingId }, 'Unable to delete the recording.');
-  if (!result.ok) return result;
-  if (result.data) {
-    const { error } = await createClient().storage.from('room_recordings').remove([result.data]);
-    if (error) return { ok: false, error: 'The recording was deleted, but its file could not be removed. It expires with its retention period.' };
-  }
-  return { ok: true, data: null };
+  // The server authorizes, marks the row deleted, and removes the stored object.
+  const response = await fetch(`/api/recordings/${encodeURIComponent(recordingId)}`, { method: 'DELETE', credentials: 'include' });
+  if (response.ok) return { ok: true, data: null };
+  const body = await response.json().catch(() => ({})) as { error?: string };
+  return { ok: false, error: body.error ?? 'Unable to delete the recording.' };
 }
 export async function uploadRecording(path: string, blob: Blob): Promise<DataResult<null>> {
   if (blob.size > MAX_UPLOAD_BYTES) return { ok: false, error: 'Recordings must be 500 MB or smaller.' };
-  const { error } = await createClient().storage.from('room_recordings').upload(path, blob, { contentType: blob.type.split(';')[0] || 'audio/webm', upsert: false });
-  if (error) return { ok: false, error: 'The recording could not be uploaded.' };
+  // Content type follows the extension so it always matches what the server signs.
+  const contentType = path.endsWith('.ogg') ? 'audio/ogg' : path.endsWith('.m4a') ? 'audio/mp4' : 'audio/webm';
+  try {
+    await uploadFileWithProgress(createClient(), 'room_recordings', path, blob, undefined, contentType);
+  } catch {
+    return { ok: false, error: 'The recording could not be uploaded.' };
+  }
   return { ok: true, data: null };
 }
-export async function recordingUrl(path: string): Promise<DataResult<string>> {
-  const { data, error } = await createClient().storage.from('room_recordings').createSignedUrl(path, 600);
-  if (error || !data?.signedUrl) return { ok: false, error: 'This recording is not available to you.' };
-  return { ok: true, data: data.signedUrl };
+export async function recordingUrl(recordingId: string): Promise<DataResult<string>> {
+  const response = await fetch(`/api/recordings/${encodeURIComponent(recordingId)}`, { credentials: 'include', cache: 'no-store' });
+  const body = await response.json().catch(() => ({})) as { url?: string };
+  if (!response.ok || !body.url) return { ok: false, error: 'This recording is not available to you.' };
+  return { ok: true, data: body.url };
 }
 export const saveTranscript = (recordingId: string, expectedVersion: number, body: string) =>
   rpc<number>('save_room_transcript', { p_recording_id: recordingId, p_expected_version: expectedVersion, p_body: body }, 'Unable to save the transcript.');

@@ -3,9 +3,10 @@ import { screenBitrate, shouldInitiateOffer, withStereoOpus } from '@/lib/collab
 // Peer-to-peer voice and screen share (Action 12). No managed media provider
 // is configured, so this is the provider-neutral free path: a full mesh of
 // RTCPeerConnections (fine for small study rooms), public STUN for address
-// discovery and no TURN relay (members behind strict NATs may fail to
-// connect; recorded in the ledger). Signaling travels as `rtc_signal` events
-// on the private, chat-capability-scoped room topic through useRoomSync.
+// discovery, plus a TURN relay from /api/ice-servers when one is configured
+// (without it, members behind strict NATs may fail to connect). Signaling
+// travels as `rtc_signal` events on the private, chat-capability-scoped room
+// topic through useRoomSync.
 //
 // Negotiation follows the "perfect negotiation" pattern: either side may
 // renegotiate (e.g. to add a screen track); on an offer collision the polite
@@ -55,6 +56,26 @@ type PeerEntry = {
 const HEARTBEAT_MS = 10_000;
 export const PEER_TIMEOUT_MS = 32_000;
 export const ICE_SERVERS: RTCIceServer[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+const ICE_CACHE_MS = 30 * 60_000;
+let iceCache: { at: number; servers: Promise<RTCIceServer[]> } | null = null;
+
+// STUN first (direct paths win), then any TURN relay the server hands out.
+// Failures are not cached and fall back to STUN only.
+export function loadIceServers(): Promise<RTCIceServer[]> {
+  if (iceCache && Date.now() - iceCache.at < ICE_CACHE_MS) return iceCache.servers;
+  const servers = fetch('/api/ice-servers', { credentials: 'include', cache: 'no-store' })
+    .then(async (response) => {
+      if (!response.ok) throw new Error('ICE servers unavailable');
+      const body = await response.json() as { iceServers?: unknown };
+      return [...ICE_SERVERS, ...(Array.isArray(body.iceServers) ? body.iceServers as RTCIceServer[] : [])];
+    })
+    .catch(() => {
+      iceCache = null;
+      return ICE_SERVERS;
+    });
+  iceCache = { at: Date.now(), servers };
+  return servers;
+}
 // A conservative per-viewer ceiling keeps ordinary desktop uploads viable.
 const SCREEN_ENCODER_MAX_BITRATE = 2_500_000;
 
@@ -101,6 +122,7 @@ export class VoiceMesh {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private joined = false;
   private watching = true;
+  private iceServers: RTCIceServer[] = ICE_SERVERS;
 
   constructor(
     private readonly selfId: string,
@@ -146,6 +168,9 @@ export class VoiceMesh {
     this.joined = true;
     this.watching = typeof document === 'undefined' || document.visibilityState === 'visible' || Boolean(document.pictureInPictureElement);
     this.watchVisibility(true);
+    // Stays synchronous (a screen picker may need this click's gesture); the
+    // relay list applies to new peers and to ICE restarts of existing ones.
+    void loadIceServers().then((servers) => { if (this.joined) this.setIceServers(servers); });
     this.hello();
     this.heartbeat = setInterval(() => {
       this.hello();
@@ -153,6 +178,13 @@ export class VoiceMesh {
       for (const [id, peer] of this.peers) if (now - peer.lastSeen > PEER_TIMEOUT_MS) this.dropPeer(id);
     }, HEARTBEAT_MS);
     this.onChange();
+  }
+
+  private setIceServers(servers: RTCIceServer[]) {
+    this.iceServers = servers;
+    for (const { pc } of this.peers.values()) {
+      try { pc.setConfiguration({ ...pc.getConfiguration(), iceServers: servers }); } catch { /* closed peer */ }
+    }
   }
 
   // Turns a watch-only member into a speaking one.
@@ -271,7 +303,7 @@ export class VoiceMesh {
   private ensurePeer(peerId: string): PeerEntry {
     const existing = this.peers.get(peerId);
     if (existing) return existing;
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
     const peer: PeerEntry = {
       pc,
       polite: !shouldInitiateOffer(this.selfId, peerId),

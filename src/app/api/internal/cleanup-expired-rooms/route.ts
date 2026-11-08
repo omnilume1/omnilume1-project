@@ -55,7 +55,7 @@ async function cleanupExpiredRooms(request: Request) {
     const rooms = roomStorage
       ? await cleanupDestroyedRooms(supabase, now, roomStorage)
       : await cleanupDestroyedRooms(supabase, now);
-    const recordings = await cleanupExpiredRecordings(supabase);
+    const recordings = await cleanupExpiredRecordings(supabase, roomStorage);
     const music = musicStorage
       ? await cleanupMusicUploads(supabase, musicStorage)
       : await cleanupMusicUploads(supabase);
