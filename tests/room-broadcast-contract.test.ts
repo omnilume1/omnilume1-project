@@ -84,6 +84,9 @@ test('Action 12 events: hints carry only a version and kind, signaling is shape-
   assert.deepEqual(toRoomBroadcastPayload('rtc_signal', { kind: 'who', note: SECRET_MARKER }), { kind: 'who' });
   assert.deepEqual(toRoomBroadcastPayload('rtc_signal', { kind: 'hello', screen: true, mic: false }), { kind: 'hello', screen: true, mic: false });
   assert.deepEqual(toRoomBroadcastPayload('rtc_signal', { kind: 'hello', mic: 'yes' }), { kind: 'hello' }, 'mic must be a boolean');
+  // A viewer who cannot see the shared screen says so, and the sharer slows (not stops) their video.
+  assert.deepEqual(toRoomBroadcastPayload('rtc_signal', { kind: 'hello', screen: false, mic: true, watching: false }), { kind: 'hello', screen: false, mic: true, watching: false });
+  assert.deepEqual(toRoomBroadcastPayload('rtc_signal', { kind: 'hello', watching: 'no' }), { kind: 'hello' }, 'watching must be a boolean');
 });
 
 test('chat events are not part of the Broadcast contract', () => {

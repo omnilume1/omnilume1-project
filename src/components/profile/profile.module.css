@@ -1,0 +1,64 @@
+.hero { position: relative; display: grid; gap: 18px; overflow: visible; }
+
+/* Banner: the theme-following art, clipped on its own so the avatar can overlap its edge. */
+.banner { position: relative; height: 200px; overflow: hidden; border: 1px solid var(--omni-line-soft); border-radius: 18px; }
+.bannerArt { position: absolute; inset: 0 0 -60px; background: radial-gradient(60% 120% at 82% 8%, rgb(var(--pal-f3e8ff) / .16), transparent 45%), linear-gradient(180deg, rgb(var(--pal-211a38)) 0%, rgb(var(--pal-3b2c63)) 45%, rgb(var(--pal-674b8e)) 75%, rgb(var(--pal-9a74a8)) 100%); will-change: transform; }
+
+.identity { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; column-gap: 24px; row-gap: 14px; padding: 0 28px; }
+.avatar { display: inline-flex; align-items: center; justify-content: center; width: 128px; height: 128px; margin-top: -64px; overflow: hidden; border: 5px solid var(--omni-bg); border-radius: 50%; background: linear-gradient(135deg, rgb(var(--pal-8b6cff)), rgb(var(--pal-c084fc))); color: white; font-size: 44px; font-weight: 600; box-shadow: 0 0 0 1px var(--omni-line); }
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.copy { min-width: 0; padding-top: 14px; }
+.nameRow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.nameRow h2 { margin: 0; color: var(--omni-text); font-size: 30px; font-weight: 500; letter-spacing: -.025em; line-height: 1.15; overflow-wrap: anywhere; }
+.handle { margin: 2px 0 0; color: var(--omni-muted); font-size: 14px; }
+.bio { max-width: 38rem; margin: 12px 0 0; color: var(--omni-text-2); font-size: 15px; line-height: 22px; overflow-wrap: anywhere; }
+.stats { display: flex; flex-wrap: wrap; gap: 28px; margin-top: 16px; }
+.stats > * { padding: 0; border: 0; background: none; color: var(--omni-muted); font: inherit; font-size: 13px; text-align: left; }
+.stats button { cursor: pointer; border-radius: 8px; transition: color 160ms var(--omni-ease); }
+.stats button:hover { color: var(--omni-text); }
+.stats strong, .stats span { display: block; }
+.stats strong { color: var(--omni-text); font-size: 20px; font-weight: 500; }
+.actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; padding-top: 16px; }
+.relationships { display: grid; min-width: 200px; gap: 10px; }
+.relGroup { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.relLabel { color: var(--omni-muted); font-size: 12px; }
+.relInline { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+
+.colour { margin: 0 28px; padding-top: 14px; border-top: 1px solid var(--omni-line-soft); }
+.colour :global(.profile-color-picker) { margin: 0; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(280px, .7fr); align-items: start; gap: 24px; }
+.main, .side { display: grid; gap: 18px; min-width: 0; }
+
+.tabs { display: flex; align-items: center; gap: 22px; border-bottom: 1px solid var(--omni-line-soft); }
+.tabs h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 -1px; padding: 10px 2px; border-bottom: 2px solid var(--omni-accent); color: var(--omni-text); font-size: 15px; font-weight: 500; }
+.tabs h2 span { color: var(--omni-muted); font-weight: 400; }
+
+/* The wall: columns that fill top to bottom, each card rises in one after another. */
+.wall { column-width: 260px; column-gap: 16px; }
+.post { display: grid; gap: 12px; margin: 0 0 16px; break-inside: avoid; animation: rise 520ms var(--omni-ease) both; animation-delay: calc(min(var(--i, 0), 12) * 60ms); }
+.post :global(.post-card-content) { font-size: 14.5px; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
+@keyframes drift { from { transform: translateY(0); } to { transform: translateY(48px); } }
+
+@supports (animation-timeline: scroll()) {
+  .bannerArt { animation: drift linear both; animation-timeline: scroll(root); animation-range: 0 420px; }
+}
+
+@media (max-width: 1024px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .banner { height: 140px; }
+  .identity { grid-template-columns: auto minmax(0, 1fr); padding: 0 16px; }
+  .avatar { width: 96px; height: 96px; margin-top: -48px; font-size: 34px; }
+  .copy { grid-column: 1 / -1; padding-top: 0; }
+  .actions { grid-column: 1 / -1; justify-content: flex-start; padding-top: 0; }
+  .actions > button { flex: 1; }
+  .relationships { width: 100%; }
+  .relGroup { align-items: flex-start; flex-direction: column; }
+  .relInline { justify-content: flex-start; }
+  .nameRow h2 { font-size: 26px; }
+  .colour { margin: 0 16px; }
+}

@@ -10,7 +10,7 @@ import { coverThemeCss } from '@/lib/app-theme';
 import { musicShortcutFor } from '@/lib/music-shortcuts';
 import { MusicIcon, type MusicIconName } from './MusicIcon';
 import { FixTagsDialog, ShareDialog } from './MusicLibraryParts';
-import { FullScreenPlayer, PlayerPill, SidePanel, type SidePanelKind } from './MusicPlayerChrome';
+import { CoverRoom, FullScreenPlayer, PlayerPill, SidePanel, type SidePanelKind } from './MusicPlayerChrome';
 
 const LIBRARY: [string, string, MusicIconName][] = [
   ['uploads', 'Uploads', 'expand'],
@@ -111,6 +111,7 @@ function Shell({ fontClass, children }: { fontClass: string; children: ReactNode
   return (
     <div className={`music-app ${fontClass}`} data-panel-open={panelOpen} data-drawer-open={drawerOpen} data-has-track={Boolean(player.queue.current)}>
       <a href="#music-main" className="mu-skip">Skip to content</a>
+      {player.queue.current ? <CoverRoom key={player.queue.current.id} hue={player.queue.current.hue} src={player.queue.current.artwork} /> : null}
 
       <header className="mu-topbar">
         <button type="button" className="mu-icon-button" aria-label="Open music navigation" aria-expanded={drawerOpen} aria-controls="music-sidebar" onClick={() => setDrawerOpen(true)}><MusicIcon name="menu" /></button>

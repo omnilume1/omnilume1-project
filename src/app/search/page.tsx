@@ -8,6 +8,7 @@ import { normalizeUsername } from '@/lib/profile-validation';
 import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
 import { OmniIcon } from '@/components/ui/OmniIcon';
+import styles from './search.module.css';
 
 interface UserSearchResult {
   id: string;
@@ -42,28 +43,40 @@ export default function SearchPage() {
     }
   }
 
+  const needle = query.trim().replace(/^@/, '');
+  function hit(text: string) {
+    const i = needle ? text.toLowerCase().indexOf(needle.toLowerCase()) : -1;
+    if (i < 0) return text;
+    return <>{text.slice(0, i)}<span className={styles.hit}>{text.slice(i, i + needle.length)}</span>{text.slice(i + needle.length)}</>;
+  }
+
   return (
     <div className="omni-internal">
+      <div className={styles.spot} aria-hidden="true" />
       <InternalTopbar eyebrow="Discover people" title="Search" description="Find an OmniLume member by username." />
-      <main className="omni-main-content explore-main">
-        <section className="explore-intro glass-card-ambient fade-up">
-          <div>
-            <p className="section-kicker">People discovery</p>
-            <h2 className="section-title">Find someone on OmniLume</h2>
-            <p className="section-copy">Search a username to open the existing profile experience.</p>
-          </div>
-        </section>
-
-        <section className="glass-card-ambient explore-control-card">
-          <label htmlFor="user-search" className="explore-control-label"><OmniIcon name="search" size={16} /> User search</label>
-          <form onSubmit={(event) => void handleSearch(event)} className="explore-code-form">
-            <input id="user-search" type="search" placeholder="Search by username..." value={query} onChange={(event) => { setQuery(event.target.value); setResult(null); setSearchState('idle'); }} className="omni-input" />
-            <button type="submit" disabled={!query.trim() || searchState === 'loading'} className="omni-button omni-button-primary shrink-0">{searchState === 'loading' ? 'Searching...' : 'Search'}</button>
+      <main className={`omni-main-content ${styles.main}`}>
+        <div className={styles.col}>
+          <h2 className={styles.title}>Find someone on OmniLume</h2>
+          <form onSubmit={(event) => void handleSearch(event)} className={styles.bar}>
+            <OmniIcon name="search" size={20} />
+            <label htmlFor="user-search" className="sr-only">User search</label>
+            <input id="user-search" type="search" autoFocus placeholder="Search by username..." value={query} onChange={(event) => { setQuery(event.target.value); setResult(null); setSearchState('idle'); }} className={styles.input} />
+            <button type="submit" disabled={!query.trim() || searchState === 'loading'} className={`omni-button omni-button-primary ${styles.go}`}>{searchState === 'loading' ? 'Searching...' : 'Search'}</button>
           </form>
-          {result && <Link href={`/profile/${result.id}`} className="person-row explore-user-result"><span className="person-avatar">{result.avatar_url ? <img src={result.avatar_url} alt="" /> : (result.display_name || result.username || 'O').slice(0, 1).toUpperCase()}</span><span><strong>{result.display_name || result.username || 'OmniLume member'}</strong><small>@{result.username || 'member'} {result.is_private ? '· Private profile' : '· Public profile'}</small></span><OmniIcon name="arrow" size={15} /></Link>}
-          {searchState === 'empty' && <p className="mt-3 text-sm text-neutral-500">No users found.</p>}
-          {searchState === 'error' && <p className="form-error mt-3" role="alert">Enter a valid username to search.</p>}
-        </section>
+          {result && (
+            <section className={styles.group} aria-label="People">
+              <p className={styles.label}>People</p>
+              <Link href={`/profile/${result.id}`} className={styles.row}>
+                <span className="person-avatar">{result.avatar_url ? <img src={result.avatar_url} alt="" /> : (result.display_name || result.username || 'O').slice(0, 1).toUpperCase()}</span>
+                <span><strong>{hit(result.display_name || result.username || 'OmniLume member')}</strong><small>@{hit(result.username || 'member')} {result.is_private ? '· Private profile' : '· Public profile'}</small></span>
+                <OmniIcon name="arrow" size={15} />
+              </Link>
+            </section>
+          )}
+          {searchState === 'empty' && <p className={styles.note}>No users found.</p>}
+          {searchState === 'error' && <p className={`form-error ${styles.error}`} role="alert">Enter a valid username to search.</p>}
+          {!result && searchState === 'idle' && <p className={styles.hint}>Press Enter to search</p>}
+        </div>
       </main>
       <FloatingDock />
     </div>

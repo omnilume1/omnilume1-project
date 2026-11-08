@@ -904,6 +904,9 @@ button.site-link { font-family: inherit; line-height: inherit; cursor: pointer; 
 .voice-name { color: white; font-size: 13px; font-weight: 700; }
 .voice-state { color: var(--omni-muted); font-size: 11px; }
 .voice-actions { display: flex; gap: 10px; margin-left: auto; }
+.voice-volume { display: flex; flex-basis: 100%; align-items: center; gap: 8px; padding-left: 17px; color: var(--omni-muted); font-size: 11px; }
+.voice-volume input[type="range"] { flex: 1; min-width: 0; max-width: 180px; accent-color: rgb(var(--pal-a78bfa)); }
+.voice-volume-value { min-width: 36px; }
 .voice-dot { width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%; background: var(--omni-faint); }
 .voice-dot.is-on { background: #34d399; box-shadow: 0 0 8px rgba(52,211,153,.8); }
 .voice-live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,.9); animation: voice-pulse 1.4s ease-in-out infinite; }

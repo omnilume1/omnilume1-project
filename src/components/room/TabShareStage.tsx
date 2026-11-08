@@ -161,18 +161,22 @@ export default function TabShareStage() {
   if (voice.sharingScreen && voice.screenStream) {
     const watching = voice.peers.filter((item) => item.state === 'connected').length;
     const hasSound = voice.screenStream.getAudioTracks().length > 0;
+    // A tab keeps playing while the host uses other windows; a window does not.
+    const surface = voice.screenStream.getVideoTracks()[0]?.getSettings().displaySurface;
+    const what = surface === 'window' ? 'window' : surface === 'monitor' ? 'screen' : 'tab';
     return (
       <div className="tab-share">
         <div {...frameProps}>
-          <ShareVideo stream={voice.screenStream} label="Your shared tab" />
-          <span className="tab-share-badge"><span className="tab-share-dot" aria-hidden="true" />Live · Your tab</span>
+          <ShareVideo stream={voice.screenStream} label={`Your shared ${what}`} />
+          <span className="tab-share-badge"><span className="tab-share-dot" aria-hidden="true" />Live · Your {what}</span>
         </div>
         <div className="tab-share-bar">
           <div className="min-w-0">
-            <p className="tab-share-title">You&apos;re sharing a tab</p>
+            <p className="tab-share-title">You&apos;re sharing {what === 'screen' ? 'your screen' : `a ${what}`}</p>
             <p className="tab-share-meta" role="status">
               {watching === 0 ? 'Waiting for people to watch' : `${watching} watching`} · only you can control it
             </p>
+            {what === 'window' && <p className="tab-share-warn">A shared window freezes when you minimize it, and a browser window also pauses while another window covers it. To keep using other windows, stop and share a tab instead.</p>}
             {!hasSound && <p className="tab-share-warn">No tab sound. Stop, share again and turn on &ldquo;Also share tab audio&rdquo; (Chrome or Edge).</p>}
             <p className="tab-share-meta">Tip: press full screen on the video in that tab so everyone sees just the video.</p>
           </div>

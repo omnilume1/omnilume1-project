@@ -37,6 +37,9 @@ type VoiceContextValue = {
   shareSoundBlocked: boolean;
   setShareVolume: (volume: number) => void;
   setShareMuted: (muted: boolean) => void;
+  // How loud each member's voice plays for this listener only (0 to 2, 1 = as sent).
+  memberVolumes: Record<string, number>;
+  setMemberVolume: (userId: string, volume: number) => void;
   resumeShareSound: () => void;
   join: (options?: { mic?: boolean }) => Promise<void>;
   enableMic: () => Promise<void>;
@@ -85,6 +88,19 @@ export const TAB_SHARE_CONSTRAINTS = {
   systemAudio: 'include',
 } as DisplayMediaStreamOptions;
 
+// Per-member voice volume, saved on this device for every room.
+const VOLUME_KEY = 'omnilume:voice-volumes';
+export const MAX_MEMBER_VOLUME = 2;
+function readMemberVolumes(): Record<string, number> {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(VOLUME_KEY) ?? '{}') as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === 'number' && entry[1] >= 0 && entry[1] <= MAX_MEMBER_VOLUME));
+  } catch {
+    return {};
+  }
+}
+
 function mediaErrorMessage(error: unknown, kind: 'mic' | 'screen') {
   const name = error instanceof DOMException ? error.name : '';
   if (name === 'NotAllowedError') return kind === 'mic' ? 'Microphone permission was denied.' : 'Screen sharing was cancelled or not allowed.';
@@ -122,6 +138,19 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
   const [shareMuted, setShareMuted] = useState(false);
   const [shareSoundBlocked, setShareSoundBlocked] = useState(false);
   const [soundNonce, setSoundNonce] = useState(0);
+  // The room renders client-side only (after the access check), so storage is readable here.
+  const [memberVolumes, setMemberVolumes] = useState<Record<string, number>>(readMemberVolumes);
+  const setMemberVolume = useCallback((userId: string, volume: number) => {
+    const level = Math.round(Math.min(MAX_MEMBER_VOLUME, Math.max(0, volume)) * 100) / 100;
+    // Called from the slider, so this click can start the boost's audio context.
+    if (level > 1) getBoostContext();
+    setMemberVolumes((current) => {
+      const next = { ...current };
+      if (level === 1) delete next[userId]; else next[userId] = level;
+      try { window.localStorage.setItem(VOLUME_KEY, JSON.stringify(next)); } catch { /* storage blocked: the level lasts for this visit */ }
+      return next;
+    });
+  }, []);
 
   // The mesh reports every signal (ICE candidates, heartbeats); the room only
   // re-renders when something a member can see changed.
@@ -368,9 +397,9 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
     roomId, joined, joining, micEnabled: micEnabled && !forcedMute, sharingScreen, peers, error, moderation, hands,
     recordings, consents, recordingActive: Boolean(activeRecording), recorderRunning, savingRecording,
     localStream, screenStream, hasMic, canUseVoice: capabilities.chat, liveSharers, shareVolume, shareMuted, shareSoundBlocked,
-    setShareVolume, setShareMuted, resumeShareSound,
+    setShareVolume, setShareMuted, resumeShareSound, memberVolumes, setMemberVolume,
     join, enableMic, leave, toggleMic, startScreen, stopScreen, stopRecording, reload, setError,
-  }), [activeRecording, capabilities.chat, consents, enableMic, error, forcedMute, hands, hasMic, join, joined, joining, leave, liveSharers, localStream, micEnabled, moderation, peers, recorderRunning, recordings, reload, resumeShareSound, roomId, savingRecording, screenStream, shareMuted, shareSoundBlocked, shareVolume, sharingScreen, startScreen, stopRecording, stopScreen, toggleMic]);
+  }), [activeRecording, capabilities.chat, consents, enableMic, error, forcedMute, hands, hasMic, join, joined, joining, leave, liveSharers, localStream, memberVolumes, micEnabled, moderation, peers, recorderRunning, recordings, reload, resumeShareSound, roomId, savingRecording, screenStream, setMemberVolume, shareMuted, shareSoundBlocked, shareVolume, sharingScreen, startScreen, stopRecording, stopScreen, toggleMic]);
 
   return (
     <VoiceContext.Provider value={value}>
@@ -378,7 +407,7 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
       {/* Remote voices and shared-tab sound play here so they continue while the panel is closed. */}
       <div hidden>
         {peers.map((peer) => (
-          <VoiceAudio key={peer.id} stream={peer.audio} muted={Boolean(moderation.get(peer.id)?.audio_muted)} />
+          <VoiceAudio key={peer.id} stream={peer.audio} muted={Boolean(moderation.get(peer.id)?.audio_muted)} volume={memberVolumes[peer.id] ?? 1} />
         ))}
         {peers.filter((peer) => peer.screen && liveSharers.includes(peer.id)).map((peer) => (
           <ShareAudio key={`${peer.id}-${soundNonce}`} stream={peer.screen as MediaStream} volume={shareVolume} muted={shareMuted} onBlocked={markShareSoundBlocked} />
@@ -405,15 +434,47 @@ function ShareAudio({ stream, volume, muted, onBlocked }: { stream: MediaStream;
   return <audio ref={ref} autoPlay data-share-audio="live" />;
 }
 
-function VoiceAudio({ stream, muted }: { stream: MediaStream | null; muted: boolean }) {
+// One shared context plays every boosted voice.
+let boostContext: AudioContext | null = null;
+function getBoostContext() {
+  if (typeof AudioContext === 'undefined') return null;
+  boostContext ??= new AudioContext();
+  if (boostContext.state === 'suspended') void boostContext.resume().catch(() => undefined);
+  return boostContext;
+}
+
+// Up to 100% the element plays the voice at `volume`. A manager's mute wins.
+function VoiceAudio({ stream, muted, volume }: { stream: MediaStream | null; muted: boolean; volume: number }) {
   const ref = useRef<HTMLAudioElement | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
+  const boosting = Boolean(stream) && !muted && volume > 1;
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
     if (element.srcObject !== stream) element.srcObject = stream;
-    element.muted = muted;
+    element.volume = Math.min(1, Math.max(0, volume));
+    if (!boosting) element.muted = muted;
     if (stream) void element.play().catch(() => undefined);
-  }, [muted, stream]);
+  }, [boosting, muted, stream, volume]);
+  // Above 100% a gain node plays the voice and the element goes quiet, but
+  // only while the audio context runs (Safari starts it on a click), so the
+  // voice never drops out. The element keeps playing muted: Chrome feeds a
+  // remote stream to Web Audio only while an element plays it.
+  useEffect(() => {
+    const element = ref.current;
+    const context = boosting && stream ? getBoostContext() : null;
+    if (!element || !context || !stream) return;
+    let source: MediaStreamAudioSourceNode;
+    try { source = context.createMediaStreamSource(stream); } catch { return; }
+    const gain = context.createGain();
+    source.connect(gain).connect(context.destination);
+    gainRef.current = gain;
+    const sync = () => { element.muted = context.state === 'running'; };
+    sync();
+    context.addEventListener('statechange', sync);
+    return () => { context.removeEventListener('statechange', sync); source.disconnect(); gain.disconnect(); gainRef.current = null; };
+  }, [boosting, stream]);
+  useEffect(() => { if (gainRef.current) gainRef.current.gain.value = volume; }, [boosting, volume]);
   return <audio ref={ref} autoPlay data-voice-peer-audio={muted ? 'muted' : 'live'} />;
 }
 

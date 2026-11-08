@@ -313,28 +313,6 @@ export async function logCastHistory(roomId: string, title: string, url: string)
   return logTemporaryMedia(roomId, title, url, 'url');
 }
 
-// Generate a signed URL for private storage access
-// This is required for Action 2 (RLS lockdown) - storage bucket is private
-export async function getSignedStorageUrl(filePath: string, roomId: string): Promise<{ success: boolean; url?: string; error?: string }> {
-  try {
-    if (!filePath || !roomId) throw new Error('File path and room ID are required.');
-    if (!isRoomObjectPath(roomId, filePath) && !isLegacyRoomObjectPath(roomId, filePath)) {
-      throw new Error('Invalid file path.');
-    }
-
-    const { supabase, user } = await getAuthenticatedUser();
-    const room = await assertActiveRoom(supabase, roomId);
-    // Mirror the storage SELECT policy: Watch media and subtitles need the
-    // watch capability, and shared files need files.
-    const pathKind = filePath.slice(roomId.length + 1).split('/')[0];
-    await assertCapability(supabase, roomId, user.id, pathKind === 'media' || pathKind === 'subtitles' ? 'watch' : 'files');
-
-    return { success: true, url: await signRoomObject(supabase, room, roomId, filePath) };
-  } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unable to generate signed URL.' };
-  }
-}
-
 // Used after a cancelled upload or a rejected metadata registration. The
 // explicit capability and structured path prevent a client from deleting an
 // arbitrary object through this server-side cleanup path.

@@ -23,10 +23,18 @@ export function PageTitle({ children }: { children: ReactNode }) {
   return <h1 className="mu-title">{children}</h1>;
 }
 
+/** A record that slides out from behind the cover; it only spins while `playing` (CSS). */
+export function Vinyl({ hue, playing = false }: { hue: number; playing?: boolean }) {
+  return <span className="mu-vinyl" data-playing={playing} style={hueStyle(hue)} aria-hidden="true"><span className="mu-vinyl-disc" /></span>;
+}
+
 export function EmptyState({ title, detail, children }: { title: string; detail?: string; children?: ReactNode }) {
   return (
     <div className="mu-empty" role="status">
-      <MusicIcon name="note" size={34} />
+      <span className="mu-empty-disc" aria-hidden="true">
+        <Vinyl hue={262} />
+        <span className="mu-empty-sleeve"><MusicIcon name="note" size={30} /></span>
+      </span>
       <h2>{title}</h2>
       {detail ? <p>{detail}</p> : null}
       {children}

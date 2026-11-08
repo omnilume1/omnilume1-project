@@ -42,7 +42,6 @@ export type WhiteboardDocument = {
 export type WhiteboardOps = Map<string, WhiteboardElement | null>;
 
 export const LEGACY_IMAGE_KEY = '__legacy_image__';
-export const WHITEBOARD_STATE_MAX_BYTES = 512 * 1024;
 // Leave headroom under the database cap for JSON escaping differences.
 export const WHITEBOARD_SAVE_BUDGET_BYTES = 480 * 1024;
 export const WHITEBOARD_MAX_ELEMENTS = 4000;

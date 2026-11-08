@@ -6,6 +6,7 @@ import {
   listMyBookmarks, listMyOpenTasks, listMyRoomOverview, listMyUpcomingEvents, setBookmark, setEventRsvp,
   type Bookmark, type OpenTask, type UpcomingEvent,
 } from '@/lib/management-data';
+import styles from '@/components/home/home.module.css';
 import { organizeRooms, relativeTime, RSVP_LABELS, type OverviewRoom, type RsvpResponse } from '@/lib/room-management-model';
 
 type Loaded<T> = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; data: T };
@@ -23,9 +24,9 @@ function useLoaded<T>(load: () => Promise<{ ok: true; data: T } | { ok: false; e
   return [value, retry, setValue] as const;
 }
 
-function Block({ kicker, title, children }: { kicker: string; title: string; children: React.ReactNode }) {
+function Block({ kicker, title, tile, index, children }: { kicker: string; title: string; tile: string; index: number; children: React.ReactNode }) {
   return (
-    <section className="glass-panel glass-card-ambient overview-block">
+    <section className={`glass-card ${styles.tile} ${tile}`} style={{ ['--i' as string]: index }}>
       <p className="section-kicker">{kicker}</p>
       <h2 className="section-title">{title}</h2>
       <div className="mt-3">{children}</div>
@@ -74,7 +75,7 @@ export default function HomeOverview() {
 
   return (
     <>
-      <Block kicker="Your rooms" title="Organized for you">
+      <Block kicker="Your rooms" tile={styles.tileRooms} index={0} title="Organized for you">
         <Fallback value={rooms} retry={retryRooms} empty="You have not joined any rooms yet. Find one in Explore.">
           {(data) => (
             <div className="overview-buckets">
@@ -102,7 +103,7 @@ export default function HomeOverview() {
         </Fallback>
       </Block>
 
-      <Block kicker="Your calendar" title="Upcoming events">
+      <Block kicker="Your calendar" tile={styles.tileEvents} index={5} title="Upcoming events">
         <Fallback value={events} retry={retryEvents} empty="No upcoming events in your rooms.">
           {(data) => (
             <ul className="overview-list">
@@ -125,7 +126,7 @@ export default function HomeOverview() {
         </Fallback>
       </Block>
 
-      <Block kicker="To do" title="Assigned to you">
+      <Block kicker="To do" tile={styles.tileTasks} index={6} title="Assigned to you">
         <Fallback value={tasks} retry={retryTasks} empty="Nothing assigned to you right now.">
           {(data) => (
             <ul className="overview-list">
@@ -139,7 +140,7 @@ export default function HomeOverview() {
         </Fallback>
       </Block>
 
-      <Block kicker="Saved" title="Saved rooms and content">
+      <Block kicker="Saved" tile={styles.tileSaved} index={7} title="Saved rooms and content">
         <Fallback value={saved} retry={retrySaved} empty="Save rooms, messages and files to find them here.">
           {(data) => (
             <ul className="overview-list">

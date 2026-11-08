@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Memoizes components and hooks automatically (fewer re-renders site-wide).
+  reactCompiler: true,
 };
 
 export default nextConfig;

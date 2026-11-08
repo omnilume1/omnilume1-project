@@ -2,6 +2,7 @@
 
 import { saveAppTheme, useAppTheme } from '@/hooks/useAppTheme';
 import { APP_THEMES, APP_THEME_LABELS, sectionAccents, themeSwatch, type AppTheme } from '@/lib/app-theme';
+import styles from './settings.module.css';
 
 const SECTION_DOTS = sectionAccents();
 
@@ -17,20 +18,26 @@ function ThemePreview({ theme }: { theme: AppTheme }) {
 export default function AppearanceSettings() {
   const theme = useAppTheme();
   return (
-    <div className="glass-panel settings-card">
-      <p className="section-kicker">Appearance</p>
-      <h2 className="section-title">Theme</h2>
-      <p className="section-copy">Dark purple is the default everywhere. Pick another colour for the whole app, or give every section its own. Saved on this device.</p>
-      <fieldset className="theme-picker">
-        <legend className="sr-only">Theme</legend>
-        {APP_THEMES.map((id) => (
-          <label key={id} className="theme-option">
-            <input type="radio" name="app-theme" value={id} checked={theme === id} onChange={() => saveAppTheme(id)} />
-            <ThemePreview theme={id} />
-            <span className="theme-option-text"><strong>{APP_THEME_LABELS[id].label}</strong><small>{APP_THEME_LABELS[id].note}</small></span>
-          </label>
-        ))}
-      </fieldset>
-    </div>
+    <section id="appearance" className={styles.group} aria-labelledby="appearance-title">
+      <div className={styles.groupHead}><h2 id="appearance-title">Appearance</h2></div>
+      <div className={styles.card}>
+        <div className={`${styles.row} ${styles.rowStack}`}>
+          <div className={styles.rowText}>
+            <strong>Theme</strong>
+            <small>Dark purple is the default everywhere. Pick another colour for the whole app, or give every section its own. Saved on this device.</small>
+          </div>
+          <fieldset className={styles.picker}>
+            <legend className="sr-only">Theme</legend>
+            {APP_THEMES.map((id) => (
+              <label key={id} className={styles.option}>
+                <input type="radio" name="app-theme" value={id} checked={theme === id} onChange={() => saveAppTheme(id)} />
+                <ThemePreview theme={id} />
+                <span className={styles.optionText}><strong>{APP_THEME_LABELS[id].label}</strong><small>{APP_THEME_LABELS[id].note}</small></span>
+              </label>
+            ))}
+          </fieldset>
+        </div>
+      </div>
+    </section>
   );
 }

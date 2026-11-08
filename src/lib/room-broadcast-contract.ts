@@ -126,7 +126,9 @@ const EVENT_FIELDS: Record<RoomBroadcastEventType, Record<string, FieldKind>> = 
   cursor: { x: 'coord', y: 'coord' },
   note_editing: { noteId: 'uuid', editing: 'boolean' },
   pdf_follow: { fileId: 'uuid', page: 'page' },
-  rtc_signal: { to: 'uuid', kind: 'rtc_kind', sdp: 'sdp', candidate: 'candidate', sdpMid: 'id', sdpMLineIndex: 'index', screen: 'boolean', mic: 'boolean' },
+  // `watching`: whether the member can see a shared screen right now (voice-mesh.ts sends a
+  // hidden viewer a 2 fps trickle). Without it here, the flag was stripped and never arrived.
+  rtc_signal: { to: 'uuid', kind: 'rtc_kind', sdp: 'sdp', candidate: 'candidate', sdpMid: 'id', sdpMLineIndex: 'index', screen: 'boolean', mic: 'boolean', watching: 'boolean' },
 };
 
 // Fields an event is useless without.

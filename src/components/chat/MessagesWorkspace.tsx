@@ -8,6 +8,7 @@ import PrivateChat from '@/components/chat/PrivateChat';
 import GroupChat from '@/components/chat/GroupChat';
 import { isPendingRequestContact } from '@/lib/conversation-model';
 import { OmniIcon } from '@/components/ui/OmniIcon';
+import styles from './messages.module.css';
 import {
   usePersonalMessageNotifications,
   type PersonalMessageToast,
@@ -866,8 +867,8 @@ export default function MessagesWorkspace() {
   };
 
   return (
-    <div className={`messages-workspace ${active || activeGroup ? 'is-expanded' : 'is-collapsed'}`}>
-      <aside className="messages-list">
+    <div className={`messages-workspace ${styles.workspace} ${active || activeGroup ? 'is-expanded' : 'is-collapsed'}`}>
+      <aside className={`messages-list ${styles.list}`}>
         <div className="msg-search">
           <OmniIcon name="search" size={15} />
           <input
@@ -903,11 +904,11 @@ export default function MessagesWorkspace() {
         {renderList()}
       </aside>
 
-      <section className="messages-pane" aria-label="Active conversation">
+      <section className={`messages-pane ${styles.pane}`} aria-label="Active conversation">
         {activeGroup && currentUserId ? (
           <>
             <div className="lg:hidden">
-              <div className="msg-pane-topbar">
+              <div className={`msg-pane-topbar ${styles.head}`}>
                 <button type="button" className="icon-button" aria-label="Back to conversation list" onClick={() => setActiveGroup(null)}>
                   <OmniIcon name="arrow" size={16} className="rotate-180" />
                 </button>
@@ -920,7 +921,7 @@ export default function MessagesWorkspace() {
           </>
         ) : active ? (
           <>
-            <div className="msg-pane-topbar">
+            <div className={`msg-pane-topbar ${styles.head}`}>
               <button
                 type="button"
                 className="icon-button lg:hidden"
@@ -933,7 +934,7 @@ export default function MessagesWorkspace() {
                 <OmniIcon name="arrow" size={16} className="rotate-180" />
               </button>
               <span className="msg-pane-title">
-                <span className="msg-pane-lock">&#x1F512;</span>
+                <span className={styles.avatar} aria-hidden="true">{active.peerName.charAt(0).toUpperCase()}</span>
                 <span className="msg-pane-name">{active.phase === 'ready' ? active.peerName : `Starting secure chat with ${active.peerName}…`}</span>
               </span>
               <span className="msg-pane-badge"><OmniIcon name="shield" size={13} /> E2EE</span>

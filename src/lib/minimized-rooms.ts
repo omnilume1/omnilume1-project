@@ -1,9 +1,3 @@
-export type MinimizedRoom = {
-  id: string;
-  name: string;
-  username: string | null;
-};
-
 const STORAGE_KEY = 'omnilume:minimized-room-ids';
 
 function readIds() {

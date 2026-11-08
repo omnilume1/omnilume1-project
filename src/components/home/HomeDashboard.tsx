@@ -12,6 +12,7 @@ import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
 import HomeOverview from '@/components/home/HomeOverview';
 import { OmniIcon } from '@/components/ui/OmniIcon';
+import styles from '@/components/home/home.module.css';
 import RoomArt, { roomArtFor } from '@/components/ui/RoomArt';
 
 // Children rise in one after another (concept video: 45ms apart).
@@ -132,61 +133,59 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
       </aside>
 
       <main className="omni-main-content">
-        <section className="home-grid">
-          <div className="home-main">
-            <div className="home-greet rise" style={stagger(0)}>
-              <div>
-                <p className="section-kicker">Good to see you</p>
-                <h2>Welcome back, {shortName}.</h2>
-                <p>Keep your momentum close. Find a room, start a focus session or pick up where you left off.</p>
-              </div>
-              <div className="home-greet-actions">
-                <Link href="/explore" className="omni-button omni-button-primary">Find a room <OmniIcon name="arrow" size={16} /></Link>
-                <Link href="/create-room" className="omni-button omni-button-ghost"><OmniIcon name="plus" size={16} /> Create room</Link>
-              </div>
+        <div className={styles.bento}>
+          <div className={styles.greet}>
+            <div>
+              <p className="section-kicker">Good to see you</p>
+              <h2>Welcome back, {shortName}.</h2>
+              <p>Keep your momentum close. Find a room, start a focus session or pick up where you left off.</p>
             </div>
-
-            <section className="rise" style={stagger(1)} aria-labelledby="home-discover">
-              <div className="home-label"><h2 id="home-discover">Public rooms to explore <span className="section-kicker">Discover</span></h2><Link href="/explore">View all</Link></div>
-              {dashboardLoading ? <div className="home-rcards">{[0, 1, 2].map((index) => <div key={index} className="glass-card home-rcard home-rcard-skeleton" aria-hidden="true" />)}</div> : publicRooms.length === 0 ? <p className="glass-card home-empty">There are no public rooms to show right now.</p> : <div className="home-rcards">{publicRooms.slice(0, 3).map((room) => {
-                const memberCount = room.room_members[0]?.count ?? 0;
-                return (
-                  <article key={room.id} className="glass-card home-rcard lift glow">
-                    <div className="home-rprev"><RoomArt kind={roomArtFor(room.id)} /><span className="home-live">Public</span></div>
-                    <div className="home-rbody">
-                      <h3>{room.name}</h3>
-                      {room.username ? <p className="home-rmeta">@{room.username}</p> : <p className="home-rmeta">Public room</p>}
-                      <div className="home-rfoot"><span><OmniIcon name="users" size={14} /> {memberCount} joined</span><Link href="/explore">Explore</Link></div>
-                    </div>
-                  </article>
-                );
-              })}</div>}
-            </section>
-
-            <div className="home-stats rise" style={stagger(2)} aria-label="Your OmniLume overview">
-              <div className="glass-card home-stat"><span className="section-kicker">Friends</span><strong className="mono">{dashboardLoading ? '—' : friends.length}</strong></div>
-              <div className="glass-card home-stat"><span className="section-kicker">Public rooms</span><strong className="mono">{dashboardLoading ? '—' : publicRooms.length}</strong></div>
-              <div className="glass-card home-stat"><span className="section-kicker">Profile</span><strong>{account.profileDetailsCompleted ? 'Ready' : 'Set up'}</strong></div>
+            <div className={styles.greetActions}>
+              <Link href="/explore" className="omni-button omni-button-primary">Find a room <OmniIcon name="arrow" size={16} /></Link>
+              <Link href="/create-room" className="omni-button omni-button-ghost"><OmniIcon name="plus" size={16} /> Create room</Link>
             </div>
-
-            <div className="home-overview rise" style={stagger(3)}><HomeOverview /></div>
           </div>
 
-          <aside className="home-aside">
-            <section className="glass-card home-friends rise" style={stagger(1)} aria-labelledby="home-friends">
-              <div className="home-label"><h2 id="home-friends">Friends</h2><span>{dashboardLoading ? '' : friends.length}</span></div>
-              {dashboardLoading ? <p className="home-muted">Loading friends...</p> : friends.length === 0 ? <p className="home-muted">No friends yet. Connect from a profile when you are ready.</p> : <div className="home-friend-list">{friends.slice(0, 5).map((friend) => <Link key={friend.user_id} href={`/profile/${friend.user_id}`} className="home-fr"><DashboardAvatar name={friend.display_name || friend.username || 'OmniLume member'} src={friend.avatar_url} compact /><span className="min-w-0"><strong>{friend.display_name || friend.username || 'OmniLume member'}</strong><small>{friend.username ? `@${friend.username}` : 'Friend'}</small></span><OmniIcon name="chevronRight" size={16} className="home-go" /></Link>)}</div>}
-            </section>
+          <section className={`glass-card ${styles.tile} ${styles.tileExplore}`} style={stagger(4)} aria-labelledby="home-discover">
+            <div className={styles.label}><h2 id="home-discover">Public rooms to explore <span className="section-kicker">Discover</span></h2><Link href="/explore">View all</Link></div>
+            {dashboardLoading ? <div className={styles.rcards}>{[0, 1, 2].map((index) => <div key={index} className={`glass-card ${styles.rcard} ${styles.rcardSkeleton}`} aria-hidden="true" />)}</div> : publicRooms.length === 0 ? <p className="home-empty">There are no public rooms to show right now.</p> : <div className={styles.rcards}>{publicRooms.slice(0, 3).map((room) => {
+              const memberCount = room.room_members[0]?.count ?? 0;
+              return (
+                <article key={room.id} className={`glass-card home-rcard lift ${styles.rcard}`}>
+                  <div className="home-rprev"><RoomArt kind={roomArtFor(room.id)} /><span className="home-live">Public</span></div>
+                  <div className="home-rbody">
+                    <h3>{room.name}</h3>
+                    {room.username ? <p className="home-rmeta">@{room.username}</p> : <p className="home-rmeta">Public room</p>}
+                    <div className="home-rfoot"><span><OmniIcon name="users" size={14} /> {memberCount} joined</span><Link href="/explore">Explore</Link></div>
+                  </div>
+                </article>
+              );
+            })}</div>}
+          </section>
 
-            <section className="glass-card home-profile rise" style={stagger(2)} aria-label="Your profile">
-              <button onClick={() => setIsProfileOpen(true)} className="dashboard-profile-menu-button icon-button" aria-label="Open profile menu"><OmniIcon name="more" size={17} /></button>
-              <DashboardAvatar name={account.displayName} src={account.avatarUrl} />
-              <h3>{account.displayName}</h3><p>{account.username ? `@${account.username}` : account.email}</p>
-              <div className="home-profile-stats"><div><strong className="mono">{dashboardLoading ? '—' : friends.length}</strong><span>Friends</span></div><div><strong className="mono">{dashboardLoading ? '—' : publicRooms.length}</strong><span>Public rooms</span></div><div><strong>{account.profileDetailsCompleted ? '✓' : '—'}</strong><span>Profile</span></div></div>
-              {dashboardUnavailable && <p className="home-muted">Some dashboard information is temporarily unavailable. You can still explore rooms.</p>}
-            </section>
-          </aside>
-        </section>
+          <section className={`glass-card ${styles.tile} ${styles.tileFriends}`} style={stagger(1)} aria-labelledby="home-friends">
+            <div className={styles.label}><h2 id="home-friends">Friends</h2><span>{dashboardLoading ? '' : friends.length}</span></div>
+            {dashboardLoading ? <p className="home-muted">Loading friends...</p> : friends.length === 0 ? <p className="home-muted">No friends yet. Connect from a profile when you are ready.</p> : <div className={styles.friends}>{friends.slice(0, 5).map((friend) => <Link key={friend.user_id} href={`/profile/${friend.user_id}`} className="home-fr"><DashboardAvatar name={friend.display_name || friend.username || 'OmniLume member'} src={friend.avatar_url} compact /><span className="min-w-0"><strong>{friend.display_name || friend.username || 'OmniLume member'}</strong><small>{friend.username ? `@${friend.username}` : 'Friend'}</small></span><OmniIcon name="chevronRight" size={16} className="home-go" /></Link>)}</div>}
+          </section>
+
+          <section className={`glass-card ${styles.tile} ${styles.tileProfile} ${styles.profile}`} style={stagger(2)} aria-label="Your profile">
+            <button onClick={() => setIsProfileOpen(true)} className={`dashboard-profile-menu-button icon-button ${styles.profileMenu}`} aria-label="Open profile menu"><OmniIcon name="more" size={17} /></button>
+            <DashboardAvatar name={account.displayName} src={account.avatarUrl} />
+            <h3>{account.displayName}</h3><p>{account.username ? `@${account.username}` : account.email}</p>
+            {dashboardUnavailable && <p className={`home-muted ${styles.note}`}>Some dashboard information is temporarily unavailable. You can still explore rooms.</p>}
+            <div className={styles.profileStats}><div><strong className="mono">{dashboardLoading ? '—' : friends.length}</strong><span>Friends</span></div><div><strong className="mono">{dashboardLoading ? '—' : publicRooms.length}</strong><span>Public rooms</span></div><div><strong>{account.profileDetailsCompleted ? '✓' : '—'}</strong><span>Profile</span></div></div>
+          </section>
+
+          <div className={`glass-card ${styles.tile} ${styles.tileStats}`} style={stagger(3)} aria-label="Your OmniLume overview">
+            <div className={styles.stats}>
+              <div><span className="section-kicker">Friends</span><strong className="mono">{dashboardLoading ? '—' : friends.length}</strong></div>
+              <div><span className="section-kicker">Public rooms</span><strong className="mono">{dashboardLoading ? '—' : publicRooms.length}</strong></div>
+              <div><span className="section-kicker">Profile</span><strong>{account.profileDetailsCompleted ? 'Ready' : 'Set up'}</strong></div>
+            </div>
+          </div>
+
+          <HomeOverview />
+        </div>
       </main>
       <FloatingDock />
     </div>
