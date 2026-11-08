@@ -1,0 +1,71 @@
+/* Home: bento. Mobile first, one column; tiles are placed explicitly from 1100px. */
+.bento { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+
+.greet { display: flex; flex-direction: column; gap: 18px; padding: 8px 0 18px; animation: rise 500ms var(--omni-ease) both; }
+.greet h2 { margin: 0; font-size: clamp(34px, 5vw, 56px); line-height: 1.04; font-weight: 500; letter-spacing: -.04em; }
+.greet p:not(:global(.section-kicker)) { max-width: 540px; margin: 12px 0 0; color: var(--omni-text-2); font-size: 16px; line-height: 1.5; }
+.greetActions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* Tile: glass card that rises in, with one faint sheen along its top edge. */
+.tile { position: relative; overflow: hidden; min-width: 0; padding: 20px; animation: rise 500ms var(--omni-ease) calc(120ms + var(--i, 0) * 70ms) both; }
+.tile::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 72px; background: linear-gradient(180deg, rgba(255,255,255,.05), transparent); pointer-events: none; }
+.tile::after { content: ""; position: absolute; top: 0; left: 0; width: 38%; height: 1px; background: linear-gradient(90deg, transparent, rgb(var(--pal-b9a8ff) / .85), transparent); opacity: 0; pointer-events: none; animation: sheen 1100ms var(--omni-ease) calc(320ms + var(--i, 0) * 70ms) both; }
+.tile > * { position: relative; }
+
+.tileRooms { order: 1; }
+.tileFriends { order: 2; }
+.tileProfile { order: 3; }
+.tileStats { order: 4; }
+.tileExplore { order: 5; }
+.tileEvents { order: 6; }
+.tileTasks { order: 7; }
+.tileSaved { order: 8; }
+
+.tileRooms :global(.overview-buckets) { max-height: 440px; overflow-y: auto; padding-right: 4px; overscroll-behavior: contain; }
+
+.label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
+.label h2 { margin: 0; font-size: 15px; font-weight: 500; }
+.label a, .label > span { color: var(--omni-muted); font-size: 13px; text-decoration: none; }
+.label a:hover { color: var(--omni-text); }
+
+.rcards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.rcard { padding: 0 !important; border-radius: 12px; animation: none; }
+.rcard::before, .rcard::after { display: none; }
+.rcardSkeleton { height: 210px; }
+
+.friends { display: grid; gap: 2px; margin: 0 -8px; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; height: 100%; align-content: center; }
+.stats div { display: grid; gap: 6px; align-content: start; }
+.stats strong { display: block; font-size: clamp(26px, 3vw, 38px); font-weight: 500; letter-spacing: -.02em; line-height: 1; }
+.profile { display: flex; flex-direction: column; align-items: flex-start; }
+.profile h3 { margin: 14px 0 2px; font-size: 17px; font-weight: 500; }
+.profile > p { margin: 0; color: var(--omni-muted); font-size: 13px; }
+.profileMenu { position: absolute !important; top: 16px; right: 16px; }
+.profileStats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--omni-line-soft); text-align: center; }
+.profileStats strong { display: block; font-size: 18px; font-weight: 500; }
+.profileStats span { color: var(--omni-muted); font-size: 12px; }
+.profile > .note { margin: 12px 0 0; }
+.profile > h3 + p { margin-bottom: 16px; }
+
+@media (min-width: 700px) {
+  .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tileRooms, .tileExplore, .tileEvents, .tileStats { grid-column: 1 / -1; }
+  .rcards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .greet { flex-direction: row; align-items: flex-end; justify-content: space-between; grid-column: 1 / -1; }
+}
+
+@media (min-width: 1100px) {
+  .bento { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .tileRooms { grid-column: 1 / 3; grid-row: 2 / 4; order: 0; }
+  .tileFriends { grid-column: 3; grid-row: 2; order: 0; }
+  .tileProfile { grid-column: 4; grid-row: 2; order: 0; }
+  .tileStats { grid-column: 3 / 5; grid-row: 3; order: 0; }
+  .tileExplore { grid-column: 1 / -1; grid-row: 4; order: 0; }
+  .tileEvents { grid-column: 1 / 3; grid-row: 5; order: 0; }
+  .tileTasks { grid-column: 3; grid-row: 5; order: 0; }
+  .tileSaved { grid-column: 4; grid-row: 5; order: 0; }
+  .tileRooms :global(.overview-buckets) { max-height: 340px; }
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(22px); } }
+@keyframes sheen { 0% { opacity: 0; transform: translateX(-100%); } 25% { opacity: 1; } 100% { opacity: 0; transform: translateX(270%); } }

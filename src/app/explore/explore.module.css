@@ -1,0 +1,74 @@
+/* Explore / Rooms: the lobby. Cards carry a small live orbit. Transform-only motion. */
+
+.head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 460px); align-items: end; gap: 20px 32px; }
+.title { margin: 0; font-size: clamp(28px, 4vw, 40px); font-weight: 500; letter-spacing: -.02em; line-height: 1.1; color: var(--omni-text); }
+.copy { margin: 8px 0 0; color: var(--omni-muted); font-size: 14px; }
+.count { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; color: var(--omni-muted); font-size: 13px; }
+.count svg { color: var(--omni-accent); }
+.search { height: 52px; border-radius: 16px; }
+.side { display: grid; gap: 10px; }
+.tools { display: block; }
+.codeForm { height: 46px; border-radius: 14px; }
+
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+
+.card {
+  position: relative; display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 280px; padding: 16px 18px 18px;
+  overflow: hidden; border: 1px solid var(--omni-line); border-radius: 18px;
+  background: radial-gradient(120% 70% at 50% 0%, rgb(var(--pal-7c5cff) / .12), transparent 70%), var(--omni-frost);
+  box-shadow: var(--omni-glass-shadow);
+  transition: transform 300ms var(--omni-ease), border-color 300ms var(--omni-ease);
+}
+.card:hover { transform: translateY(-4px); border-color: rgb(var(--pal-b9a8ff) / .45); }
+.card:focus-within { border-color: rgb(var(--pal-b9a8ff) / .55); }
+
+.live {
+  position: absolute; top: 14px; right: 14px; z-index: 2; display: inline-flex; align-items: center; gap: 7px;
+  height: 26px; padding: 0 10px; border: 1px solid var(--omni-line); border-radius: 999px;
+  background: rgba(0, 0, 0, .22); color: var(--omni-text-2); font-size: 12px; white-space: nowrap;
+}
+.liveDot { position: relative; width: 7px; height: 7px; border-radius: 50%; background: #ef5b6b; }
+.liveDot::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: #ef5b6b; animation: pulse 2.4s ease-out infinite; }
+.idle { background: var(--omni-muted); }
+.idle::after { display: none; }
+@keyframes pulse { 0% { transform: scale(1); opacity: .55; } 70%, 100% { transform: scale(3); opacity: 0; } }
+
+/* Orbit stage. Ring is a dashed ellipse; dots travel an ellipse via two phase-shifted axis tweens. */
+.stage { --rx: 96px; --ry: 38px; --turn: 26s; position: relative; height: 112px; margin: 6px 0 0; flex: 0 0 auto; }
+.ring { position: absolute; left: 50%; top: 50%; width: calc(var(--rx) * 2); height: calc(var(--ry) * 2); margin: calc(var(--ry) * -1) 0 0 calc(var(--rx) * -1); border: 1px dashed var(--omni-line); border-radius: 50%; }
+.core {
+  position: absolute; left: 50%; top: 50%; z-index: 1; display: grid; place-items: center; width: 46px; height: 46px; margin: -23px 0 0 -23px;
+  border: 1px solid rgb(var(--pal-b9a8ff) / .4); border-radius: 50%; color: var(--omni-text);
+  background: radial-gradient(circle at 35% 30%, rgb(var(--pal-b9a8ff) / .4), rgb(var(--pal-7c5cff) / .22));
+  box-shadow: 0 0 28px rgb(var(--pal-7c5cff) / .4);
+}
+.ox, .oy { position: absolute; left: 50%; top: 50%; width: 0; height: 0; animation-duration: calc(var(--turn) / 2); animation-timing-function: ease-in-out; animation-iteration-count: infinite; animation-direction: alternate; }
+.ox { animation-name: swayX; animation-delay: var(--d); }
+.oy { animation-name: swayY; animation-delay: calc(var(--d) - var(--turn) / 4); }
+@keyframes swayX { from { transform: translateX(calc(var(--rx) * -1)); } to { transform: translateX(var(--rx)); } }
+@keyframes swayY { from { transform: translateY(calc(var(--ry) * -1)); } to { transform: translateY(var(--ry)); } }
+.dot {
+  position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid var(--omni-bg-raised); background: var(--omni-accent); opacity: .9;
+}
+.dot[data-v="1"] { background: rgb(var(--pal-7c5cff)); width: 14px; height: 14px; left: -7px; top: -7px; }
+.dot[data-v="2"] { background: var(--omni-text-2); opacity: .7; width: 12px; height: 12px; left: -6px; top: -6px; }
+.dot[data-v="3"] { background: rgb(var(--pal-b9a8ff)); opacity: .6; width: 14px; height: 14px; left: -7px; top: -7px; }
+
+.body { min-width: 0; }
+.name { margin: 0; overflow: hidden; font-size: 19px; font-weight: 500; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; color: var(--omni-text); }
+.handle { margin: 2px 0 0; color: var(--omni-accent); font-size: 13px; }
+.meta { display: -webkit-box; margin: 6px 0 0; overflow: hidden; color: var(--omni-muted); font-size: 13px; line-height: 19px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; }
+
+@media (max-width: 1100px) {
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 820px) {
+  .head { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .stage { --rx: 76px; }
+}

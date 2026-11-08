@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useRef, type CSSProperties, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { useMusicPlayer } from '@/hooks/useMusicPlayer';
 import { formatMusicTime } from '@/lib/music-model';
 import { upNext, type UpNextTier } from '@/lib/music-queue';
 import { MusicIcon } from './MusicIcon';
-import { Artwork, EmptyState } from './MusicParts';
+import { Artwork, EmptyState, Vinyl } from './MusicParts';
 
 export type SidePanelKind = 'queue' | 'lyrics';
 
@@ -23,20 +23,23 @@ export function Transport({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export function Progress() {
+export function Progress({ wave = false }: { wave?: boolean }) {
   const player = useMusicPlayer();
   const duration = player.durationMs || player.queue.current?.durationMs || 0;
   const position = Math.min(player.positionMs, duration);
   const percent = duration ? (position / duration) * 100 : 0;
+  const range = (
+    <input
+      type="range" className="mu-range" aria-label="Seek" min={0} max={duration || 1} step={1000} value={position}
+      aria-valuetext={`${formatMusicTime(position)} of ${formatMusicTime(duration)}`}
+      disabled={!player.queue.current} onChange={(event) => player.seek(Number(event.target.value))}
+      style={{ '--mu-fill': `${percent}%` } as CSSProperties}
+    />
+  );
   return (
-    <div className="mu-progress">
+    <div className={`mu-progress ${wave ? 'is-wave' : ''}`}>
       <span className="mu-time">{formatMusicTime(position)}</span>
-      <input
-        type="range" className="mu-range" aria-label="Seek" min={0} max={duration || 1} step={1000} value={position}
-        aria-valuetext={`${formatMusicTime(position)} of ${formatMusicTime(duration)}`}
-        disabled={!player.queue.current} onChange={(event) => player.seek(Number(event.target.value))}
-        style={{ '--mu-fill': `${percent}%` } as CSSProperties}
-      />
+      {wave ? <span className="mu-wave">{range}</span> : range}
       <span className="mu-time">-{formatMusicTime(duration - position)}</span>
     </div>
   );
@@ -190,15 +193,23 @@ export function SidePanel({ kind, open }: { kind: SidePanelKind; open: boolean }
   );
 }
 
-// shortcut: mesh is CSS gradients from the fixture hue; sample real artwork colours (canvas) with uploads in 16.4.
-function MeshBackdrop({ hue, playing }: { hue: number; playing: boolean }) {
-  return <div className="mu-mesh" data-playing={playing} style={{ '--mu-hue': hue } as CSSProperties} aria-hidden="true"><i /><i /><i /></div>;
+/** The listening room: a static, blurred and darkened copy of the cover (hue mesh when there is no artwork). */
+export function CoverRoom({ hue, src }: { hue: number; src?: string }) {
+  return (
+    <div className="mu-room" style={{ '--mu-hue': hue } as CSSProperties} aria-hidden="true">
+      <div className="mu-mesh"><i /><i /><i /></div>
+      {/* eslint-disable-next-line @next/next/no-img-element -- private signed artwork URL, not optimisable */}
+      {src ? <img src={src} alt="" /> : null}
+      <span className="mu-room-shade" />
+    </div>
+  );
 }
 
 export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
   const player = useMusicPlayer();
   const dialog = useRef<HTMLDialogElement>(null);
   const track = player.queue.current;
+  const [view, setView] = useState<'upnext' | 'lyrics'>(() => (track?.lyrics?.length ? 'lyrics' : 'upnext'));
   useEffect(() => {
     const element = dialog.current;
     // No close() in cleanup: its async "close" event would re-close under Strict Mode; unmount removes it from the top layer.
@@ -212,23 +223,35 @@ export function FullScreenPlayer({ onClose }: { onClose: () => void }) {
   }, [onClose]);
   return (
     <dialog ref={dialog} className="mu-fullscreen" aria-label="Now playing">
-      <MeshBackdrop hue={track?.hue ?? 260} playing={player.isPlaying} />
+      <CoverRoom key={track?.id} hue={track?.hue ?? 260} src={track?.artwork} />
       <button type="button" className="mu-icon-button mu-fs-close" aria-label="Close full-screen player" onClick={onClose}><MusicIcon name="close" /></button>
       <div className="mu-fs-grid">
-        <div className="mu-fs-player">
+        <div className="mu-fs-stage">
           <div className="mu-fs-art">
+            <Vinyl hue={track?.hue ?? 260} playing={player.isPlaying} />
             <Artwork hue={track?.hue ?? 260} src={track?.artwork} className="is-fs is-glow" />
             <Artwork hue={track?.hue ?? 260} src={track?.artwork} className="is-fs" label={track ? `${track.album} artwork` : undefined} />
           </div>
+        </div>
+        <div className="mu-fs-player">
           <div className="mu-fs-text">
+            <p className="mu-fs-kicker">Now playing</p>
             <p className="mu-fs-title">{track?.title ?? 'Nothing playing'}</p>
             <p className="mu-fs-subtitle">{track ? `${track.artist} — ${track.album}` : ''}</p>
           </div>
-          <Progress />
-          <Transport />
-          <VolumeControl />
+          <Progress wave />
+          <div className="mu-fs-controls">
+            <Transport />
+            <VolumeControl />
+          </div>
+          <section className="mu-fs-card" aria-label={view === 'lyrics' ? 'Lyrics' : 'Up next'}>
+            <div className="mu-fs-tabs">
+              <button type="button" className={`mu-text-button ${view === 'upnext' ? 'is-on' : ''}`} aria-pressed={view === 'upnext'} onClick={() => setView('upnext')}>Up next</button>
+              <button type="button" className={`mu-text-button ${view === 'lyrics' ? 'is-on' : ''}`} aria-pressed={view === 'lyrics'} onClick={() => setView('lyrics')}>Lyrics</button>
+            </div>
+            <div className={`mu-fs-card-body ${view === 'lyrics' ? 'is-lyrics' : ''}`}>{view === 'lyrics' ? <Lyrics anchor={0.3} /> : <UpNextPanel />}</div>
+          </section>
         </div>
-        <div className="mu-fs-lyrics"><Lyrics anchor={0.3} /></div>
       </div>
     </dialog>
   );

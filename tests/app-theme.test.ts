@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -29,8 +29,18 @@ import { ROOM_THEMES } from '../src/lib/room-layout.js';
 
 const root = process.cwd();
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
-// Everything that draws the app's purple: the stylesheets, and the room card art (SVG).
-const STYLESHEETS = ['src/app/globals.css', 'src/app/app.css', 'src/app/management.css', 'src/app/music/music.css', 'src/components/music/mini-player.css', 'src/components/ui/RoomArt.tsx'];
+// Everything that draws the app's purple: every app stylesheet (shared ones and each
+// section's CSS module), and the room card art (SVG). The landing keeps its own brand colours,
+// and app-themes.css is the generated theme file itself.
+const NOT_THEMED = new Set(['src/app/landing.module.css', 'src/components/landing/hero-app.css', 'src/components/landing/use-case.module.css', 'src/app/app-themes.css']);
+function cssFiles(directory: string): string[] {
+  return readdirSync(resolve(root, directory), { withFileTypes: true }).flatMap((entry) => {
+    const path = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) return cssFiles(path);
+    return entry.name.endsWith('.css') && !NOT_THEMED.has(path) ? [path] : [];
+  });
+}
+const STYLESHEETS = [...cssFiles('src/app'), ...cssFiles('src/components'), 'src/components/ui/RoomArt.tsx'];
 
 test('each app path maps to its section, and nothing else does', () => {
   const cases: [string, string | null][] = [

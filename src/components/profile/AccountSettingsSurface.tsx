@@ -6,6 +6,7 @@ import AppearanceSettings from '@/components/profile/AppearanceSettings';
 import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
 import { OmniIcon } from '@/components/ui/OmniIcon';
+import styles from './settings.module.css';
 
 export default function AccountSettingsSurface() {
   const router = useRouter();
@@ -19,20 +20,29 @@ export default function AccountSettingsSurface() {
         actions={<button type="button" onClick={() => router.back()} className="omni-button omni-button-ghost"><OmniIcon name="arrow" size={15} /> Back</button>}
       />
       <main className="omni-main-content account-settings-content">
-        <section className="account-settings-grid !grid-cols-1">
-          <AppearanceSettings />
-          <div className="glass-panel settings-card">
-            <p className="section-kicker">Account controls</p>
-            <h2 className="section-title">Your account, your call.</h2>
-            <p className="section-copy">Profile editing and visibility live on your profile page. This area is reserved for account-level actions that need extra care.</p>
-            <div className="settings-link-list">
-              <button type="button" onClick={() => router.push('/profile')} className="settings-link-row"><span><OmniIcon name="user" size={17} /><strong>Profile and privacy</strong><small>Update your identity, profile visibility and posts.</small></span><OmniIcon name="arrow" size={15} /></button>
-              <button type="button" onClick={() => router.push('/home')} className="settings-link-row"><span><OmniIcon name="home" size={17} /><strong>Return to Home</strong><small>Continue to your rooms and shared spaces.</small></span><OmniIcon name="arrow" size={15} /></button>
-            </div>
+        <div className={styles.layout}>
+          <nav className={styles.nav} aria-label="Settings sections">
+            <a href="#appearance"><OmniIcon name="spark" size={16} /> Appearance</a>
+            <a href="#account"><OmniIcon name="user" size={16} /> Account</a>
+          </nav>
+          <div className={styles.content}>
+            <AppearanceSettings />
+            <section id="account" className={styles.group} aria-labelledby="account-title">
+              <div className={styles.groupHead}>
+                <h2 id="account-title">Account</h2>
+                <p>Profile editing and visibility live on your profile page. This area is reserved for account-level actions that need extra care.</p>
+              </div>
+              <div className={styles.card}>
+                <button type="button" onClick={() => router.push('/profile')} className={`${styles.row} ${styles.linkRow}`}><span className={styles.rowText}><strong>Profile and privacy</strong><small>Update your identity, profile visibility and posts.</small></span><span className={styles.rowControl}><OmniIcon name="arrow" size={15} /></span></button>
+                <button type="button" onClick={() => router.push('/home')} className={`${styles.row} ${styles.linkRow}`}><span className={styles.rowText}><strong>Return to Home</strong><small>Continue to your rooms and shared spaces.</small></span><span className={styles.rowControl}><OmniIcon name="arrow" size={15} /></span></button>
+                <div className={styles.row}>
+                  <div className={styles.rowText}><strong>Session and account</strong><small>Log out of this device or every device, or delete your account.</small></div>
+                  <div className={styles.rowControl}><AccountControlActions className={styles.actions} /></div>
+                </div>
+              </div>
+            </section>
           </div>
-        </section>
-
-        <AccountControlActions className="mt-6 flex flex-col items-start gap-3" />
+        </div>
       </main>
       <FloatingDock />
     </div>
