@@ -136,7 +136,10 @@ test('Action 12 wiring: one realtime path, enforcement on both ends', () => {
   assert.match(sync, /if \(eventType === 'collab_changed' \|\| eventType === 'rtc_signal'\) return 'chat';/);
   assert.match(sync, /eventType === 'cursor' \|\| eventType === 'note_editing' \|\| eventType === 'pdf_follow'\) return 'study';/);
   const voice = read('src/components/room/VoiceRoom.tsx');
-  assert.match(voice, /<VoiceAudio key=\{peer\.id\} stream=\{peer\.audio\} muted=\{Boolean\(moderation\.get\(peer\.id\)\?\.audio_muted\)\} \/>/, 'listeners silence a muted member');
+  assert.match(voice, /<VoiceAudio key=\{peer\.id\} stream=\{peer\.audio\} muted=\{Boolean\(moderation\.get\(peer\.id\)\?\.audio_muted\)\} volume=\{memberVolumes\[peer\.id\] \?\? 1\} \/>/, 'listeners silence a muted member');
+  assert.match(voice, /const boosting = Boolean\(stream\) && !muted && volume > 1;/, 'a manager mute also silences a boosted voice');
+  assert.match(voice, /if \(!boosting\) element\.muted = muted;/, 'the element follows a manager mute when not boosted');
+  assert.match(voice, /element\.muted = context\.state === 'running';/, 'a boosted voice never plays twice or drops out');
   assert.match(voice, /if \(forcedMute\) meshRef\.current\?\.setMicEnabled\(false\);/, 'the muted member stops sending');
   assert.match(voice, /activeRecording\.requested_by === currentUserId && joined/, 'only the requester records, only in voice');
   const mesh = read('src/lib/voice-mesh.ts');

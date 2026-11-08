@@ -83,17 +83,20 @@ const SCREEN_ENCODER_MAX_BITRATE = 2_500_000;
 // watcher comes from screenBitrate (total upload cap), with a conservative
 // sender ceiling for compatibility.
 // A mesh encodes the screen once per viewer, so a viewer who is not looking (room
-// tab hidden, no picture-in-picture) gets no video: that copy costs the host
-// no CPU or upload, frees its share of the cap for the others, and the picture
-// resumes with a fresh key frame the moment they look again. Tab sound keeps
-// playing for them meanwhile.
-async function tuneVideoSender(sender: RTCRtpSender, active: boolean, maxBitrate: number) {
+// tab hidden, no picture-in-picture) gets a trickle: 2 fps at a low bitrate
+// frees their share of the cap for the others. The video is never switched
+// off: Chrome on Windows reports a covered window as hidden, so switching to
+// another window used to stop the picture and need a reconnect to come back.
+// Full rate returns the moment they look again. Tab sound is unaffected.
+const HIDDEN_VIEWER_BITRATE = 500_000;
+const HIDDEN_VIEWER_FRAMERATE = 2;
+async function tuneVideoSender(sender: RTCRtpSender, watching: boolean, maxBitrate: number) {
   try {
     const params = sender.getParameters();
     if (!params.encodings?.length) params.encodings = [{}];
-    params.encodings[0].active = active;
-    params.encodings[0].maxBitrate = Math.min(maxBitrate, SCREEN_ENCODER_MAX_BITRATE);
-    params.encodings[0].maxFramerate = 30;
+    params.encodings[0].active = true;
+    params.encodings[0].maxBitrate = Math.min(maxBitrate, watching ? SCREEN_ENCODER_MAX_BITRATE : HIDDEN_VIEWER_BITRATE);
+    params.encodings[0].maxFramerate = watching ? 30 : HIDDEN_VIEWER_FRAMERATE;
     (params as RTCRtpSendParameters & { degradationPreference?: string }).degradationPreference = 'balanced';
     await sender.setParameters(params);
   } catch {
@@ -144,7 +147,7 @@ export class VoiceMesh {
     this.send({ kind: 'hello', ...(to ? { to } : {}), screen: this.screen !== null, mic: this.hasMic, watching: this.watching });
   }
 
-  // Whether this member can see a shared picture right now; sharers pause
+  // Whether this member can see a shared picture right now; sharers slow
   // their video to a member who cannot.
   private readonly updateWatching = () => {
     const watching = document.visibilityState === 'visible' || Boolean(document.pictureInPictureElement);

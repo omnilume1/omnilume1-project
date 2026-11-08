@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
-import { useVoiceRoom, VideoStream } from '@/components/room/VoiceRoom';
+import { MAX_MEMBER_VOLUME, useVoiceRoom, VideoStream } from '@/components/room/VoiceRoom';
 import { useAnnounce, useMemberNames, useRoomCapabilities, formatDuration } from '@/lib/collab-hooks';
 import {
   cancelRecording, deleteRecording, getTranscript, lowerHand, raiseHand, recordingUrl, requestRecording,
@@ -71,6 +71,7 @@ export default function VoicePanel() {
         )}
         {voice.peers.map((peer) => {
           const mod = voice.moderation.get(peer.id);
+          const volume = voice.memberVolumes[peer.id] ?? 1;
           return (
             <li key={peer.id} className="voice-person">
               <span className={`voice-dot ${peer.state === 'connected' && !mod?.audio_muted ? 'is-on' : ''}`} aria-hidden="true" />
@@ -81,6 +82,14 @@ export default function VoicePanel() {
                   <button type="button" className="collab-link" onClick={() => void moderate(peer.id, !mod?.audio_muted, Boolean(mod?.screen_blocked))}>{mod?.audio_muted ? 'Unmute' : 'Mute'}</button>
                   <button type="button" className="collab-link" onClick={() => void moderate(peer.id, Boolean(mod?.audio_muted), !mod?.screen_blocked)}>{mod?.screen_blocked ? 'Allow share' : 'Stop share'}</button>
                 </span>
+              )}
+              {voice.joined && peer.hasMic && (
+                <div className="voice-volume" title="Only you hear this change">
+                  <input type="range" min={0} max={MAX_MEMBER_VOLUME} step={0.05} value={volume} aria-label={`${name(peer.id)}'s volume for you`} aria-valuetext={`${Math.round(volume * 100)}%`}
+                    onChange={(event) => voice.setMemberVolume(peer.id, Number(event.target.value))} onDoubleClick={() => voice.setMemberVolume(peer.id, 1)} />
+                  <span className="voice-volume-value mono" aria-hidden="true">{Math.round(volume * 100)}%</span>
+                  {volume !== 1 && <button type="button" className="collab-link" onClick={() => voice.setMemberVolume(peer.id, 1)}>Reset</button>}
+                </div>
               )}
             </li>
           );
