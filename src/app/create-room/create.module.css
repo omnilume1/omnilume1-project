@@ -14,7 +14,7 @@
 .previewLabel { margin: 0; color: var(--omni-muted); font: 500 12px/1 var(--font-geist-mono, ui-monospace, monospace); letter-spacing: .02em; }
 .board { position: relative; width: min(360px, 100%); }
 .outline { position: absolute; inset: 0; border: 1.5px dashed rgb(var(--pal-b9a8ff) / .5); border-radius: 18px; }
-.card { position: relative; display: grid; align-content: start; gap: 8px; min-height: 220px; padding: 18px; border: 1px solid var(--omni-line); border-radius: 18px; background: var(--omni-frost-strong); box-shadow: var(--omni-glass-shadow);
+.card { position: relative; display: grid; align-content: start; gap: 8px; min-height: 220px; padding: 18px; border: 1px solid var(--omni-rim); border-top-color: var(--omni-edge); border-radius: 18px; background: var(--omni-frost-strong); box-shadow: var(--omni-glass-depth); backdrop-filter: var(--omni-glass-filter);
   animation: draw 700ms var(--omni-ease) both; }
 .card::after { content: ""; position: absolute; inset: -1px; border-radius: 18px; pointer-events: none; opacity: 0; box-shadow: 0 0 0 2px var(--omni-accent), 0 0 44px rgb(var(--pal-7c5cff) / .45); }
 .glow::after { animation: glow 1400ms var(--omni-ease) both; }

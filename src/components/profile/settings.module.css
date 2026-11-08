@@ -7,7 +7,7 @@
 .group { display: grid; gap: 12px; scroll-margin-top: 24px; }
 .groupHead h2 { margin: 0; color: var(--omni-text); font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
 .groupHead p { margin: 4px 0 0; color: var(--omni-muted); font-size: 13px; }
-.card { overflow: hidden; border: 1px solid var(--omni-line-soft); border-radius: 18px; background: var(--omni-bg-raised); }
+.card { overflow: hidden; border: 1px solid var(--omni-rim); border-top-color: var(--omni-edge); border-radius: 18px; background: var(--omni-bg-raised); box-shadow: var(--omni-glass-depth); backdrop-filter: var(--omni-glass-filter); }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 20px; }
 .row + .row { border-top: 1px solid var(--omni-line-soft); }
 .rowStack { flex-direction: column; align-items: stretch; gap: 14px; }
