@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { assertActiveRoom } from '@/lib/room-lifecycle';
 import {
+  RECORDINGS_BUCKET,
   ROOM_ATTACHMENT_BUCKET,
   assertRoomFileInput,
   extensionForFileName,
@@ -15,9 +16,11 @@ import {
   isUuid,
 } from '@/lib/music-upload-validation';
 import { getServerStorageProvider } from '@/lib/storage/server-provider';
+import { MAX_UPLOAD_BYTES } from '@/lib/upload-limits';
 import { createClient } from '@/utils/supabase/server';
 
 const noStore = { 'Cache-Control': 'private, no-store' };
+const RECORDING_AUDIO_TYPES = { webm: 'audio/webm', ogg: 'audio/ogg', m4a: 'audio/mp4' } as const;
 
 function failure(message: string, status: number) {
   return NextResponse.json({ error: message }, { status, headers: noStore });
@@ -76,6 +79,16 @@ export async function POST(request: Request) {
       if (!isCover && !extension) return failure('Invalid music upload.', 400);
       if (size <= 0 || size > (isCover ? MUSIC_MAX_COVER_BYTES : MUSIC_MAX_FILE_BYTES)) return failure('This file is too large.', 413);
       if (!isCover && extension && contentType !== MUSIC_AUDIO_TYPES[extension]) return failure('Invalid music MIME type.', 400);
+    } else if (bucket === RECORDINGS_BUCKET) {
+      const match = path.match(/^([^/]+)\/([^/]+)\.(webm|ogg|m4a)$/);
+      if (!match || !isUuid(match[1]) || !isUuid(match[2])) return failure('Invalid recording upload path.', 400);
+      if (contentType !== RECORDING_AUDIO_TYPES[match[3] as keyof typeof RECORDING_AUDIO_TYPES]) return failure('Invalid recording MIME type.', 400);
+      if (size <= 0 || size > MAX_UPLOAD_BYTES) return failure('This file is too large.', 413);
+      // RLS limits this read to participants; only the member running it may upload.
+      const { data: recording } = await supabase.from('room_recordings').select('room_id, requested_by, status').eq('id', match[2]).maybeSingle();
+      if (!recording || recording.room_id !== match[1] || recording.requested_by !== user.id || recording.status !== 'recording') {
+        return failure('You do not have permission to upload here.', 403);
+      }
     } else {
       return failure('Unsupported storage bucket.', 400);
     }

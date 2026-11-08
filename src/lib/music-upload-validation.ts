@@ -1,4 +1,4 @@
-import { MAX_UPLOAD_BYTES } from '@/lib/upload-limits';
+import { MAX_UPLOAD_BYTES } from './upload-limits';
 
 // Shared by the browser upload flow and POST /api/music/uploads. The database
 // (register_music_upload) stays authoritative for caps and the 7-day expiry.

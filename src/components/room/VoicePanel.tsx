@@ -237,7 +237,7 @@ function FinishedRecording({ recording, canDelete }: { recording: Recording; can
 
   const play = async () => {
     if (!recording.storage_path) return;
-    const result = await recordingUrl(recording.storage_path);
+    const result = await recordingUrl(recording.id);
     if (!result.ok) { setStatus(result.error); return; }
     setUrl(result.data);
   };

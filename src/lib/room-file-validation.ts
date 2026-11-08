@@ -1,4 +1,4 @@
-import { MAX_UPLOAD_BYTES } from '@/lib/upload-limits';
+import { MAX_UPLOAD_BYTES } from './upload-limits';
 
 export type RoomUploadCandidate = {
   name: string;

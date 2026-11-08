@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
-import { PEER_TIMEOUT_MS, VoiceMesh, type RtcSignal, type VoicePeer } from '@/lib/voice-mesh';
+import { PEER_TIMEOUT_MS, VoiceMesh, loadIceServers, type RtcSignal, type VoicePeer } from '@/lib/voice-mesh';
 import { useAnnounce, useHintedLoad, useRoomCapabilities } from '@/lib/collab-hooks';
 import {
   finishRecording, listConsents, listHands, listRecordings, listVoiceModeration, uploadRecording,
@@ -197,6 +197,9 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
   useEffect(() => {
     if (screenBlocked && meshRef.current?.isSharingScreen) meshRef.current.stopScreen();
   }, [screenBlocked]);
+
+  // Fetch relay credentials before anyone joins, so the first peers use them.
+  useEffect(() => { if (currentUserId) void loadIceServers(); }, [currentUserId]);
 
   // Joins the mesh synchronously (no await) so a screen picker opened in the
   // same click still has the user's gesture.

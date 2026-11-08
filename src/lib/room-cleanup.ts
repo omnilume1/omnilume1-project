@@ -107,7 +107,7 @@ async function listStorageFiles(
   bucket: string = STORAGE_BUCKET,
   roomStorage?: RoomAttachmentStorage,
 ): Promise<string[]> {
-  if (bucket === STORAGE_BUCKET && roomStorage) return roomStorage.list(bucket, prefix);
+  if (roomStorage) return roomStorage.list(bucket, prefix);
   const paths: string[] = [];
   let offset = 0;
 
@@ -150,7 +150,7 @@ async function removeStorageFiles(
   bucket: string = STORAGE_BUCKET,
   roomStorage?: RoomAttachmentStorage,
 ) {
-  if (bucket === STORAGE_BUCKET && roomStorage) {
+  if (roomStorage) {
     for (let index = 0; index < paths.length; index += STORAGE_REMOVE_BATCH_SIZE) {
       await roomStorage.cleanup(bucket, paths.slice(index, index + STORAGE_REMOVE_BATCH_SIZE));
     }
@@ -284,7 +284,7 @@ export async function cleanupPendingRoomFiles(supabase: SupabaseClient, roomStor
 // Recordings past their 7-day retention: the database marks them deleted in
 // one statement (so overlapping runs never double-process a row) and returns
 // the object paths to remove.
-export async function cleanupExpiredRecordings(supabase: SupabaseClient) {
+export async function cleanupExpiredRecordings(supabase: SupabaseClient, roomStorage?: RoomAttachmentStorage) {
   const { data, error } = await supabase.rpc('expire_room_recordings');
   if (error) throw new Error(error.message);
   const paths = ((data ?? []) as Array<{ storage_path: string | null } | string | null>)
@@ -292,7 +292,7 @@ export async function cleanupExpiredRecordings(supabase: SupabaseClient) {
     .filter((path): path is string => typeof path === 'string' && path.length > 0);
   const failures: string[] = [];
   try {
-    await removeStorageFiles(supabase, paths, RECORDINGS_BUCKET);
+    await removeStorageFiles(supabase, paths, RECORDINGS_BUCKET, roomStorage);
   } catch (removeError) {
     failures.push(`recordings:${removeError instanceof Error ? removeError.message : 'remove failed'}`);
   }
@@ -357,8 +357,8 @@ export async function cleanupDestroyedRooms(
       const storagePaths = await listStorageFiles(supabase, roomId, STORAGE_BUCKET, roomStorage);
       if (roomStorage) await removeStorageFiles(supabase, storagePaths, STORAGE_BUCKET, roomStorage);
       else await removeStorageFiles(supabase, storagePaths);
-      const recordingPaths = await listStorageFiles(supabase, roomId, RECORDINGS_BUCKET);
-      await removeStorageFiles(supabase, recordingPaths, RECORDINGS_BUCKET);
+      const recordingPaths = await listStorageFiles(supabase, roomId, RECORDINGS_BUCKET, roomStorage);
+      await removeStorageFiles(supabase, recordingPaths, RECORDINGS_BUCKET, roomStorage);
 
       const { data: destroyed, error: destroyError } = await supabase.rpc('destroy_expired_room', {
         p_room_id: roomId,
