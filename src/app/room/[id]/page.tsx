@@ -38,6 +38,7 @@ import { leaveRoom, transferRoomOwnership } from '@/actions/room-controls';
 import { getRoomMembersList } from '@/actions/members';
 import { clearRoomRealtimeCache, useRoomSync } from '@/hooks/useRoomSync';
 import { useRoomPresence } from '@/hooks/useRoomPresence';
+import { useRootAttribute } from '@/hooks/useAppTheme';
 import { clearFocusLock } from '@/lib/focus-lock';
 import { isRoomExpired } from '@/lib/room-lifecycle';
 import { roomWorkspacePreferenceKey } from '@/lib/room-workspace-preferences';
@@ -390,6 +391,8 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   });
   const layout = effectiveLayout(appearance, personalLayout);
   const theme = effectiveTheme(appearance, personalTheme);
+  // With "Section colours", the whole app takes the room's theme while you are inside it.
+  useRootAttribute('data-room-theme', theme);
   const handleControlStateChange = useCallback(({ featureFlags: nextFlags, canManageMembers: nextCanManageMembers, canControlMedia: nextCanControlMedia, appearance: nextAppearance }: { featureFlags: Partial<Record<RoomFeature, boolean>>; canManageMembers: boolean; canControlMedia: boolean; isGhostMode: boolean; appearance: RoomAppearance }) => {
     setFeatureFlags({ ...DEFAULT_FEATURE_FLAGS, ...nextFlags });
     setAppearance(nextAppearance);

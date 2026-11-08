@@ -18,7 +18,10 @@ import {
   updatePost,
 } from '@/actions/profiles';
 import ProfileForm from '@/components/profile/ProfileForm';
+import ProfileColorPicker from '@/components/profile/ProfileColorPicker';
 import AccountControlActions from '@/components/profile/AccountControlActions';
+import { useRootAttribute } from '@/hooks/useAppTheme';
+import { DEFAULT_PROFILE_COLOR, parseProfileColor } from '@/lib/app-theme';
 import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
 import type { AccountView } from '@/components/ui/CurrentAccountControls';
@@ -36,6 +39,7 @@ interface ProfileRecord {
   is_private: boolean;
   profile_completed?: boolean;
   profile_details_completed?: boolean;
+  profile_color?: string | null;
 }
 
 interface PostRecord {
@@ -165,6 +169,10 @@ export default function ProfileSurface({ profileId }: { profileId?: string }) {
 
   const visiblePeople = useMemo(() => peopleTab === 'following' ? following : followers, [followers, following, peopleTab]);
 
+  // With "Section colours", the page takes its owner's colour (app-themes.css).
+  const profileColor = profile ? parseProfileColor(profile.profile_color) ?? DEFAULT_PROFILE_COLOR : null;
+  useRootAttribute('data-profile-color', profileColor);
+
   async function performRelationshipAction(action: () => Promise<unknown>) {
     setWorkingRelationship(true);
     setErrorMessage(null);
@@ -236,6 +244,7 @@ export default function ProfileSurface({ profileId }: { profileId?: string }) {
             <div className="profile-name-row"><div><p className="section-kicker">{profile.is_private ? 'Private profile' : 'Public profile'}</p><h2>{profile.display_name || profile.username}</h2><p className="profile-handle">@{profile.username}</p></div><span className="room-chip"><OmniIcon name={profile.is_private ? 'lock' : 'users'} size={13} /> {profile.is_private ? 'Private' : 'Public'}</span></div>
             {profile.bio && <p className="profile-bio">{profile.bio}</p>}
             <div className="profile-stats"><button type="button" onClick={() => setPeopleTab('followers')}><strong>{followers.length}</strong><span>Followers</span></button><button type="button" onClick={() => setPeopleTab('following')}><strong>{following.length}</strong><span>Following</span></button><div><strong>{posts.length}</strong><span>Posts</span></div></div>
+            {isOwn && profileColor && <ProfileColorPicker value={profileColor} onChange={(color) => setProfile((current) => current ? { ...current, profile_color: color } : current)} />}
           </div>
           {isOwn ? <button type="button" onClick={() => setEditing((current) => !current)} className="omni-button omni-button-ghost profile-edit-button"><OmniIcon name="more" size={15} /> {editing ? 'Close editor' : 'Edit profile'}</button> : <div className="relationship-stack"><div className="relationship-group"><span className="relationship-label">Following</span>{relationship?.outgoingFollow?.status === 'accepted' ? <button type="button" disabled={workingRelationship} onClick={() => void performRelationshipAction(() => unfollowUser(profile.id).then(unwrapAction))} className="omni-button omni-button-ghost">Unfollow</button> : relationship?.outgoingFollow?.status === 'pending' ? <button type="button" disabled={workingRelationship} onClick={() => void performRelationshipAction(() => cancelFollowRequest(profile.id).then(unwrapAction))} className="omni-button omni-button-ghost">Request sent</button> : <button type="button" disabled={workingRelationship} onClick={() => void performRelationshipAction(() => requestFollow(profile.id).then(unwrapAction))} className="omni-button omni-button-primary">Follow</button>}</div><div className="relationship-group"><span className="relationship-label">Friendship</span>{relationship?.friendship ? <button type="button" disabled={workingRelationship} onClick={() => void performRelationshipAction(() => removeFriend(profile.id).then(unwrapAction))} className="omni-button omni-button-ghost">Friends ✓</button> : relationship?.incomingFriendRequest?.status === 'pending' ? <span className="relationship-inline"><button type="button" disabled={workingRelationship} onClick={() => void performRelationshipAction(() => respondToFriendRequest(relationship.incomingFriendRequest!.id, 'accepted').then(unwrapAction))} className="omni-button omni-button-primary">Accept</button><button type="button" disabled={workingRelationship} onClick={() => void performRelationshipAction(() => respondToFriendRequest(relationship.incomingFriendRequest!.id, 'rejected').then(unwrapAction))} className="omni-button omni-button-ghost">Reject</button></span> : relationship?.outgoingFriendRequest?.status === 'pending' ? <button type="button" disabled={workingRelationship} onClick={() => void performRelationshipAction(() => cancelFriendRequest(relationship.outgoingFriendRequest!.id).then(unwrapAction))} className="omni-button omni-button-ghost">Request sent</button> : <button type="button" disabled={workingRelationship} onClick={() => void performRelationshipAction(() => requestFriend(profile.id).then(unwrapAction))} className="omni-button omni-button-primary">Add friend</button>}</div></div>}
         </section>

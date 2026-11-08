@@ -29,19 +29,19 @@
 .overview-bucket-title span { margin-left: 4px; color: #a1a1aa; }
 .overview-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
 .overview-row, .overview-event { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--omni-line-soft); border-radius: 12px; background: rgba(255, 255, 255, .03); padding: 10px 12px; }
-.overview-row:hover, .overview-event-main:hover strong { border-color: var(--omni-line); color: #ddd6fe; }
+.overview-row:hover, .overview-event-main:hover strong { border-color: var(--omni-line); color: rgb(var(--pal-ddd6fe)); }
 .overview-event { flex-wrap: wrap; }
 .overview-event-main { min-width: 0; flex: 1 1 180px; }
 .overview-badges { display: flex; flex: none; gap: 6px; }
-.overview-badge { border-radius: 999px; background: rgba(168, 85, 247, .25); color: #ede9fe; padding: 1px 8px; font-size: 10px; font-weight: 800; }
+.overview-badge { border-radius: 999px; background: rgb(var(--pal-a855f7) / .25); color: rgb(var(--pal-ede9fe)); padding: 1px 8px; font-size: 10px; font-weight: 800; }
 .overview-badge.is-task { background: rgba(250, 204, 21, .16); color: #fde68a; }
 
 .rsvp-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .overview-event .rsvp-row { margin-top: 0; }
 .rsvp-button { border: 1px solid var(--omni-line); border-radius: 999px; background: transparent; color: #d4d4d8; padding: 3px 10px; font-size: 11px; font-weight: 700; }
 .rsvp-button:hover { background: rgba(255, 255, 255, .06); }
-.rsvp-button.is-selected { border-color: rgba(168, 85, 247, .6); background: rgba(168, 85, 247, .2); color: #ede9fe; }
-.rsvp-button:focus-visible, .overview-row:focus-visible { outline: 2px solid #c4b5fd; outline-offset: 2px; }
+.rsvp-button.is-selected { border-color: rgb(var(--pal-a855f7) / .6); background: rgb(var(--pal-a855f7) / .2); color: rgb(var(--pal-ede9fe)); }
+.rsvp-button:focus-visible, .overview-row:focus-visible { outline: 2px solid rgb(var(--pal-c4b5fd)); outline-offset: 2px; }
 
 .convert-dialog-list { margin: 12px 0; padding-left: 18px; color: #d4d4d8; font-size: 12px; line-height: 1.6; }
 .convert-dialog-list li { margin: 2px 0; }
