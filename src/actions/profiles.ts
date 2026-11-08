@@ -221,21 +221,6 @@ export async function setMyProfileColor(color: string) {
   return actionResult(() => setMyProfileColorImpl(color));
 }
 
-async function getPublicProfileImpl(profileId: string) {
-  assertUuid(profileId, 'profile ID');
-  const { supabase } = await requireUser();
-  const { data, error } = await supabase
-    .from('public_profiles')
-    .select('id, username, display_name, avatar_url, bio, is_private, created_at, updated_at')
-    .eq('id', profileId)
-    .maybeSingle();
-  if (error) throw new Error('Unable to load this profile.');
-  return data;
-}
-export async function getPublicProfile(profileId: string) {
-  return actionResult(() => getPublicProfileImpl(profileId));
-}
-
 async function getPublicProfileByUsernameImpl(username: string) {
   const normalized = username.trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9_.]{2,29}$/.test(normalized)) {
@@ -254,28 +239,6 @@ export async function getPublicProfileByUsername(username: string) {
   return actionResult(() => getPublicProfileByUsernameImpl(username));
 }
 
-async function getProfileFollowersImpl(profileId: string) {
-  assertUuid(profileId, 'profile ID');
-  const { supabase } = await requireUser();
-  const { data, error } = await supabase.rpc('get_profile_followers', { p_profile_id: profileId });
-  if (error) throw new Error('Unable to load followers.');
-  return data;
-}
-export async function getProfileFollowers(profileId: string) {
-  return actionResult(() => getProfileFollowersImpl(profileId));
-}
-
-async function getProfileFollowingImpl(profileId: string) {
-  assertUuid(profileId, 'profile ID');
-  const { supabase } = await requireUser();
-  const { data, error } = await supabase.rpc('get_profile_following', { p_profile_id: profileId });
-  if (error) throw new Error('Unable to load following.');
-  return data;
-}
-export async function getProfileFollowing(profileId: string) {
-  return actionResult(() => getProfileFollowingImpl(profileId));
-}
-
 async function requestFollowImpl(targetId: string) {
   assertUuid(targetId, 'profile ID');
   const { supabase } = await requireUser();
@@ -285,20 +248,6 @@ async function requestFollowImpl(targetId: string) {
 }
 export async function requestFollow(targetId: string) {
   return actionResult(() => requestFollowImpl(targetId));
-}
-
-async function respondToFollowRequestImpl(followId: string, decision: 'accepted' | 'rejected') {
-  assertUuid(followId, 'follow request ID');
-  const { supabase } = await requireUser();
-  const { data, error } = await supabase.rpc('respond_to_follow_request', {
-    p_follow_id: followId,
-    p_decision: decision,
-  });
-  if (error) throw new Error('Unable to update this follow request.');
-  return data;
-}
-export async function respondToFollowRequest(followId: string, decision: 'accepted' | 'rejected') {
-  return actionResult(() => respondToFollowRequestImpl(followId, decision));
 }
 
 async function cancelFollowRequestImpl(targetId: string) {
@@ -321,17 +270,6 @@ async function unfollowUserImpl(targetId: string) {
 }
 export async function unfollowUser(targetId: string) {
   return actionResult(() => unfollowUserImpl(targetId));
-}
-
-async function removeFollowerImpl(followerId: string) {
-  assertUuid(followerId, 'follower ID');
-  const { supabase } = await requireUser();
-  const { data, error } = await supabase.rpc('remove_follower', { p_follower_id: followerId });
-  if (error) throw new Error('Unable to remove this follower.');
-  return data;
-}
-export async function removeFollower(followerId: string) {
-  return actionResult(() => removeFollowerImpl(followerId));
 }
 
 async function requestFriendImpl(recipientId: string) {
@@ -381,31 +319,6 @@ export async function removeFriend(otherUserId: string) {
   return actionResult(() => removeFriendImpl(otherUserId));
 }
 
-async function getMyRelationshipStateImpl(otherUserId: string) {
-  assertUuid(otherUserId, 'profile ID');
-  const { supabase, user } = await requireUser();
-  const [outgoingFollow, incomingFollow, friend, outgoingFriendRequest, incomingFriendRequest] = await Promise.all([
-    supabase.from('follows').select('id, status').eq('follower_id', user.id).eq('following_id', otherUserId).maybeSingle(),
-    supabase.from('follows').select('id, status').eq('follower_id', otherUserId).eq('following_id', user.id).maybeSingle(),
-    supabase.from('friendships').select('user_one, user_two').or(`and(user_one.eq.${user.id},user_two.eq.${otherUserId}),and(user_one.eq.${otherUserId},user_two.eq.${user.id})`).maybeSingle(),
-    supabase.from('friend_requests').select('id, status').eq('requester_id', user.id).eq('recipient_id', otherUserId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
-    supabase.from('friend_requests').select('id, status').eq('requester_id', otherUserId).eq('recipient_id', user.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
-  ]);
-  if ([outgoingFollow, incomingFollow, friend, outgoingFriendRequest, incomingFriendRequest].some((result) => result.error)) {
-    throw new Error('Unable to load relationship status.');
-  }
-  return {
-    outgoingFollow: outgoingFollow.data,
-    incomingFollow: incomingFollow.data,
-    friendship: friend.data,
-    outgoingFriendRequest: outgoingFriendRequest.data,
-    incomingFriendRequest: incomingFriendRequest.data,
-  };
-}
-export async function getMyRelationshipState(otherUserId: string) {
-  return actionResult(() => getMyRelationshipStateImpl(otherUserId));
-}
-
 async function getMyFriendsImpl() {
   const { supabase, user } = await requireUser();
   const { data: friendships, error } = await supabase
@@ -436,50 +349,6 @@ async function getMyFriendsImpl() {
 }
 export async function getMyFriends() {
   return actionResult(() => getMyFriendsImpl());
-}
-
-async function getMyFriendRequestsImpl() {
-  const { supabase, user } = await requireUser();
-  const { data: requests, error } = await supabase
-    .from('friend_requests')
-    .select('id, requester_id, recipient_id, status, created_at')
-    .or(`requester_id.eq.${user.id},recipient_id.eq.${user.id}`)
-    .order('created_at', { ascending: false });
-  if (error) throw new Error('Unable to load friend requests.');
-
-  const otherIds = Array.from(new Set((requests ?? []).map((request) =>
-    request.requester_id === user.id ? request.recipient_id : request.requester_id,
-  )));
-  const { data: profiles, error: profileError } = otherIds.length === 0
-    ? { data: [], error: null }
-    : await supabase.from('public_profiles').select('id, username, display_name, avatar_url, bio, is_private').in('id', otherIds);
-  if (profileError) throw new Error('Unable to load friend requests.');
-
-  const byId = new Map((profiles ?? []).map((profile) => [profile.id, { user_id: profile.id, ...profile }]));
-  return (requests ?? []).map((request) => ({
-    ...request,
-    direction: request.recipient_id === user.id ? 'incoming' as const : 'outgoing' as const,
-    profile: byId.get(request.requester_id === user.id ? request.recipient_id : request.requester_id) ?? null,
-  }));
-}
-export async function getMyFriendRequests() {
-  return actionResult(() => getMyFriendRequestsImpl());
-}
-
-async function getPostsForProfileImpl(authorId: string) {
-  assertUuid(authorId, 'author ID');
-  const { supabase } = await requireUser();
-  const { data, error } = await supabase
-    .from('posts')
-    .select('id, author_id, content, media_url, visibility, created_at, updated_at')
-    .eq('author_id', authorId)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false });
-  if (error) throw new Error('Unable to load posts.');
-  return data;
-}
-export async function getPostsForProfile(authorId: string) {
-  return actionResult(() => getPostsForProfileImpl(authorId));
 }
 
 async function createPostImpl(content: string, visibility: PostVisibility = 'profile', mediaUrl?: string | null) {

@@ -59,17 +59,6 @@ export async function createRoomInvite(roomId: string, options: { expiresAt?: st
   return actionResult(() => createRoomInviteImpl(roomId, options));
 }
 
-async function validateRoomInviteImpl(token: string) {
-  const normalizedToken = normalizeInviteToken(token);
-  const supabase = await authenticatedClient();
-  const { data, error } = await supabase.rpc('get_room_invite', { p_token: normalizedToken });
-  if (error) throw new Error(error.message);
-  return data?.[0] ?? null;
-}
-export async function validateRoomInvite(token: string) {
-  return actionResult(() => validateRoomInviteImpl(token));
-}
-
 // Room name and deletion policy for a valid invite, shown before joining
 // (master plan §9). Same validity rules as get_room_invite.
 async function previewRoomInviteImpl(token: string) {
@@ -352,28 +341,6 @@ async function updateRoomSpecificProfileImpl(roomId: string, input: { displayNam
 }
 export async function updateRoomSpecificProfile(roomId: string, input: { displayName?: string | null; avatarUrl?: string | null; bio?: string | null }) {
   return actionResult(() => updateRoomSpecificProfileImpl(roomId, input));
-}
-
-async function getRoomSpecificProfileImpl(roomId: string, userId?: string) {
-  assertUuid(roomId, 'room ID');
-  if (userId !== undefined) assertUuid(userId, 'user ID');
-  const supabase = await authenticatedClient();
-  const { data, error } = await supabase.rpc('get_room_member_profile', {
-    p_room_id: roomId,
-    p_user_id: userId ?? null,
-  });
-  if (error) throw new Error(error.message);
-  return data?.[0] ?? null;
-}
-export async function getRoomSpecificProfile(roomId: string, userId?: string) {
-  return actionResult(() => getRoomSpecificProfileImpl(roomId, userId));
-}
-
-async function getMyRoomSpecificProfileImpl(roomId: string) {
-  return getRoomSpecificProfileImpl(roomId);
-}
-export async function getMyRoomSpecificProfile(roomId: string) {
-  return actionResult(() => getMyRoomSpecificProfileImpl(roomId));
 }
 
 async function createRoomAnnouncementImpl(roomId: string, body: string, isPinned = false) {

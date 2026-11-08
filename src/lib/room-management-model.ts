@@ -194,9 +194,6 @@ export const TRUST_HINTS: Record<TrustLevel, string> = {
   trusted: 'Active for a week or more with many contributions.',
   steward: 'Room owner or admin.',
 };
-export function isTrustLevel(value: unknown): value is TrustLevel {
-  return value === 'new' || value === 'member' || value === 'trusted' || value === 'steward';
-}
 
 // --- Events / RSVP -------------------------------------------------------------------
 export type RsvpResponse = 'going' | 'maybe' | 'declined';

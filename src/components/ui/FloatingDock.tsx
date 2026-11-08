@@ -120,5 +120,4 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
   );
 }
 
-export { defaultItems as omniDockItems };
 export default FloatingDock;
