@@ -10,6 +10,7 @@ import type { CurrentAccount } from '@/lib/current-account';
 import { listMyRoomOverview } from '@/lib/management-data';
 import type { OverviewRoom } from '@/lib/room-management-model';
 import { useFriendsListening } from '@/hooks/useFriendsListening';
+import { useCloseOnBack } from '@/hooks/useCloseOnBack';
 import { createClient } from '@/utils/supabase/client';
 import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
@@ -44,6 +45,7 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
   const router = useRouter();
   const supabase = createClient();
   const shortName = account.displayName.split(/\s+/)[0] || account.displayName;
+  useCloseOnBack(isProfileOpen, () => setIsProfileOpen(false));
 
   useEffect(() => {
     let active = true;

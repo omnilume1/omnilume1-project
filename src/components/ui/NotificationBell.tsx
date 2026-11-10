@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import { useNotificationCenter } from '@/hooks/useNotificationCenter';
+import { useCloseOnBack } from '@/hooks/useCloseOnBack';
 import {
   bellAccessibleLabel,
   itemStaggerDelay,
@@ -47,6 +48,7 @@ export default function NotificationBell({ roomId }: { roomId?: string } = {}) {
     closeTimer.current = setTimeout(() => setPhase('closed'), motion.exitMs);
     if (returnFocus) buttonRef.current?.focus();
   }, [motion.exitMs]);
+  useCloseOnBack(isOpen, () => close(true));
 
   const open = useCallback(() => {
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }

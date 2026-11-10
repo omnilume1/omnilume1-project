@@ -325,7 +325,7 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
     if (screenBlocked) { setError('A room manager stopped your screen sharing.'); return; }
     const unavailable = voiceUnavailable(capabilities.chat);
     if (unavailable) { setError(unavailable); return; }
-    if (!navigator.mediaDevices?.getDisplayMedia) { setError('This browser does not support screen sharing.'); return; }
+    if (!navigator.mediaDevices?.getDisplayMedia) { setError('Screen sharing works from a computer.'); return; }
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getDisplayMedia(TAB_SHARE_CONSTRAINTS);

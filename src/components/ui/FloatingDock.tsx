@@ -49,6 +49,13 @@ function playDockClick() {
   }
 }
 
+// On a phone, opening the AudioContext inside the tap held the tap for 250 ms and more
+// (measured at 4x CPU throttle), so there the tick plays after the tap has painted.
+function onDockTap() {
+  if (window.matchMedia('(pointer: coarse)').matches) requestAnimationFrame(() => window.setTimeout(playDockClick, 0));
+  else playDockClick();
+}
+
 function isActive(item: FloatingDockItem, pathname: string) {
   if (item.href.includes('#')) return false;
   if (item.href === '/home') return pathname === '/home';
@@ -101,7 +108,7 @@ export function FloatingDock({ items = defaultItems }: { items?: FloatingDockIte
               href={item.href}
               aria-label={item.title}
               aria-current={active ? 'page' : undefined}
-              onClick={playDockClick}
+              onClick={onDockTap}
               className={`dock-item ${active ? 'is-active' : ''} ${item.emphasis ? 'is-emphasis' : ''}`}
             >
               <OmniIcon name={item.icon} size={20} />

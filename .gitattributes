@@ -1,0 +1,3 @@
+# The generated Android project (Bubblewrap) is kept byte-for-byte: Bubblewrap checks
+# twa-manifest.json by checksum, and gradlew must keep its LF line endings.
+android/** -text

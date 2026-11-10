@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { MAX_MEMBER_VOLUME, useVoiceRoom, VideoStream } from '@/components/room/VoiceRoom';
+import { useCanShareScreen } from '@/components/room/TabShareStage';
 import { useAnnounce, useMemberNames, useRoomCapabilities, formatDuration } from '@/lib/collab-hooks';
 import {
   cancelRecording, deleteRecording, getTranscript, lowerHand, raiseHand, recordingUrl, requestRecording,
@@ -17,6 +18,7 @@ export default function VoicePanel() {
   const capabilities = useRoomCapabilities(voice.roomId);
   const names = useMemberNames(voice.roomId);
   const announce = useAnnounce();
+  const canShareScreen = useCanShareScreen();
   const name = (id: string) => (id === currentUserId ? 'You' : names.get(id) ?? 'Member');
 
   const moderate = async (userId: string, audioMuted: boolean, screenBlocked: boolean) => {
@@ -48,7 +50,9 @@ export default function VoicePanel() {
               : <button type="button" className="voice-button" onClick={() => void voice.enableMic()} disabled={voice.joining}>Turn on mic</button>}
             {voice.sharingScreen
               ? <button type="button" className="voice-button is-live" onClick={voice.stopScreen}>Stop sharing</button>
-              : <button type="button" className="voice-button" onClick={() => void voice.startScreen()}>Share screen</button>}
+              : canShareScreen
+                ? <button type="button" className="voice-button" onClick={() => void voice.startScreen()}>Share screen</button>
+                : <span className="collab-meta">Screen sharing works from a computer</span>}
             <button type="button" className="voice-button is-danger" onClick={voice.leave}>Leave voice</button>
           </>
         )}

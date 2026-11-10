@@ -1066,3 +1066,58 @@ button.site-link { font-family: inherit; line-height: inherit; cursor: pointer; 
 .profile-color-picker[aria-busy="true"] .profile-color-swatch { cursor: progress; }
 .profile-color-note { margin: 10px 0 0; color: var(--omni-muted); font-size: 12px; }
 .profile-color-note a { color: var(--omni-accent); text-decoration: underline; text-underline-offset: 2px; }
+
+/* Touch devices: phones, tablets and the Android app. Every rule below sits behind
+   (hover: none) and (pointer: coarse), which a desktop pointer never matches, so desktop is
+   untouched. `body` in front lifts each rule over the base rule whatever order the files load in. */
+@media (hover: none) and (pointer: coarse) {
+  /* Blur is the main GPU cost on Android (about 85% of the compositor time while scrolling Home).
+     Cards in the page flow scroll over the still ambient light, so blurring it shows nothing new
+     but runs again on every frame: they keep the tint and drop the blur. Glass that floats over
+     moving content (dock, top-bar buttons, popovers, toasts, the room rail) keeps its blur.
+     Only the sections measured to look the same without it are listed (under 0.2% of pixels move,
+     by at most 5 of 255). Create is left out: its cards sit on the blueprint grid, which would show through. */
+  html:is([data-section="home"], [data-section="search"], [data-section="rooms"], [data-section="messages"], [data-section="profile"], [data-section="settings"]) .omni-main-content { --omni-glass-filter: saturate(150%); }
+  body .omni-main-content :is(.messages-list, .messages-pane) { backdrop-filter: saturate(170%); }
+  /* Frosted top bar, as in a native app: it stays at the top, clear while the page is at rest,
+     and whatever scrolls up under it is frosted (blur under the page colour, the same glass as
+     the cards). The frost fades in over the first 56px of scroll, on the compositor, and its
+     foot fades out instead of ending in a line. Browsers without scroll-linked animation show
+     the frost all the time. */
+  body .internal-topbar { position: sticky; top: 0; z-index: 20; min-height: 64px; align-items: center; padding: calc(10px + env(safe-area-inset-top)) 0 10px; }
+  body .internal-topbar:has(.notification-popover) { z-index: 90; }
+  body .internal-topbar::before { content: ""; position: absolute; z-index: -1; top: 0; right: calc(50% - 50vw); bottom: -18px; left: calc(50% - 50vw); background: var(--omni-frost); backdrop-filter: blur(24px) saturate(150%); -webkit-mask-image: linear-gradient(#000 calc(100% - 30px), transparent); mask-image: linear-gradient(#000 calc(100% - 30px), transparent); pointer-events: none; opacity: 0; animation: omni-frost-in linear both; animation-timeline: scroll(root block); animation-range: 0 56px; }
+
+  /* Motion, as in a native app: a page rises into place when you switch section (never on the
+     first load: AppThemeSync sets data-navigated after the first move), and controls give under the finger. */
+  html[data-navigated] .omni-main-content { animation: omni-page-in 320ms var(--omni-ease) both; }
+  body :is(.room-rail-btn, .fchip, .msg-tab, .chat-row, .overview-row) { transition-property: all; }
+  body :is(.room-rail-btn, .fchip, .msg-tab, .avatar-small):active { transform: scale(.96); }
+  body :is(.chat-row, .overview-row):active { transform: scale(.985); }
+
+  /* Glass inside glass: the outer surface already frosts what is behind it. */
+  body :is(.internal-topbar, .glass, .glass-card, .glass-panel, .glass-card-ambient, .glass-strong, .desk-win, .messages-list, .messages-pane, .notification-popover, .room-layout-popover, .watch-panel, .floating-dock, .voice-dock) :is(.glass, .glass-card, .glass-panel, .glass-card-ambient, .glass-strong, .icon-button, .omni-button-ghost, .room-action, .chat-menu, .now-playing-bar, .personal-message-toast, .watch-panel) { backdrop-filter: none; }
+
+  /* Taps: no double-tap wait and no grey flash on controls (the focus ring stays). */
+  a, button, input, select, textarea, label, summary, [role="button"], [role="tab"], [role="menuitem"] { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+
+  /* Tap targets of at least 44px. Shared controls grow a little; small ones keep their size
+     and get a larger invisible tap area instead. */
+  body .icon-button, body .avatar-small, body .room-rail-btn { width: 44px; height: 44px; }
+  body .omni-button, body .omni-input, body .omni-select, body .omni-row-toggle, body .msg-tab { min-height: 44px; }
+  body .room-action, body .fchip { height: 44px; }
+  body .explore-save { width: 32px; height: 32px; }
+  .omni-logo, .message-more, .desk-dot { position: relative; }
+  .omni-logo::after, .explore-save::after, .message-more::after { content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
+  .desk-dot::after { content: ""; position: absolute; inset: -14px -4px; }
+
+  /* A chat or list that reaches its end must not drag the page behind it. */
+  .chat-scroller, .messages-list-scroll, .room-chat-mentions { overscroll-behavior: contain; }
+
+  /* Loading placeholders: fade (opacity only) instead of sliding a gradient, which repaints every frame. */
+  body :is(.notification-skeleton, .room-dashboard-skeleton, .watch-panel-skeleton, .collab-skeleton) { animation: voice-pulse 1.4s ease-in-out infinite; }
+}
+/* Phone room: the windows are stacked in the page and scroll with it (see above). */
+@media (max-width: 767px) and (hover: none) and (pointer: coarse) {
+  body .room-desk .desk-win { backdrop-filter: saturate(170%); }
+}

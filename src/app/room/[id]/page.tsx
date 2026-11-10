@@ -50,6 +50,7 @@ import RoomPulseBar from '@/components/room/RoomPulseBar';
 import RoomConversionDialog, { type ConversionResult } from '@/components/room/RoomConversionDialog';
 import { BookmarkToggle } from '@/components/room/BookmarkButton';
 import { getRoomGroup } from '@/lib/management-data';
+import { useCloseOnBack } from '@/hooks/useCloseOnBack';
 import {
   DEFAULT_ROOM_APPEARANCE,
   ROOM_LAYOUTS,
@@ -339,6 +340,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     write(layoutPreferenceKey, personalLayout);
     write(themePreferenceKey, personalTheme);
   }, [layoutPreferenceKey, personalLayout, personalTheme, themePreferenceKey]);
+  useCloseOnBack(showLayoutMenu, () => setShowLayoutMenu(false));
   useEffect(() => {
     if (!showLayoutMenu) return;
     const onPointerDown = (event: PointerEvent) => {

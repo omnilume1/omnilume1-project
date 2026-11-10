@@ -8,6 +8,7 @@ import { MusicLibraryProvider, useMusicLibrary } from '@/hooks/useMusicLibrary';
 import { useMusicPlayer } from '@/hooks/useMusicPlayer';
 import { coverThemeCss } from '@/lib/app-theme';
 import { musicShortcutFor } from '@/lib/music-shortcuts';
+import { useCloseOnBack } from '@/hooks/useCloseOnBack';
 import { MusicIcon, type MusicIconName } from './MusicIcon';
 import { FixTagsDialog, ShareDialog } from './MusicLibraryParts';
 import { CoverRoom, FullScreenPlayer, PlayerPill, SidePanel, type SidePanelKind } from './MusicPlayerChrome';
@@ -71,6 +72,8 @@ function Shell({ fontClass, children }: { fontClass: string; children: ReactNode
   const [panelOpen, setPanelOpen] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  useCloseOnBack(fullScreen, () => setFullScreen(false));
+  useCloseOnBack(drawerOpen && !fullScreen, () => setDrawerOpen(false));
 
   useEffect(() => {
     playerRef.current = player;
