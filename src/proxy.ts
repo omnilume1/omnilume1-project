@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getSafeRedirectPath, isAuthRequiredPath, isProfileComplete, PROFILE_SETUP_PATH } from '@/lib/auth';
+import { REF_COOKIE, REF_COOKIE_MAX_AGE_SECONDS, refToStore } from '@/lib/product-events';
 
 function redirectWithSessionCookies(url: URL, sessionResponse: NextResponse) {
   const response = NextResponse.redirect(url);
@@ -37,6 +38,18 @@ export async function proxy(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
   const requiresAuth = isAuthRequiredPath(pathname);
+
+  // First-touch attribution (phase 02). Readable by the browser helper, so not
+  // httpOnly; it holds only a short public tag such as `campus-iitb`.
+  const ref = refToStore(pathname, request.nextUrl.searchParams, request.cookies.get(REF_COOKIE)?.value);
+  if (ref) {
+    supabaseResponse.cookies.set(REF_COOKIE, ref, {
+      maxAge: REF_COOKIE_MAX_AGE_SECONDS,
+      path: '/',
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+    });
+  }
 
   if (requiresAuth && !user) {
     const loginUrl = request.nextUrl.clone();

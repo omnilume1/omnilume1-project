@@ -18,6 +18,8 @@ import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { useRoomPanelResize } from '@/components/room/useRoomPanelResize';
 import type { TimerState } from '@/hooks/useRoomSync';
 import { ROOM_TIMER_SUBJECT_MAX_CHARS } from '@/lib/room-broadcast-contract';
+import { logProductEventFromBrowser } from '@/lib/product-events';
+import { createClient } from '@/utils/supabase/client';
 import {
   FOCUS_LOCK_EVENT,
   activateFocusLock,
@@ -313,6 +315,7 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
       completionSessionRef.current = timerState.sessionId;
       const elapsedSeconds = getElapsedSeconds(timerState);
       void persistStudyProgress(timerState, elapsedSeconds);
+      void logProductEventFromBrowser(createClient(), 'timer_completed', { roomId, meta: { minutes: Math.max(1, Math.round(elapsedSeconds / 60)) } });
       broadcastEvent('timer_pause', {
         remaining: 0,
         duration: timerState.duration,
@@ -326,7 +329,7 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
     }, 250);
 
     return () => window.clearInterval(interval);
-  }, [broadcastEvent, currentUserId, persistStudyProgress, timerState]);
+  }, [broadcastEvent, currentUserId, persistStudyProgress, roomId, timerState]);
 
   useEffect(() => {
     if (!focusLockActive || !focusLock || focusLockRemaining !== 0) return;
@@ -382,6 +385,7 @@ export default function StudyStage({ roomId, focusRoomPath, timerNavigationReque
       segmentStartedAt: Date.now(),
       elapsedSeconds,
     });
+    if (!isResume) void logProductEventFromBrowser(createClient(), 'timer_started', { roomId, meta: { minutes: Math.max(1, Math.round(duration / 60)) } });
   };
 
   const pauseTimer = async () => {

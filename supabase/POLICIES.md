@@ -35,10 +35,31 @@ Temporary-room lifecycle:
 4. Only an owner/admin may approve conversion.
 5. Permanent conversion clears temporary expiry fields and remains available
    indefinitely.
+6. A pending recovery request holds an expired room only for 7 days after it
+   was filed. Unanswered after that, it lapses: the room is `destroyed`, the
+   daily cleanup deletes it, and its requests cascade. Lapsed requests are
+   hidden from the review queue and refused by `review_recovery_request`
+   (`20261110070802_recovery_request_lapse.sql`, phase 01b).
 
 Identity and scope protections prevent room-membership identity changes and
 message sender/room/chat reassignment. The cleanup endpoint is separately
 protected by its server-only secret and service-role configuration.
+
+## Product metrics and live status (hostel roadmap phases 02–03)
+
+- `product_events` (phase 02, `20261110071321_phase02_product_events.sql`):
+  anonymous counts only, with no user ids, IPs, message text or titles. RLS is on with no
+  policies and every table privilege is revoked from `anon` and
+  `authenticated`, so no client can read or write it directly. The only
+  client write path is `log_product_event` (`authenticated` only), which
+  validates the event, `ref` and meta, and requires approved membership for a
+  room-scoped event. `room_tick` is not accepted from clients.
+- `night_date(ts)`: a night runs 06:00–06:00 Asia/Kolkata.
+- `room_live_status` (phase 03, `20261110071805_phase03_room_live_status.sql`):
+  per-room counts and door only. RLS is on with no policies and privileges are revoked. Written only by
+  `room_heartbeat` and read only through `get_my_rooms_live`; both are
+  `authenticated` only and approved-member only. The heartbeat writes at most
+  one `room_tick` per room per 10 minutes, and only while 2+ people are in.
 
 ## Rebuild and deployment notes
 
@@ -50,3 +71,12 @@ protected by its server-only secret and service-role configuration.
 - The `room_messages` table is intentionally retained for database
   compatibility; removing its application writer is separate from dropping
   the table.
+
+## Auth settings
+
+- Leaked-password protection (HaveIBeenPwned) is **off**: the project is on
+  the Free plan and the setting needs Pro or above (checked 10 Nov 2026).
+  After upgrading, turn it on at Dashboard → Authentication → Attack
+  Protection → "Prevent use of leaked passwords".
+- Anonymous sign-ins are available on the Free plan. The app never calls
+  `signInAnonymously` and there are 0 anonymous users.

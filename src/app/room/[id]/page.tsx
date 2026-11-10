@@ -20,6 +20,7 @@ import {
   type PermanentRoomRequest,
   type RecoveryRequestStatus,
 } from '@/actions/recovery';
+import { recoveryRequestLapsesAt } from '@/lib/room-deletion-policy';
 import RoomRealtimeProvider from '@/components/room/RoomRealtimeProvider';
 import { VoiceRoomProvider } from '@/components/room/VoiceRoom';
 import VoicePanel, { VoiceDock } from '@/components/room/VoicePanel';
@@ -127,6 +128,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [timeLeft, setTimeLeft] = useState<string>('');
   const [isExpired, setIsExpired] = useState(false);
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryRequestStatus | 'none'>('none');
+  const [recoveryRequestedAt, setRecoveryRequestedAt] = useState<string | null>(null);
   const [recoverySubmitting, setRecoverySubmitting] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [permanentRequests, setPermanentRequests] = useState<PermanentRoomRequest[]>([]);
@@ -226,6 +228,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
       if (cancelled) return;
       if (result.success) {
         setRecoveryStatus(result.request?.status ?? 'none');
+        setRecoveryRequestedAt(result.request?.created_at ?? null);
         setRecoveryError(null);
       } else {
         setRecoveryStatus('none');
@@ -256,6 +259,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     const result = await requestRoomRecovery(roomData.id);
     if (result.success) {
       setRecoveryStatus(result.request?.status ?? 'pending');
+      setRecoveryRequestedAt(result.request?.created_at ?? null);
     } else {
       setRecoveryError(result.error ?? 'Unable to submit recovery request.');
     }
@@ -491,7 +495,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     // Each member sees only the status of their own request; site owners
     // review requests at /admin/recovery.
     const recoveryCopy = recoveryStatus === 'pending'
-      ? 'Your recovery request is waiting for a site owner to review it.'
+      ? `Your recovery request is waiting for a site owner to review it.${recoveryRequestedAt ? ` If it isn't answered by ${recoveryRequestLapsesAt(recoveryRequestedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}, the room and all of its chats and files are permanently deleted.` : ''}`
       : recoveryStatus === 'approved'
         ? 'Your recovery request was approved. Reload the page to enter the room.'
         : recoveryStatus === 'rejected'
