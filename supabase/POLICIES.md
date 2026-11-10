@@ -61,6 +61,30 @@ protected by its server-only secret and service-role configuration.
   `authenticated` only and approved-member only. The heartbeat writes at most
   one `room_tick` per room per 10 minutes, and only while 2+ people are in.
 
+## Door key, nameplate and public invite card (hostel roadmap phases 04–05)
+
+- `rooms.nameplate` (phase 04, `20261110103628_phase04_door_key_and_nameplate.sql`):
+  1–12 of `[A-Za-z0-9 -]`, backfilled from a hash of the room id and filled
+  by a BEFORE INSERT trigger. Renamed only through `set_room_nameplate`
+  (`manage_settings` holders).
+- `room_invites.is_door_key`: at most one live door key per room (partial
+  unique index). `get_room_door_link` returns it, creating it on first share;
+  any approved non-guest member may call it (decision D1), and guests only if
+  they hold `manage_invites`. `change_room_lock` (`manage_invites` only)
+  revokes the key, so the old link stops joining, and mints a new one. All
+  three functions are `authenticated` only; `room_invites` still has no client
+  policies, so tokens are never readable directly.
+- `get_public_invite_card` (phase 05, `20261110105146_phase05_public_invite_card.sql`)
+  is the **only** function `anon` can call from these phases. For a valid
+  invite to a room that still exists it returns the room name, nameplate,
+  member count, fresh live counts and door, visitor-pass expiry and a running
+  timer's end. It never returns ids, names, avatars, the timer subject or
+  media titles. It logs `join_viewed` only when `p_log` is true.
+- `invite_card_hits`: per-token rate-limit buckets (SHA-256 of the token, never
+  the token). RLS on, no policies, privileges revoked. 60 reads per token per
+  10 minutes; the 61st raises `PT429` (HTTP 429). Buckets older than a day are
+  deleted as the function runs.
+
 ## Rebuild and deployment notes
 
 - Do not run only the historical base object dump when rebuilding a project.
