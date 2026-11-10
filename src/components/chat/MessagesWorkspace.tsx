@@ -19,6 +19,7 @@ import {
 } from '@/lib/encryption';
 import { saveUserPublicKey, getUserPublicKey, getOrCreatePrivateChat } from '@/actions/chat';
 import { unreadBadge } from '@/lib/room-chat-model';
+import { parseMessagesDeepLink, resolveMessagesDeepLink, type MessagesDeepLink } from '@/lib/messages-deep-link';
 import {
   getMyMessageInbox,
   sendMessageRequest,
@@ -401,6 +402,27 @@ export default function MessagesWorkspace() {
     }
     void beginChat({ ...contact, chat_id: notification.chatId });
   }, [beginChat, dismissToast, inbox]);
+
+  // Deep link (a notification tap): /messages?chat=<id> or ?group=<id> opens that thread once.
+  // The id is only looked up in this member's own inbox, so a thread they cannot see is ignored.
+  const deepLinkRef = useRef<MessagesDeepLink | null | undefined>(undefined);
+  useEffect(() => {
+    if (!inbox) return;
+    if (deepLinkRef.current === undefined) deepLinkRef.current = parseMessagesDeepLink(window.location.search);
+    const link = deepLinkRef.current;
+    if (!link) return;
+    const target = resolveMessagesDeepLink(link, inbox);
+    if (!target) { deepLinkRef.current = null; return; }
+    if (target.kind === 'group') {
+      deepLinkRef.current = null;
+      queueMicrotask(() => { beginChatRequestRef.current += 1; setTab('groups'); setActive(null); setActiveGroup(target.group); });
+      return;
+    }
+    // The chat opens as soon as this browser's secure messaging key is ready.
+    if (!myPrivateKey || !currentUserId) return;
+    deepLinkRef.current = null;
+    queueMicrotask(() => { setTab(target.tab); void beginChat(target.contact); });
+  }, [inbox, myPrivateKey, currentUserId, beginChat]);
 
   const handleAccept = async (contact: InboxGeneralContact) => {
     const request = contact.request;

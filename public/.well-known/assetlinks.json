@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.omnilume.app",
+      "sha256_cert_fingerprints": [
+        "B0:8A:DC:2E:E6:35:60:66:62:AE:B4:0D:08:A4:D2:9D:18:71:D9:64:9C:0E:32:98:AD:4A:27:ED:25:0C:B9:90"
+      ]
+    }
+  }
+]

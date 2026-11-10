@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { HOME_ROWS_KEY, homeRowsHold, type HomeRowsKind } from '@/lib/app-shell';
 import type { FriendListening } from '@/hooks/useFriendsListening';
 import { useMusicPlayer } from '@/hooks/useMusicPlayer';
 import { listMyUpcomingEvents, setEventRsvp, type UpcomingEvent } from '@/lib/management-data';
@@ -31,6 +32,26 @@ export function Avatar({ name, src, size = 34 }: { name: string; src?: string | 
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
+// Phones stack every tile in one column, so a list that arrives taller than its loading
+// placeholder pushes every tile below it (the main layout shift on Home). The row counts from
+// the last visit on this device size the placeholder: a script in <head> turns them into CSS
+// variables before the first paint (app-shell.ts), and home.module.css uses them on touch only.
+function useRememberRows(kind: HomeRowsKind, rows: number | null) {
+  useEffect(() => {
+    if (rows === null) return;
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem(HOME_ROWS_KEY) ?? '{}');
+      localStorage.setItem(HOME_ROWS_KEY, JSON.stringify({ ...(stored && typeof stored === 'object' ? stored : {}), [kind]: rows }));
+      const hold = homeRowsHold(rows);
+      if (hold) document.documentElement.style.setProperty(`--home-${kind}-hold`, hold);
+    } catch { /* private mode: the placeholder stays small */ }
+  }, [kind, rows]);
+}
+
+function ListSkeleton({ kind }: { kind: HomeRowsKind }) {
+  return <div className={`room-dashboard-skeleton ${kind === 'friends' ? styles.holdFriends : styles.holdRooms}`} aria-busy="true" />;
+}
+
 /** The room to go back to: the one with the newest activity. */
 export function lastRoom(rooms: OverviewRoom[]) {
   return rooms.slice().sort((left, right) => (right.last_activity_at ?? '').localeCompare(left.last_activity_at ?? ''))[0] ?? null;
@@ -50,7 +71,7 @@ export function ContinueTile({ rooms }: { rooms: Loaded<OverviewRoom[]> }) {
             {room.unread_count > 0 && <><span className={styles.bar} aria-hidden="true" /><span>{room.unread_count >= 100 ? '99+' : room.unread_count} unread</span></>}
             {room.last_activity_at && <><span className={styles.bar} aria-hidden="true" /><span className={styles.metaItem}><OmniIcon name="clock" size={15} /><span className="mono">active {relativeTime(room.last_activity_at)}</span></span></>}
           </p>
-        ) : !loading && <p className={styles.meta}>Watch, study or listen together. Make a room or find one to join.</p>}
+        ) : loading ? <p className={`${styles.meta} ${styles.metaHold}`} aria-hidden="true">&nbsp;</p> : <p className={styles.meta}>Watch, study or listen together. Make a room or find one to join.</p>}
         <div className={styles.continueActions}>
           {room
             ? <Link href={`/room/${room.room_id}`} className="omni-button omni-button-primary">Rejoin room <OmniIcon name="arrow" size={16} /></Link>
@@ -72,9 +93,10 @@ export function ContinueTile({ rooms }: { rooms: Loaded<OverviewRoom[]> }) {
 export function FriendsTile({ friends, listening, loading }: { friends: Friend[]; listening: FriendListening[]; loading: boolean }) {
   const songs = new Map(listening.map((item) => [item.user_id, item]));
   const rows = friends.slice().sort((left, right) => Number(songs.has(right.user_id)) - Number(songs.has(left.user_id))).slice(0, 5);
+  useRememberRows('friends', loading ? null : rows.length);
   return (
     <Tile title="Friends" className={styles.tileFriends} index={1} aside={<small className="mono">{loading ? '' : listening.length ? `${listening.length} of ${friends.length} listening` : friends.length}</small>}>
-      {loading ? <div className="room-dashboard-skeleton" aria-busy="true" /> : rows.length === 0 ? <p className={styles.empty}>No friends yet. Connect from a profile when you are ready.</p> : (
+      {loading ? <ListSkeleton kind="friends" /> : rows.length === 0 ? <p className={styles.empty}>No friends yet. Connect from a profile when you are ready.</p> : (
         <div className={styles.rows}>
           {rows.map((friend) => {
             const name = friend.display_name || friend.username || 'OmniLume member';
@@ -185,9 +207,10 @@ export function NowPlayingTile({ listening }: { listening: FriendListening[] }) 
 }
 
 export function ExploreTile({ rooms, loading }: { rooms: PublicRoom[]; loading: boolean }) {
+  useRememberRows('rooms', loading ? null : Math.min(rooms.length, 3));
   return (
     <Tile title="Rooms to explore" className={styles.tileExplore} index={4} aside={<Link href="/explore">View all</Link>}>
-      {loading ? <div className="room-dashboard-skeleton" aria-busy="true" /> : rooms.length === 0 ? <p className={styles.empty}>There are no public rooms to show right now.</p> : (
+      {loading ? <ListSkeleton kind="rooms" /> : rooms.length === 0 ? <p className={styles.empty}>There are no public rooms to show right now.</p> : (
         <div className={styles.rows}>
           {rooms.slice(0, 3).map((room) => (
             <Link key={room.id} href="/explore" className={styles.row}>

@@ -24,6 +24,7 @@
 .kicker { margin: 0; color: var(--omni-muted); font-size: 13px; }
 .continueText h3 { margin: 0; font-size: clamp(26px, 2.6vw, 32px); font-weight: 450; line-height: 1.15; letter-spacing: -.028em; overflow-wrap: anywhere; }
 .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin: 0; color: var(--omni-text-2); font-size: 14px; }
+.metaHold { display: none; }
 .bar { width: 1px; height: 14px; background: var(--omni-line); }
 .metaItem { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .continueActions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: auto; padding-top: 6px; }
@@ -96,6 +97,18 @@
 
 @media (prefers-reduced-motion: reduce) {
   .greet, .tile, .tile::after { animation: none; }
+}
+
+/* Touch devices (phones stack the tiles in one column): hold the space content is about to
+   take, so the tiles below do not jump when it arrives, and give small links a 44px tap area. */
+@media (hover: none) and (pointer: coarse) {
+  .tileContinue .metaHold { display: flex; }
+  .tile .holdFriends { height: var(--home-friends-hold, 42px); }
+  .tile .holdRooms { height: var(--home-rooms-hold, 42px); }
+  .tileEvents .empty { min-height: 42px; }
+  .chip, .tileHead a { position: relative; }
+  .chip::after, .tileHead a::after { content: ""; position: absolute; inset: -8px 0; }
+  .tileHead a::after { inset: -13px -8px; }
 }
 
 @keyframes rise { from { opacity: 0; transform: translateY(22px); } }

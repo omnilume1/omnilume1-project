@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# android app (Trusted Web Activity): never commit signing keys or build output
+*.keystore
+*.jks
+android/app/build/
+android/.gradle/
+android/local.properties

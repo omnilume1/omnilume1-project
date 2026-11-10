@@ -1,0 +1,85 @@
+{
+  "packageId": "com.omnilume.app",
+  "host": "omnilume.vercel.app",
+  "name": "OmniLume",
+  "launcherName": "OmniLume",
+  "display": "standalone",
+  "themeColor": "#050307",
+  "themeColorDark": "#050307",
+  "navigationColor": "#050307",
+  "navigationColorDark": "#050307",
+  "navigationDividerColor": "#050307",
+  "navigationDividerColorDark": "#050307",
+  "backgroundColor": "#050307",
+  "enableNotifications": true,
+  "startUrl": "/home",
+  "iconUrl": "https://omnilume.vercel.app/icons/icon-512.png",
+  "maskableIconUrl": "https://omnilume.vercel.app/icons/icon-maskable-512.png",
+  "monochromeIconUrl": "https://omnilume.vercel.app/icons/badge-96.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "android"
+  },
+  "appVersionName": "1",
+  "appVersionCode": 1,
+  "shortcuts": [
+    {
+      "name": "Home",
+      "shortName": "Home",
+      "url": "https://omnilume.vercel.app/home",
+      "chosenIconUrl": "https://omnilume.vercel.app/icons/shortcut-home.png"
+    },
+    {
+      "name": "Rooms",
+      "shortName": "Rooms",
+      "url": "https://omnilume.vercel.app/explore",
+      "chosenIconUrl": "https://omnilume.vercel.app/icons/shortcut-rooms.png"
+    },
+    {
+      "name": "Messages",
+      "shortName": "Messages",
+      "url": "https://omnilume.vercel.app/messages",
+      "chosenIconUrl": "https://omnilume.vercel.app/icons/shortcut-messages.png"
+    },
+    {
+      "name": "Music",
+      "shortName": "Music",
+      "url": "https://omnilume.vercel.app/music",
+      "chosenIconUrl": "https://omnilume.vercel.app/icons/shortcut-music.png"
+    }
+  ],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://omnilume.vercel.app/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://omnilume.vercel.app/",
+  "minSdkVersion": 21,
+  "shareTarget": {
+    "action": "https://omnilume.vercel.app/share",
+    "method": "GET",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "orientation": "default",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": [
+    "standalone"
+  ],
+  "appVersion": "1"
+}

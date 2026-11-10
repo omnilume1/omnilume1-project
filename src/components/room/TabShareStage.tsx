@@ -11,6 +11,8 @@ import { useMemberNames } from '@/lib/collab-hooks';
 
 const subscribeToNothing = () => () => undefined;
 const canShareHere = () => typeof navigator !== 'undefined' && Boolean(navigator.mediaDevices?.getDisplayMedia);
+/** False on phones: Chrome on Android cannot capture a screen or tab. */
+export const useCanShareScreen = () => useSyncExternalStore(subscribeToNothing, canShareHere, () => true);
 
 export function useTabShareLive() {
   const voice = useVoiceRoom();

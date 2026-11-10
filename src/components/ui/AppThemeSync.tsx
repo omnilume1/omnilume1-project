@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { useLayoutEffect } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { readStoredAppTheme, useAppTheme } from '@/hooks/useAppTheme';
 import { applyThemeAttributes, themeAttributes } from '@/lib/app-theme';
 
@@ -18,5 +18,11 @@ export default function AppThemeSync() {
   useLayoutEffect(() => {
     applyThemeAttributes(document.documentElement, themeAttributes(pathname, readStoredAppTheme()));
   }, [pathname, theme]);
+  // Marks <html> once the visitor has moved to another page inside the app. On touch the next
+  // page then rises into place (app.css); the first load never animates, so it is not slowed.
+  const firstPathname = useRef(pathname);
+  useLayoutEffect(() => {
+    if (pathname !== firstPathname.current) document.documentElement.dataset.navigated = '';
+  }, [pathname]);
   return null;
 }
