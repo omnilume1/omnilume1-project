@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { isAuthRequiredPath } from '../src/lib/auth.js';
-import { roomDeletionPolicy } from '../src/lib/room-deletion-policy.js';
+import { RECOVERY_REQUEST_LAPSE_DAYS, recoveryRequestLapsesAt, roomDeletionPolicy } from '../src/lib/room-deletion-policy.js';
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n');
 const MIGRATION = read('supabase/migrations/20261105130000_action06_site_owner_recovery_and_notifications_core.sql');
@@ -84,4 +84,14 @@ test('the deletion policy is described before joining', () => {
   const explore = read('src/app/explore/page.tsx');
   assert.match(explore, /previewRoomInvite\(token\)/);
   assert.match(explore, /roomDeletionPolicy\(room\)/);
+});
+
+test('an unanswered recovery request lapses after 7 days', () => {
+  assert.equal(RECOVERY_REQUEST_LAPSE_DAYS, 7);
+  assert.equal(recoveryRequestLapsesAt('2026-11-01T10:00:00.000Z').toISOString(), '2026-11-08T10:00:00.000Z');
+  const lapse = read('supabase/migrations/20261110070802_recovery_request_lapse.sql');
+  // The lifecycle hold, the review queue and the review all ignore lapsed requests.
+  assert.equal(lapse.match(/created_at > now\(\) - interval '7 days'/g)?.length, 3);
+  assert.match(lapse, /created_at <= now\(\) - interval '7 days' THEN\n\s+RAISE EXCEPTION 'This recovery request lapsed/);
+  assert.doesNotMatch(lapse, /GRANT[^;]*\banon\b/);
 });

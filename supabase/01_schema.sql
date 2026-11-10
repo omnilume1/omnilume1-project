@@ -3361,11 +3361,15 @@ BEGIN
     rr.created_at,
     (SELECT count(*)::integer
      FROM public.recovery_requests other
-     WHERE other.room_id = rr.room_id AND other.status = 'pending' AND other.id <> rr.id)
+     WHERE other.room_id = rr.room_id
+       AND other.status = 'pending'
+       AND other.created_at > now() - interval '7 days'
+       AND other.id <> rr.id)
   FROM public.recovery_requests rr
   JOIN public.rooms r ON r.id = rr.room_id
   WHERE rr.status = 'pending'
-  ORDER BY r.expires_at ASC NULLS LAST, rr.created_at ASC;
+    AND rr.created_at > now() - interval '7 days'
+  ORDER BY rr.created_at ASC;
 END;
 $$;
 
@@ -5896,6 +5900,10 @@ BEGIN
     RAISE EXCEPTION 'This recovery request has already been reviewed.';
   END IF;
 
+  IF request_row.created_at <= now() - interval '7 days' THEN
+    RAISE EXCEPTION 'This recovery request lapsed after 7 days without a review.';
+  END IF;
+
   SELECT r.* INTO room_row
   FROM public.rooms r
   WHERE r.id = request_row.room_id
@@ -6184,6 +6192,7 @@ BEGIN
          FROM public.recovery_requests rr
          WHERE rr.room_id = p_room_id
            AND rr.status = 'pending'
+           AND rr.created_at > now() - interval '7 days'
        )
      ) THEN
     RETURN 'recovery-window';
@@ -13058,6 +13067,227 @@ ALTER TABLE public.user_blocks ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE public.user_keys ENABLE ROW LEVEL SECURITY;
+
+--
+-- Hostel roadmap phases 02–03 (20261110071321, 20261110071805). Added in
+-- pg_dump format without a fresh dump (pg_dump isn't installed on the machine
+-- that applied them); the next full regeneration replaces this block.
+--
+
+--
+-- Name: product_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.product_events (
+    id bigint NOT NULL,
+    event text NOT NULL,
+    room_id uuid,
+    ref text,
+    meta jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT product_events_event_check CHECK ((event = ANY (ARRAY['room_created'::text, 'invite_created'::text, 'share_completed'::text, 'call_in_shared'::text, 'join_viewed'::text, 'joined'::text, 'guest_joined'::text, 'spot_joined'::text, 'drop_in'::text, 'knock_sent'::text, 'timer_started'::text, 'timer_completed'::text, 'room_tick'::text, 'recap_shared'::text, 'report_created'::text]))),
+    CONSTRAINT product_events_meta_check CHECK ((pg_column_size(meta) <= 512)),
+    CONSTRAINT product_events_ref_check CHECK ((ref ~ '^[a-z0-9-]{1,40}$'::text))
+);
+
+COMMENT ON TABLE public.product_events IS 'Anonymous product metrics. No user ids, IPs, message text or titles. Written only through log_product_event / room_heartbeat.';
+
+ALTER TABLE public.product_events ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.product_events_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+ALTER TABLE ONLY public.product_events
+    ADD CONSTRAINT product_events_pkey PRIMARY KEY (id);
+
+CREATE INDEX product_events_event_created_at_idx ON public.product_events USING btree (event, created_at);
+
+CREATE INDEX product_events_room_created_at_idx ON public.product_events USING btree (room_id, created_at);
+
+ALTER TABLE public.product_events ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: room_live_status; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.room_live_status (
+    room_id uuid NOT NULL,
+    people integer DEFAULT 0 NOT NULL,
+    desk integer DEFAULT 0 NOT NULL,
+    screen integer DEFAULT 0 NOT NULL,
+    speaker integer DEFAULT 0 NOT NULL,
+    bed integer DEFAULT 0 NOT NULL,
+    door text DEFAULT 'open'::text NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT room_live_status_bed_check CHECK (((bed >= 0) AND (bed <= 50))),
+    CONSTRAINT room_live_status_desk_check CHECK (((desk >= 0) AND (desk <= 50))),
+    CONSTRAINT room_live_status_door_check CHECK ((door = ANY (ARRAY['open'::text, 'knock'::text, 'dnd'::text]))),
+    CONSTRAINT room_live_status_people_check CHECK (((people >= 0) AND (people <= 50))),
+    CONSTRAINT room_live_status_screen_check CHECK (((screen >= 0) AND (screen <= 50))),
+    CONSTRAINT room_live_status_speaker_check CHECK (((speaker >= 0) AND (speaker <= 50)))
+);
+
+COMMENT ON TABLE public.room_live_status IS 'Live counts per room from the public presence channel. Counts only, no user ids. Written only through room_heartbeat.';
+
+ALTER TABLE ONLY public.room_live_status
+    ADD CONSTRAINT room_live_status_pkey PRIMARY KEY (room_id);
+
+ALTER TABLE ONLY public.room_live_status
+    ADD CONSTRAINT room_live_status_room_id_fkey FOREIGN KEY (room_id) REFERENCES public.rooms(id) ON DELETE CASCADE;
+
+ALTER TABLE public.room_live_status ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: night_date(timestamp with time zone); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.night_date(ts timestamp with time zone) RETURNS date
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+    SET search_path TO ''
+    AS $$
+  SELECT ((ts AT TIME ZONE 'Asia/Kolkata') - interval '6 hours')::date;
+$$;
+
+--
+-- Name: log_product_event(text, uuid, text, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.log_product_event(p_event text, p_room_id uuid DEFAULT NULL::uuid, p_ref text DEFAULT NULL::text, p_meta jsonb DEFAULT NULL::jsonb) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+DECLARE
+  meta_key text;
+  meta_value jsonb;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Sign in to log events.' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_event IS NULL OR p_event NOT IN (
+    'room_created', 'invite_created', 'share_completed', 'call_in_shared',
+    'join_viewed', 'joined', 'guest_joined', 'spot_joined', 'drop_in',
+    'knock_sent', 'timer_started', 'timer_completed',
+    'recap_shared', 'report_created'
+  ) THEN
+    RAISE EXCEPTION 'Unknown event.' USING ERRCODE = '22023';
+  END IF;
+
+  IF p_ref IS NOT NULL AND p_ref !~ '^[a-z0-9-]{1,40}$' THEN
+    RAISE EXCEPTION 'Invalid ref.' USING ERRCODE = '22023';
+  END IF;
+
+  IF p_meta IS NOT NULL THEN
+    IF jsonb_typeof(p_meta) <> 'object' OR pg_column_size(p_meta) > 512 THEN
+      RAISE EXCEPTION 'Invalid meta.' USING ERRCODE = '22023';
+    END IF;
+    FOR meta_key, meta_value IN SELECT key, value FROM jsonb_each(p_meta) LOOP
+      IF meta_key NOT IN ('spot', 'people', 'minutes', 'template', 'from', 'variant') THEN
+        RAISE EXCEPTION 'Invalid meta key.' USING ERRCODE = '22023';
+      END IF;
+      IF jsonb_typeof(meta_value) = 'string' THEN
+        IF length(meta_value #>> '{}') > 40 THEN
+          RAISE EXCEPTION 'Invalid meta value.' USING ERRCODE = '22023';
+        END IF;
+      ELSIF jsonb_typeof(meta_value) = 'number' THEN
+        IF (meta_value #>> '{}')::numeric NOT BETWEEN -100000 AND 100000 THEN
+          RAISE EXCEPTION 'Invalid meta value.' USING ERRCODE = '22023';
+        END IF;
+      ELSIF jsonb_typeof(meta_value) <> 'boolean' THEN
+        RAISE EXCEPTION 'Invalid meta value.' USING ERRCODE = '22023';
+      END IF;
+    END LOOP;
+  END IF;
+
+  IF p_room_id IS NOT NULL AND NOT public.is_approved_room_member(p_room_id, auth.uid()) THEN
+    RAISE EXCEPTION 'Not a member of this room.' USING ERRCODE = '42501';
+  END IF;
+
+  INSERT INTO public.product_events (event, room_id, ref, meta)
+  VALUES (p_event, p_room_id, p_ref, p_meta);
+END;
+$$;
+
+--
+-- Name: room_heartbeat(uuid, integer, jsonb, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.room_heartbeat(p_room_id uuid, p_people integer, p_spots jsonb, p_door text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+DECLARE
+  v_people integer;
+  v_desk integer;
+  v_screen integer;
+  v_speaker integer;
+  v_bed integer;
+  v_door text;
+  v_spots jsonb := CASE WHEN jsonb_typeof(p_spots) = 'object' THEN p_spots ELSE '{}'::jsonb END;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Sign in first.' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_room_id IS NULL OR NOT public.is_approved_room_member(p_room_id, auth.uid()) THEN
+    RAISE EXCEPTION 'Not a member of this room.' USING ERRCODE = '42501';
+  END IF;
+
+  -- Clamp everything to 0..50; anything that isn't a number counts as 0.
+  v_people := LEAST(GREATEST(COALESCE(p_people, 0), 0), 50);
+  v_desk := CASE WHEN jsonb_typeof(v_spots -> 'desk') = 'number' THEN LEAST(GREATEST(floor((v_spots ->> 'desk')::numeric), 0), 50)::integer ELSE 0 END;
+  v_screen := CASE WHEN jsonb_typeof(v_spots -> 'screen') = 'number' THEN LEAST(GREATEST(floor((v_spots ->> 'screen')::numeric), 0), 50)::integer ELSE 0 END;
+  v_speaker := CASE WHEN jsonb_typeof(v_spots -> 'speaker') = 'number' THEN LEAST(GREATEST(floor((v_spots ->> 'speaker')::numeric), 0), 50)::integer ELSE 0 END;
+  v_bed := CASE WHEN jsonb_typeof(v_spots -> 'bed') = 'number' THEN LEAST(GREATEST(floor((v_spots ->> 'bed')::numeric), 0), 50)::integer ELSE 0 END;
+  v_door := CASE WHEN p_door IN ('open', 'knock', 'dnd') THEN p_door ELSE 'open' END;
+
+  -- The upsert locks the room's row, so concurrent heartbeats run one at a
+  -- time and the tick check below sees the other's tick.
+  INSERT INTO public.room_live_status AS s (room_id, people, desk, screen, speaker, bed, door, updated_at)
+  VALUES (p_room_id, v_people, v_desk, v_screen, v_speaker, v_bed, v_door, now())
+  ON CONFLICT (room_id) DO UPDATE
+  SET people = EXCLUDED.people,
+      desk = EXCLUDED.desk,
+      screen = EXCLUDED.screen,
+      speaker = EXCLUDED.speaker,
+      bed = EXCLUDED.bed,
+      door = EXCLUDED.door,
+      updated_at = now();
+
+  IF v_people >= 2 AND NOT EXISTS (
+    SELECT 1
+    FROM public.product_events e
+    WHERE e.room_id = p_room_id
+      AND e.event = 'room_tick'
+      AND e.created_at > now() - interval '10 minutes'
+  ) THEN
+    INSERT INTO public.product_events (event, room_id, meta)
+    VALUES ('room_tick', p_room_id, jsonb_build_object(
+      'people', v_people, 'desk', v_desk, 'screen', v_screen, 'speaker', v_speaker, 'bed', v_bed
+    ));
+  END IF;
+END;
+$$;
+
+--
+-- Name: get_my_rooms_live(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.get_my_rooms_live() RETURNS TABLE(room_id uuid, people integer, desk integer, screen integer, speaker integer, bed integer, door text, fresh boolean)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+  SELECT s.room_id, s.people, s.desk, s.screen, s.speaker, s.bed, s.door,
+         s.updated_at > now() - interval '2 minutes'
+  FROM public.room_live_status s
+  JOIN public.room_members m ON m.room_id = s.room_id AND m.user_id = auth.uid()
+  WHERE auth.uid() IS NOT NULL
+    AND public.is_approved_room_member(s.room_id, auth.uid());
+$$;
 
 --
 -- PostgreSQL database dump complete

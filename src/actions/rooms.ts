@@ -2,6 +2,7 @@
 
 import { actionResult } from '@/lib/action-result';
 import { randomUUID } from 'node:crypto';
+import { logProductEventAfter } from '@/lib/product-events-server';
 import { createClient } from '@/utils/supabase/server';
 
 // 1. Create Room
@@ -83,11 +84,13 @@ async function createRoomImpl(formData: FormData) {
   // Optional template (Action 13): features, layout, theme and rules. The room
   // is already created, so a template that cannot be applied is not fatal;
   // the owner can apply it again from the room's Controls.
-  const templateId = formData.get('template_id');
-  if (typeof templateId === 'string' && /^[0-9a-f-]{36}$/i.test(templateId)) {
+  const rawTemplateId = formData.get('template_id');
+  const templateId = typeof rawTemplateId === 'string' && /^[0-9a-f-]{36}$/i.test(rawTemplateId) ? rawTemplateId : null;
+  if (templateId) {
     await supabase.rpc('apply_room_template', { p_room_id: roomId, p_template_id: templateId });
   }
 
+  logProductEventAfter('room_created', { roomId, meta: templateId ? { template: templateId } : null });
   return roomId;
 }
 export async function createRoom(formData: FormData) {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { getRecoveryReviewQueue, reviewRoomRecovery, type RecoveryReviewItem } from '@/actions/recovery';
+import { recoveryRequestLapsesAt } from '@/lib/room-deletion-policy';
 
 type Decision = 'approved' | 'rejected';
 
@@ -10,15 +11,25 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+function timeLeft(until: number, now: number) {
+  const hours = Math.floor((until - now) / 3_600_000);
+  const days = Math.floor(hours / 24);
+  return days >= 1 ? `${days}d ${hours % 24}h` : `${Math.max(1, hours)}h`;
+}
+
 // Time left in the 7-day window; a request filed in time keeps the room held
-// (and reviewable) after the window ends.
+// (and reviewable) after the window ends, until the request itself lapses.
 function windowLabel(windowEndsAt: string | null, now: number) {
   if (!windowEndsAt) return 'Unknown';
-  const remaining = new Date(windowEndsAt).getTime() - now;
-  if (remaining <= 0) return 'Window ended — held by this request';
-  const hours = Math.floor(remaining / 3_600_000);
-  const days = Math.floor(hours / 24);
-  return days >= 1 ? `${days}d ${hours % 24}h left` : `${Math.max(1, hours)}h left`;
+  const end = new Date(windowEndsAt).getTime();
+  return end <= now ? 'Window ended — held by this request' : `${timeLeft(end, now)} left`;
+}
+
+// An unanswered request lapses 7 days after it was filed; the room is then
+// deleted at the next daily cleanup.
+function lapseLabel(requestedAt: string, now: number) {
+  const lapse = recoveryRequestLapsesAt(requestedAt).getTime();
+  return lapse <= now ? 'Lapsed — the room will be deleted' : `in ${timeLeft(lapse, now)}, then the room is deleted`;
 }
 
 export default function RecoveryReviewQueue({ initialRequests, initialError }: { initialRequests: RecoveryReviewItem[]; initialError: string | null }) {
@@ -99,6 +110,7 @@ export default function RecoveryReviewQueue({ initialRequests, initialError }: {
                       <div><dt className="inline text-neutral-500">Requested by: </dt><dd className="inline">{item.requester_label}</dd></div>
                       <div><dt className="inline text-neutral-500">Recovery window: </dt><dd className="inline">{windowLabel(item.window_ends_at, now)}</dd></div>
                       <div><dt className="inline text-neutral-500">Requested: </dt><dd className="inline">{formatDate(item.requested_at)}</dd></div>
+                      <div className="sm:col-span-2"><dt className="inline text-neutral-500">Lapses if unanswered: </dt><dd className="inline text-amber-300">{lapseLabel(item.requested_at, now)}</dd></div>
                     </dl>
                     {item.other_pending > 0 && <p className="mt-2 text-[11px] text-indigo-300">{item.other_pending} other member{item.other_pending === 1 ? '' : 's'} also asked for this room. Approving answers all of them.</p>}
                   </div>

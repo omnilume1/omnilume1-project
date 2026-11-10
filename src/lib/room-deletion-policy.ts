@@ -14,6 +14,14 @@ export type RoomDeletionPolicy = {
 
 export const ROOM_RECOVERY_WINDOW_DAYS = 7;
 
+// A pending recovery request that no site owner answers lapses after this many
+// days; the room is then deleted (public.room_lifecycle_state).
+export const RECOVERY_REQUEST_LAPSE_DAYS = 7;
+
+export function recoveryRequestLapsesAt(requestedAt: string): Date {
+  return new Date(new Date(requestedAt).getTime() + RECOVERY_REQUEST_LAPSE_DAYS * 86_400_000);
+}
+
 export function roomDeletionPolicy(room: RoomPolicyInput): RoomDeletionPolicy {
   switch (room.expiration_type) {
     case 'permanent':
@@ -32,7 +40,7 @@ export function roomDeletionPolicy(room: RoomPolicyInput): RoomDeletionPolicy {
       return {
         kind: 'recoverable',
         label: `Temporary · ${ROOM_RECOVERY_WINDOW_DAYS}-day recovery`,
-        description: `Closes when its timer ends. Members can request recovery for ${ROOM_RECOVERY_WINDOW_DAYS} days; without a request, all chats and files are then permanently deleted.`,
+        description: `Closes when its timer ends. Members can request recovery for ${ROOM_RECOVERY_WINDOW_DAYS} days; without a request, or if a request isn't answered within ${RECOVERY_REQUEST_LAPSE_DAYS} days, all chats and files are permanently deleted.`,
       };
     case 'irreversible':
       return {

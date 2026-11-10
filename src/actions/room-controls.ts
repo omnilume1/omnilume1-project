@@ -1,6 +1,8 @@
 'use server';
 
 import { actionResult } from '@/lib/action-result';
+import { isNewMembership } from '@/lib/product-events';
+import { logProductEventAfter } from '@/lib/product-events-server';
 import { createClient } from '@/utils/supabase/server';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -53,6 +55,7 @@ async function createRoomInviteImpl(roomId: string, options: { expiresAt?: strin
     p_guest_lifetime_minutes: options.guestLifetimeMinutes ?? null,
   });
   if (error) throw new Error(error.message);
+  logProductEventAfter('invite_created', { roomId });
   return data;
 }
 export async function createRoomInvite(roomId: string, options: { expiresAt?: string; maxUses?: number; guestLifetimeMinutes?: number } = {}) {
@@ -83,15 +86,31 @@ export async function previewRoomInvite(token: string) {
   return actionResult(() => previewRoomInviteImpl(token));
 }
 
-async function joinRoomWithInviteImpl(token: string) {
+// `ref` is the invite link's own ref tag; it wins over the omni_ref cookie.
+async function joinRoomWithInviteImpl(token: string, ref?: string | null) {
   const normalizedToken = normalizeInviteToken(token);
+  const requestStartedAt = Date.now();
   const supabase = await authenticatedClient();
   const { data, error } = await supabase.rpc('join_room_with_invite', { p_token: normalizedToken });
   if (error || !data?.[0]) throw new Error(error?.message || 'Invite is invalid or expired.');
+  const joined = data[0] as { room_id: string; status: string; role: string };
+  // The RPC answers existing members the same way, so only a membership
+  // created by this request counts (roadmap §0.11).
+  logProductEventAfter(joined.role === 'guest' ? 'guest_joined' : 'joined', { roomId: joined.room_id, ref }, async (client) => {
+    const { data: { user } } = await client.auth.getUser();
+    if (!user) return false;
+    const { data: membership } = await client
+      .from('room_members')
+      .select('joined_at')
+      .eq('room_id', joined.room_id)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    return isNewMembership(membership?.joined_at, requestStartedAt);
+  });
   return data[0];
 }
-export async function joinRoomWithInvite(token: string) {
-  return actionResult(() => joinRoomWithInviteImpl(token));
+export async function joinRoomWithInvite(token: string, ref?: string | null) {
+  return actionResult(() => joinRoomWithInviteImpl(token, ref));
 }
 
 async function revokeRoomInviteImpl(inviteId: string) {
