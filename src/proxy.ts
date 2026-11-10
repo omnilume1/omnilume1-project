@@ -99,6 +99,6 @@ export const config = {
     // Also skipped: the Android app's asset links, the service worker and its offline page, the
     // manifest and the server-to-server routes. None of them has a session to refresh, and none
     // may ever be redirected to /login.
-    '/((?!_next/static|_next/image|favicon.ico|\\.well-known/|sw\\.js$|offline\\.html$|manifest\\.webmanifest$|api/internal/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|\\.well-known/|sw\\.js$|offline\\.html$|manifest\\.webmanifest$|api/internal/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|apk)$).*)',
   ],
 };

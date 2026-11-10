@@ -88,6 +88,7 @@ test('the Android shell matches the web app and can show notifications', () => {
   assert.equal(twa.fallbackType, 'customtabs');
   assert.equal(twa.orientation, 'default', 'full-screen video must be free to rotate');
   assert.equal(twa.signingKey.path, './android.keystore', 'a relative path, so no machine path is committed');
+  assert.ok(Number(twa.minSdkVersion) >= 24, 'androidbrowserhelper 2.7.4 needs Android 7.0 (API 24); Bubblewrap\'s default of 21 does not build');
 
   const androidManifest = read('android/app/src/main/AndroidManifest.xml');
   assert.match(androidManifest, /android\.permission\.POST_NOTIFICATIONS/, 'Android 13+ notification permission');
@@ -111,7 +112,7 @@ test('the proxy skips the files that must never redirect to /login', () => {
   const pattern = /matcher: \[\s*(?:\/\/[^\n]*\n\s*)*'([^']+)'/.exec(source)?.[1];
   assert.ok(pattern, 'matcher found');
   const matcher = new RegExp(`^${pattern!.replace(/\\\\/g, '\\')}$`);
-  const skipped = ['/.well-known/assetlinks.json', '/sw.js', '/offline.html', '/manifest.webmanifest', '/api/internal/push', '/api/internal/cleanup-expired-rooms', '/_next/static/chunks/a.js', '/icons/icon-192.png'];
+  const skipped = ['/.well-known/assetlinks.json', '/sw.js', '/offline.html', '/manifest.webmanifest', '/api/internal/push', '/api/internal/cleanup-expired-rooms', '/_next/static/chunks/a.js', '/icons/icon-192.png', '/omnilume.apk'];
   const handled = ['/', '/home', '/messages', '/room/abc', '/login', '/auth/callback', '/api/ice-servers', '/share', '/sw.json', '/offline.html/x', '/api/internalx'];
   for (const path of skipped) assert.equal(matcher.test(path), false, `${path} skips the proxy`);
   for (const path of handled) assert.equal(matcher.test(path), true, `${path} still goes through the proxy`);
