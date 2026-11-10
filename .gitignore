@@ -44,5 +44,9 @@ next-env.d.ts
 *.keystore
 *.jks
 android/app/build/
+android/build/
 android/.gradle/
 android/local.properties
+android/*.apk
+android/*.aab
+android/*.idsig

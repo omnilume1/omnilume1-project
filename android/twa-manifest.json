@@ -60,7 +60,7 @@
   "isChromeOSOnly": false,
   "isMetaQuest": false,
   "fullScopeUrl": "https://omnilume.vercel.app/",
-  "minSdkVersion": 21,
+  "minSdkVersion": 24,
   "shareTarget": {
     "action": "https://omnilume.vercel.app/share",
     "method": "GET",
