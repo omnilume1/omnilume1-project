@@ -815,8 +815,10 @@ CREATE TABLE public.rooms (
     scheduled_for timestamp with time zone,
     deletion_scheduled_at timestamp with time zone,
     deletion_scheduled_by uuid,
+    nameplate text NOT NULL,
     CONSTRAINT rooms_deletion_schedule_permanent_only CHECK (((deletion_scheduled_at IS NULL) OR (expiration_type = 'permanent'::text))),
-    CONSTRAINT rooms_expiration_type_check CHECK ((expiration_type = ANY (ARRAY['permanent'::text, 'recoverable'::text, 'irreversible'::text])))
+    CONSTRAINT rooms_expiration_type_check CHECK ((expiration_type = ANY (ARRAY['permanent'::text, 'recoverable'::text, 'irreversible'::text]))),
+    CONSTRAINT rooms_nameplate_check CHECK (((nameplate ~ '^[A-Za-z0-9 -]{1,12}$'::text) AND (btrim(nameplate) <> ''::text)))
 );
 
 
@@ -1250,6 +1252,7 @@ CREATE TABLE public.room_invites (
     revoked_at timestamp with time zone,
     revoked_by uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    is_door_key boolean DEFAULT false NOT NULL,
     CONSTRAINT room_invites_guest_lifetime_check CHECK (((guest_lifetime_minutes IS NULL) OR ((guest_lifetime_minutes >= 5) AND (guest_lifetime_minutes <= 10080)))),
     CONSTRAINT room_invites_usage_check CHECK (((max_uses IS NULL) OR (max_uses > 0))),
     CONSTRAINT room_invites_uses_count_check CHECK ((uses_count >= 0))
@@ -13287,6 +13290,308 @@ CREATE FUNCTION public.get_my_rooms_live() RETURNS TABLE(room_id uuid, people in
   JOIN public.room_members m ON m.room_id = s.room_id AND m.user_id = auth.uid()
   WHERE auth.uid() IS NOT NULL
     AND public.is_approved_room_member(s.room_id, auth.uid());
+$$;
+
+--
+-- Hostel roadmap phases 04–05 (20261110103628, 20261110105146). Same format
+-- and caveat as the 02–03 block above. rooms.nameplate and
+-- room_invites.is_door_key are in their CREATE TABLE statements.
+--
+
+--
+-- Name: fill_room_nameplate(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.fill_room_nameplate() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO ''
+    AS $$
+BEGIN
+  IF NEW.nameplate IS NULL THEN
+    NEW.nameplate := chr(65 + (abs(hashtext(NEW.id::text)::bigint) % 8)::int)
+      || '-' || (101 + (abs(hashtext(NEW.id::text)::bigint) / 8) % 399);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER fill_room_nameplate BEFORE INSERT ON public.rooms FOR EACH ROW EXECUTE FUNCTION public.fill_room_nameplate();
+
+CREATE UNIQUE INDEX room_invites_one_door_key_idx ON public.room_invites USING btree (room_id) WHERE (is_door_key AND (revoked_at IS NULL));
+
+--
+-- Name: get_room_door_link(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.get_room_door_link(p_room_id uuid) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_role text;
+  v_invite_id uuid;
+  v_token text;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Sign in first.' USING ERRCODE = '42501';
+  END IF;
+  IF p_room_id IS NULL THEN
+    RAISE EXCEPTION 'Room is required.' USING ERRCODE = '22023';
+  END IF;
+
+  v_role := public.room_user_role(p_room_id, v_uid);
+  IF NOT public.room_has_active_access(p_room_id)
+     OR v_role IS NULL
+     OR (v_role = 'guest' AND NOT public.room_has_capability(p_room_id, v_uid, 'manage_invites')) THEN
+    RAISE EXCEPTION 'Not allowed to share this room.' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT i.token INTO v_token
+  FROM public.room_invites i
+  WHERE i.room_id = p_room_id AND i.is_door_key AND i.revoked_at IS NULL;
+  IF v_token IS NOT NULL THEN
+    RETURN v_token;
+  END IF;
+
+  INSERT INTO public.room_invites (room_id, token, created_by, is_door_key)
+  VALUES (p_room_id, encode(extensions.gen_random_bytes(24), 'hex'), v_uid, true)
+  ON CONFLICT (room_id) WHERE is_door_key AND revoked_at IS NULL DO NOTHING
+  RETURNING id, token INTO v_invite_id, v_token;
+
+  IF v_token IS NULL THEN
+    -- Another member created it at the same moment: share theirs.
+    SELECT i.token INTO v_token
+    FROM public.room_invites i
+    WHERE i.room_id = p_room_id AND i.is_door_key AND i.revoked_at IS NULL;
+    RETURN v_token;
+  END IF;
+
+  INSERT INTO public.product_events (event, room_id, meta)
+  VALUES ('invite_created', p_room_id, jsonb_build_object('from', 'door'));
+
+  PERFORM public.record_room_control_event(
+    p_room_id, 'invite_changed', NULL,
+    jsonb_build_object('invite_id', v_invite_id, 'state', 'created')
+  );
+
+  RETURN v_token;
+END;
+$$;
+
+--
+-- Name: change_room_lock(uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.change_room_lock(p_room_id uuid) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_old_id uuid;
+  v_invite_id uuid;
+  v_token text;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Sign in first.' USING ERRCODE = '42501';
+  END IF;
+  IF p_room_id IS NULL OR NOT public.room_has_capability(p_room_id, v_uid, 'manage_invites') THEN
+    RAISE EXCEPTION 'Not allowed to change this room''s lock.' USING ERRCODE = '42501';
+  END IF;
+
+  UPDATE public.room_invites
+  SET revoked_at = now(), revoked_by = v_uid
+  WHERE room_id = p_room_id AND is_door_key AND revoked_at IS NULL
+  RETURNING id INTO v_old_id;
+
+  IF v_old_id IS NOT NULL THEN
+    PERFORM public.record_room_control_event(
+      p_room_id, 'invite_changed', NULL,
+      jsonb_build_object('invite_id', v_old_id, 'state', 'revoked')
+    );
+  END IF;
+
+  INSERT INTO public.room_invites (room_id, token, created_by, is_door_key)
+  VALUES (p_room_id, encode(extensions.gen_random_bytes(24), 'hex'), v_uid, true)
+  ON CONFLICT (room_id) WHERE is_door_key AND revoked_at IS NULL DO NOTHING
+  RETURNING id, token INTO v_invite_id, v_token;
+
+  IF v_token IS NULL THEN
+    -- A concurrent change already fitted a new lock: return that one.
+    SELECT i.token INTO v_token
+    FROM public.room_invites i
+    WHERE i.room_id = p_room_id AND i.is_door_key AND i.revoked_at IS NULL;
+    RETURN v_token;
+  END IF;
+
+  PERFORM public.record_room_control_event(
+    p_room_id, 'invite_changed', NULL,
+    jsonb_build_object('invite_id', v_invite_id, 'state', 'created')
+  );
+
+  RETURN v_token;
+END;
+$$;
+
+--
+-- Name: set_room_nameplate(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.set_room_nameplate(p_room_id uuid, p_text text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_text text := btrim(regexp_replace(COALESCE(p_text, ''), '\s+', ' ', 'g'));
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Sign in first.' USING ERRCODE = '42501';
+  END IF;
+  IF p_room_id IS NULL OR NOT public.room_has_capability(p_room_id, v_uid, 'manage_settings') THEN
+    RAISE EXCEPTION 'Not allowed to rename this room''s nameplate.' USING ERRCODE = '42501';
+  END IF;
+  IF v_text !~ '^[A-Za-z0-9 -]{1,12}$' THEN
+    RAISE EXCEPTION 'A nameplate is 1–12 letters, numbers, spaces or dashes.' USING ERRCODE = '22023';
+  END IF;
+
+  UPDATE public.rooms SET nameplate = v_text WHERE id = p_room_id;
+
+  PERFORM public.record_room_control_event(
+    p_room_id, 'settings_changed', NULL, jsonb_build_object('field', 'nameplate')
+  );
+
+  RETURN v_text;
+END;
+$$;
+
+--
+-- Name: invite_card_hits; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.invite_card_hits (
+    token_hash bytea NOT NULL,
+    bucket timestamp with time zone NOT NULL,
+    hits integer DEFAULT 0 NOT NULL
+);
+
+COMMENT ON TABLE public.invite_card_hits IS 'Per-token rate-limit buckets for get_public_invite_card. SHA-256 of the token only. Written only by that function.';
+
+ALTER TABLE ONLY public.invite_card_hits
+    ADD CONSTRAINT invite_card_hits_pkey PRIMARY KEY (token_hash, bucket);
+
+CREATE INDEX invite_card_hits_bucket_idx ON public.invite_card_hits USING btree (bucket);
+
+ALTER TABLE public.invite_card_hits ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: get_public_invite_card(text, text, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.get_public_invite_card(p_token text, p_ref text DEFAULT NULL::text, p_log boolean DEFAULT false) RETURNS TABLE(room_name text, nameplate text, member_count integer, people integer, desk integer, screen integer, speaker integer, bed integer, door text, is_visitor_pass boolean, visitor_until timestamp with time zone, focus_ends_at timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+DECLARE
+  v_token text := lower(btrim(COALESCE(p_token, '')));
+  v_invite public.room_invites%ROWTYPE;
+  v_room public.rooms%ROWTYPE;
+  v_status public.room_live_status%ROWTYPE;
+  v_hits integer;
+  v_timer jsonb;
+  v_end_ms numeric;
+  v_focus timestamptz;
+  v_members integer;
+BEGIN
+  IF v_token !~ '^[a-f0-9]{48}$' THEN
+    RETURN;
+  END IF;
+
+  SELECT i.* INTO v_invite
+  FROM public.room_invites i
+  WHERE i.token = v_token
+    AND i.revoked_at IS NULL
+    AND (i.expires_at IS NULL OR i.expires_at > now())
+    AND (i.max_uses IS NULL OR i.uses_count < i.max_uses);
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+
+  SELECT r.* INTO v_room FROM public.rooms r WHERE r.id = v_invite.room_id;
+  IF NOT FOUND OR public.room_lifecycle_state(v_room.id) IN ('destroyed', 'recovery-window') THEN
+    RETURN;
+  END IF;
+
+  DELETE FROM public.invite_card_hits WHERE bucket < now() - interval '1 day';
+
+  INSERT INTO public.invite_card_hits AS h (token_hash, bucket, hits)
+  VALUES (
+    sha256(convert_to(v_token, 'UTF8')),
+    date_bin('10 minutes', now(), timestamptz '2000-01-01 00:00:00+00'),
+    1
+  )
+  ON CONFLICT (token_hash, bucket) DO UPDATE SET hits = h.hits + 1
+  RETURNING h.hits INTO v_hits;
+
+  IF v_hits > 60 THEN
+    RAISE EXCEPTION 'Too many looks at this link. Try again in a few minutes.' USING ERRCODE = 'PT429';
+  END IF;
+
+  SELECT count(*)::integer INTO v_members
+  FROM public.room_members m
+  WHERE m.room_id = v_room.id
+    AND public.room_user_role(m.room_id, m.user_id) IS NOT NULL;
+
+  SELECT s.* INTO v_status
+  FROM public.room_live_status s
+  WHERE s.room_id = v_room.id
+    AND s.updated_at > now() - interval '2 minutes';
+
+  -- The timer snapshot is {eventType, payload}; endTime is epoch ms. Only a
+  -- running timer with a sane end in the next day counts. The subject is
+  -- never read.
+  SELECT s.payload INTO v_timer
+  FROM public.room_realtime_snapshots s
+  WHERE s.room_id = v_room.id AND s.snapshot_type = 'timer'
+  ORDER BY s.updated_at DESC
+  LIMIT 1;
+
+  IF v_timer ->> 'eventType' = 'timer_start'
+     AND jsonb_typeof(v_timer -> 'payload' -> 'endTime') = 'number' THEN
+    v_end_ms := (v_timer -> 'payload' ->> 'endTime')::numeric;
+    IF v_end_ms > extract(epoch FROM now()) * 1000
+       AND v_end_ms < extract(epoch FROM now() + interval '1 day') * 1000 THEN
+      v_focus := to_timestamp(v_end_ms / 1000);
+    END IF;
+  END IF;
+
+  IF p_log THEN
+    INSERT INTO public.product_events (event, room_id, ref)
+    VALUES (
+      'join_viewed',
+      v_room.id,
+      CASE WHEN p_ref ~ '^[a-z0-9-]{1,40}$' THEN p_ref END
+    );
+  END IF;
+
+  RETURN QUERY SELECT
+    v_room.name,
+    v_room.nameplate,
+    v_members,
+    COALESCE(v_status.people, 0),
+    COALESCE(v_status.desk, 0),
+    COALESCE(v_status.screen, 0),
+    COALESCE(v_status.speaker, 0),
+    COALESCE(v_status.bed, 0),
+    COALESCE(v_status.door, 'open'),
+    v_invite.guest_lifetime_minutes IS NOT NULL,
+    CASE
+      WHEN v_invite.guest_lifetime_minutes IS NULL THEN NULL
+      ELSE now() + make_interval(mins => v_invite.guest_lifetime_minutes)
+    END,
+    v_focus;
+END;
 $$;
 
 --

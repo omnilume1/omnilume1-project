@@ -1,6 +1,7 @@
 'use server';
 
 import { actionResult } from '@/lib/action-result';
+import { isDoorToken, NAMEPLATE_RULE, normalizeNameplate } from '@/lib/door-key';
 import { isNewMembership } from '@/lib/product-events';
 import { logProductEventAfter } from '@/lib/product-events-server';
 import { createClient } from '@/utils/supabase/server';
@@ -121,6 +122,33 @@ async function revokeRoomInviteImpl(inviteId: string) {
 }
 export async function revokeRoomInvite(inviteId: string) {
   return actionResult(() => revokeRoomInviteImpl(inviteId));
+}
+
+// The door key (roadmap phase 04). Reading it is a browser-client RPC
+// (get_room_door_link); only changing the lock and renaming go through here.
+async function changeRoomLockImpl(roomId: string) {
+  assertUuid(roomId, 'room ID');
+  const supabase = await authenticatedClient();
+  const { data, error } = await supabase.rpc('change_room_lock', { p_room_id: roomId });
+  if (error) throw new Error(error.message);
+  if (!isDoorToken(data)) throw new Error('The lock could not be changed.');
+  return data;
+}
+export async function changeRoomLock(roomId: string) {
+  return actionResult(() => changeRoomLockImpl(roomId));
+}
+
+async function setRoomNameplateImpl(roomId: string, text: string) {
+  assertUuid(roomId, 'room ID');
+  const nameplate = normalizeNameplate(text);
+  if (!nameplate) throw new Error(NAMEPLATE_RULE);
+  const supabase = await authenticatedClient();
+  const { data, error } = await supabase.rpc('set_room_nameplate', { p_room_id: roomId, p_text: nameplate });
+  if (error) throw new Error(error.message);
+  return typeof data === 'string' ? data : nameplate;
+}
+export async function setRoomNameplate(roomId: string, text: string) {
+  return actionResult(() => setRoomNameplateImpl(roomId, text));
 }
 
 // Historical invite reads intentionally omit the reusable token. A token is

@@ -45,8 +45,10 @@ test('room-scoped message inserts require the chat capability in the latest poli
 
 test('every function granted to authenticated is also revoked from anon', () => {
   // Pure IMMUTABLE path parsers used by storage policies. They read no data, so
-  // anon EXECUTE discloses nothing.
-  const allowedForAnon = new Set(['room_storage_path_kind', 'room_storage_path_room_id']);
+  // anon EXECUTE discloses nothing. get_public_invite_card is the signed-out
+  // /join card by design (hostel roadmap phase 05): valid token only, no ids,
+  // rate-limited.
+  const allowedForAnon = new Set(['room_storage_path_kind', 'room_storage_path_room_id', 'get_public_invite_card']);
   const grantedToAuthenticated = new Set<string>();
   const revokedFromAnon = new Set<string>();
 
