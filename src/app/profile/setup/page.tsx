@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { completeIdentitySetup } from '@/actions/auth';
 import { getMyProfile } from '@/actions/profiles';
 import { getLoginPath, getSafeRedirectPath } from '@/lib/auth';
+import { setupPrefill } from '@/lib/profile-validation';
 import { createClient } from '@/utils/supabase/client';
 import ProfileForm from '@/components/profile/ProfileForm';
 import OmniLogo from '@/components/ui/OmniLogo';
@@ -23,6 +24,7 @@ interface ProfileRecord {
 export default function ProfileSetupPage() {
   const [email, setEmail] = useState<string | null>(null);
   const [profile, setProfile] = useState<ProfileRecord | null>(null);
+  const [prefill, setPrefill] = useState<ReturnType<typeof setupPrefill> | undefined>();
   const [nextPath, setNextPath] = useState('/home');
   const [loading, setLoading] = useState(true);
   const router = useRouter();
@@ -46,13 +48,16 @@ export default function ProfileSetupPage() {
       }
 
       setEmail(user.email ?? null);
+      let currentProfile: ProfileRecord | null = null;
       try {
-        const currentProfile = await getMyProfile().then(unwrapAction);
-        if (active) setProfile(currentProfile as ProfileRecord | null);
+        currentProfile = await getMyProfile().then(unwrapAction) as ProfileRecord | null;
       } catch {
         // A profile row may not exist yet; ProfileForm can create it safely.
-      } finally {
-        if (active) setLoading(false);
+      }
+      if (active) {
+        setProfile(currentProfile);
+        setPrefill(setupPrefill(currentProfile, user.user_metadata));
+        setLoading(false);
       }
     }
 
@@ -106,6 +111,7 @@ export default function ProfileSetupPage() {
         </div>
         <ProfileForm
           initialProfile={profile}
+          prefill={prefill}
           setup
           onSaved={handleSaved}
         />

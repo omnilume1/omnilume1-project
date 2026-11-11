@@ -105,6 +105,60 @@ export function validateProfileInput(input: ProfileInput):
   };
 }
 
+const USERNAME_TAKEN = 'That username is already in use.';
+
+function withDigits(base: string, random: () => number) {
+  const clean = base.replace(/^[^a-z0-9]+/, '').slice(0, 25) || 'friend';
+  return clean + String(1000 + Math.floor(random() * 9000));
+}
+
+// A username suggestion from a display name: ASCII-folded, lowercase, then
+// four digits. Always matches the username pattern.
+export function suggestUsername(name: string, random: () => number = Math.random) {
+  const folded = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9_.]/g, '');
+  return withDigits(folded, random);
+}
+
+interface PrefillProfile {
+  display_name?: string | null;
+  avatar_url?: string | null;
+  username?: string | null;
+}
+
+// First-run setup values: existing profile values win; empty ones fall back to
+// the sign-in provider's name and photo (https only) and a suggested username.
+export function setupPrefill(
+  profile: PrefillProfile | null | undefined,
+  userMetadata: Record<string, unknown> | null | undefined,
+  random: () => number = Math.random,
+) {
+  const meta = userMetadata ?? {};
+  const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+  const displayName = profile?.display_name?.trim() || text(meta.full_name) || text(meta.name);
+  const picture = text(meta.avatar_url) || text(meta.picture);
+  const avatarUrl = profile?.avatar_url?.trim() || (picture.startsWith('https://') ? picture : '');
+  const username = profile?.username?.trim() || suggestUsername(displayName, random);
+  return { displayName, avatarUrl, username };
+}
+
+// Saves, and when the untouched suggested username turns out to be taken,
+// retries with fresh digits (at most 2 times). Other errors pass through.
+export async function saveWithUsernameRetry<R extends { success: boolean; error?: string }>(
+  save: (input: ProfileInput) => Promise<R>,
+  input: ProfileInput,
+  { suggested, random = Math.random }: { suggested: string; random?: () => number },
+): Promise<{ result: R; input: ProfileInput }> {
+  let current = input;
+  let result = await save(current);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (result.success || result.error !== USERNAME_TAKEN || current.username !== suggested) break;
+    suggested = withDigits(suggested.replace(/\d{4}$/, ''), random);
+    current = { ...current, username: suggested };
+    result = await save(current);
+  }
+  return { result, input: current };
+}
+
 export function assertUuid(value: string, label: string) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
     throw new Error(`Invalid ${label}.`);
