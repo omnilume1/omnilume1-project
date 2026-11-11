@@ -4,7 +4,15 @@ import { unwrapAction } from '@/lib/action-result';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMyRoomPresenceMode } from '@/actions/room-controls';
 import { useRoomHeartbeat } from '@/hooks/useRoomHeartbeat';
-import { DEFAULT_DOOR, DEFAULT_SPOT, normalizeDoor, normalizeSpot, type RoomDoor, type RoomSpot } from '@/lib/room-live-status';
+import {
+  DEFAULT_DOOR,
+  DEFAULT_SPOT,
+  normalizeDoor,
+  normalizeSpot,
+  publicUsersForViewer,
+  type RoomDoor,
+  type RoomSpot,
+} from '@/lib/room-live-status';
 import { createClient } from '@/utils/supabase/client';
 
 export type RoomPresenceUser = { user_id: string; online_at: string; spot?: RoomSpot; door?: RoomDoor };
@@ -165,7 +173,7 @@ export function useRoomPresence(roomId: string, refreshKey = 0): RoomPresenceVal
     };
   }, [refreshKey, roomId, supabase]);
 
-  const visiblePublicUsers = roomId ? publicUsers : [];
+  const visiblePublicUsers = roomId ? publicUsersForViewer(publicUsers, selfId, isGhostMode) : [];
   useRoomHeartbeat(roomId, selfId, visiblePublicUsers);
 
   return {

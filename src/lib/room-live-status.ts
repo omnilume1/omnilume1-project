@@ -51,6 +51,16 @@ export function countSpots(users: readonly LivePresenceUser[]): { people: number
   return { people: unique.length, spots };
 }
 
+// A ghost's own public presence can linger in a stale Realtime sync; never count it locally.
+export function publicUsersForViewer<T extends LivePresenceUser>(
+  users: T[],
+  selfId: string | null,
+  isGhostMode: boolean,
+): T[] {
+  if (!isGhostMode || !selfId) return users;
+  return users.filter((user) => user.user_id !== selfId);
+}
+
 export function strictestDoor(users: readonly LivePresenceUser[]): RoomDoor {
   let rank = 0;
   for (const user of users) rank = Math.max(rank, ROOM_DOORS.indexOf(normalizeDoor(user?.door)));
