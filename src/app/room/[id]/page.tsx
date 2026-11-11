@@ -1,7 +1,7 @@
 'use client';
 
 import { unwrapAction } from '@/lib/action-result';
-import { useState, use, useEffect, useRef, useCallback } from 'react';
+import { useState, use, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import RoomChat from '@/components/room/RoomChat';
@@ -11,6 +11,8 @@ import MediaStage from '@/components/room/MediaStage';
 import StudyStage, { StudyMiniTimer } from '@/components/room/StudyStage';
 import StudyWhiteboardPanel from '@/components/room/StudyWhiteboardPanel';
 import { getRoomAccess } from '@/actions/members';
+import { processRoomJoin } from '@/actions/rooms';
+import { buildRoomIcs } from '@/lib/room-ics';
 import {
   getPermanentRoomRequests,
   getRecoveryRequestStatus,
@@ -121,6 +123,19 @@ const WINDOW_META: Record<WinId, { title: string; icon: OmniIconName; label: str
 const ROOM_RAIL_PIN_KEY = 'omni-room-rail-pin';
 const isWinId = (value: unknown): value is WinId => typeof value === 'string' && (WINDOW_IDS as string[]).includes(value);
 
+// Glass state screens: a short line and one way out.
+function StateCard({ text, action, ghost, children }: { text?: string; action?: string; ghost?: boolean; children?: ReactNode }) {
+  return (
+    <div className="omni-state-screen flex-col text-center text-white">
+      <div className="glass-strong max-w-md w-full p-8 rounded-2xl flex flex-col items-center gap-5">
+        {text && <h1 className="text-xl font-semibold">{text}</h1>}
+        {children}
+        {action && <Link href="/home" className={`omni-button ${ghost ? 'omni-button-ghost' : 'omni-button-primary'}`}>{action}</Link>}
+      </div>
+    </div>
+  );
+}
+
 export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const identifier = resolvedParams.id;
@@ -129,6 +144,10 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const [accessStatus, setAccessStatus] = useState<AccessStatus>('loading');
   const [userRole, setUserRole] = useState<string | null>(null);
   const [roomData, setRoomData] = useState<RoomData | null>(null);
+  // Bumped after "Come in" so the access check runs again.
+  const [accessCheck, setAccessCheck] = useState(0);
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   const [timeLeft, setTimeLeft] = useState<string>('');
   const [isExpired, setIsExpired] = useState(false);
@@ -202,7 +221,22 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
       }
     }
     checkAccess();
-  }, [identifier]);
+  }, [identifier, accessCheck]);
+
+  const comeIn = async () => {
+    if (!roomData || joining) return;
+    setJoining(true);
+    setJoinError(null);
+    try {
+      const { status } = await processRoomJoin(roomData.id).then(unwrapAction);
+      if (status === 'pending') setAccessStatus('pending');
+      else setAccessCheck((count) => count + 1);
+    } catch (error) {
+      setJoinError(error instanceof Error ? error.message : 'The door would not open. Try again.');
+    } finally {
+      setJoining(false);
+    }
+  };
 
   useEffect(() => {
     if (!roomData || roomData.expiration_type === 'permanent') return;
@@ -507,13 +541,35 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   }, [roomIdForGroup, isGroupRoom, convertedEvents, applyConversion]);
 
   if (accessStatus === 'loading') return <main className="omni-loading-screen"><div className="grid justify-items-center gap-5"><OmniIntro tagline={false} /><p className="text-sm text-neutral-500">Verifying secure access...</p></div></main>;
-  if (accessStatus === 'not_found') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl">❌ Space Not Found</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Explore</Link></div>;
-  if (accessStatus === 'pending') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl text-amber-500">⏳ Waiting for Approval</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
-  if (accessStatus === 'scheduled') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl text-violet-300">⏰ This room is scheduled</h2><p className="mt-2 text-sm text-neutral-500">The room will open at {roomData?.scheduled_for ? new Date(roomData.scheduled_for).toLocaleString() : 'its scheduled time'}.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
-  if (accessStatus === 'guest_expired') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl text-amber-400">Guest access has expired</h2><p className="mt-2 text-sm text-neutral-500">Ask a room manager for a new invitation if you need access again.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-neutral-900 border border-neutral-800 rounded font-medium text-sm">Explore other spaces</Link></div>;
-  if (accessStatus === 'kicked') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl text-red-400">You were kicked from this room.</h2><p className="mt-2 text-sm text-neutral-500">Your active room session has ended.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Rooms</Link></div>;
-  if (accessStatus === 'blocked' || accessStatus === 'banned') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl text-red-400">You have been blocked from this room.</h2><p className="mt-2 text-sm text-neutral-500">Room access is not available for this account.</p><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Return to Rooms</Link></div>;
-  if (accessStatus === 'unauthorized' || accessStatus === 'public_not_joined' || accessStatus === 'private_not_joined') return <div className="omni-state-screen flex-col text-center text-white"><h2 className="text-xl text-red-500">🔒 Access Restricted</h2><Link href="/explore" className="mt-4 px-5 py-2.5 bg-white text-black rounded font-semibold text-sm">Go to Explore to Join</Link></div>;
+  if (accessStatus === 'not_found') return <StateCard text="This door doesn't exist. Check the link." action="Return home" />;
+  if (accessStatus === 'pending') return <StateCard text="Waiting at the door… the room owner will let you in." action="Back home" />;
+  if (accessStatus === 'scheduled') {
+    const opensAt = roomData?.scheduled_for ? new Date(roomData.scheduled_for) : null;
+    return (
+      <StateCard text={`Opens at ${opensAt ? opensAt.toLocaleString() : 'its scheduled time'}`} action="Back home" ghost>
+        {opensAt && roomData && (
+          <a
+            download="omnilume-room.ics"
+            href={`data:text/calendar;charset=utf-8,${encodeURIComponent(buildRoomIcs({ title: roomData.name, start: opensAt, url: `${window.location.origin}/room/${roomData.id}`, now: new Date() }))}`}
+            className="omni-button omni-button-primary"
+          >
+            Add to calendar
+          </a>
+        )}
+      </StateCard>
+    );
+  }
+  if (accessStatus === 'guest_expired') return <StateCard text="Visiting hours are over. Ask for a new link." action="Back home" />;
+  if (accessStatus === 'kicked' || accessStatus === 'blocked' || accessStatus === 'banned') return <StateCard action="Return home" />;
+  if (accessStatus === 'public_not_joined') {
+    return (
+      <StateCard text="Door's open.">
+        <button type="button" className="omni-button omni-button-primary" disabled={joining} onClick={() => void comeIn()}>{joining ? 'Coming in...' : 'Come in'}</button>
+        {joinError && <p role="alert" className="text-sm text-red-300">{joinError}</p>}
+      </StateCard>
+    );
+  }
+  if (accessStatus === 'unauthorized' || accessStatus === 'private_not_joined') return <StateCard text="Door's locked. Ask a roommate for the link." action="Back home" />;
 
   if (!roomData) return <main className="omni-loading-screen"><div className="grid justify-items-center gap-5"><OmniIntro tagline={false} /><p className="text-sm text-neutral-500">Loading room...</p></div></main>;
 
