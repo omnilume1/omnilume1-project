@@ -82,3 +82,96 @@ self.addEventListener('fetch', (event) => {
   if (decision === 'static') event.respondWith(staticFile(event));
   else if (decision === 'navigate') event.respondWith(pageOrOffline(event));
 });
+
+// Push notifications. The payload never carries message text (see src/lib/push-payload.ts).
+function swPushPlan(raw, origin, focusedUrls, existingCount) {
+    if (!raw || typeof raw !== 'object')
+        return null;
+    const data = raw;
+    const text = (value, max) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null);
+    const title = text(data.title, 120);
+    const body = text(data.body, 300);
+    const tag = text(data.tag, 120);
+    const url = typeof data.url === 'string' ? data.url : '';
+    // Only a path on this site may be opened by a tap.
+    if (!title || !body || !tag || url.charAt(0) !== '/' || url.charAt(1) === '/' || url.indexOf('\\') !== -1)
+        return null;
+    let target;
+    try {
+        target = new URL(url, origin);
+    }
+    catch {
+        return null;
+    }
+    if (target.origin !== origin)
+        return null;
+    // Someone looking at that page right now already sees it arrive there.
+    for (const clientUrl of focusedUrls) {
+        try {
+            const open = new URL(clientUrl);
+            if (open.origin === origin && open.pathname === target.pathname)
+                return null;
+        }
+        catch {
+            // Not a URL: ignore it.
+        }
+    }
+    // A busy chat updates the one notification instead of buzzing again for every message.
+    const count = (existingCount > 0 ? Math.floor(existingCount) : 0) + 1;
+    const stacked = count + (tag.indexOf('room:') === 0 ? ' new notifications' : ' new messages');
+    return {
+        title,
+        options: {
+            body: count > 1 ? stacked : body,
+            tag,
+            badge: '/icons/badge-96.png',
+            icon: '/icons/icon-192.png',
+            renotify: count === 1,
+            data: { url: target.pathname + target.search + target.hash, count },
+        },
+    };
+}
+
+self.addEventListener('push', (event) => {
+  event.waitUntil((async () => {
+    let payload = null;
+    try {
+      payload = event.data ? event.data.json() : null;
+    } catch {
+      payload = null;
+    }
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const focused = windows.filter((client) => client.focused && client.visibilityState === 'visible').map((client) => client.url);
+    const tag = payload && typeof payload.tag === 'string' ? payload.tag : '';
+    const showing = tag ? await self.registration.getNotifications({ tag }) : [];
+    const existing = showing.length ? Number((showing[0].data && showing[0].data.count) || 1) : 0;
+    const plan = swPushPlan(payload, self.location.origin, focused, existing);
+    if (plan) await self.registration.showNotification(plan.title, plan.options);
+  })());
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const data = event.notification.data;
+  event.waitUntil((async () => {
+    let target;
+    try {
+      target = new URL(data && typeof data.url === 'string' ? data.url : '/home', self.location.origin);
+    } catch {
+      return;
+    }
+    // Only this site is ever opened by a tap.
+    if (target.origin !== self.location.origin) return;
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) {
+      try {
+        await client.focus();
+        await client.navigate(target.href);
+        return;
+      } catch {
+        // That window cannot be reused: try the next one, then open a new one.
+      }
+    }
+    await self.clients.openWindow(target.href);
+  })());
+});

@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import AccountControlActions from '@/components/profile/AccountControlActions';
 import AppearanceSettings from '@/components/profile/AppearanceSettings';
+import { PushSettingsRow } from '@/components/ui/PushControls';
 import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
 import { OmniIcon } from '@/components/ui/OmniIcon';
@@ -35,6 +36,7 @@ export default function AccountSettingsSurface() {
               <div className={styles.card}>
                 <button type="button" onClick={() => router.push('/profile')} className={`${styles.row} ${styles.linkRow}`}><span className={styles.rowText}><strong>Profile and privacy</strong><small>Update your identity, profile visibility and posts.</small></span><span className={styles.rowControl}><OmniIcon name="arrow" size={15} /></span></button>
                 <button type="button" onClick={() => router.push('/home')} className={`${styles.row} ${styles.linkRow}`}><span className={styles.rowText}><strong>Return to Home</strong><small>Continue to your rooms and shared spaces.</small></span><span className={styles.rowControl}><OmniIcon name="arrow" size={15} /></span></button>
+                <PushSettingsRow classes={{ row: styles.row, rowText: styles.rowText, rowControl: styles.rowControl }} />
                 <div className={styles.row}>
                   <div className={styles.rowText}><strong>Session and account</strong><small>Log out of this device or every device, or delete your account.</small></div>
                   <div className={styles.rowControl}><AccountControlActions className={styles.actions} /></div>

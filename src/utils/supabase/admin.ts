@@ -39,6 +39,19 @@ type AdminDatabase = {
         Args: { p_upload_id: string; p_error: string | null };
         Returns: undefined;
       };
+      // Push notifications: who gets one for an event, and removing dead or stale devices.
+      push_deliveries: {
+        Args: { p_kind: string; p_id: string };
+        Returns: Array<Record<string, unknown>>;
+      };
+      prune_push_subscription: {
+        Args: { p_endpoint: string };
+        Returns: undefined;
+      };
+      prune_stale_push_subscriptions: {
+        Args: { p_days: number };
+        Returns: number;
+      };
     };
   };
   storage: {

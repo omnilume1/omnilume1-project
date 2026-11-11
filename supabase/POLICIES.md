@@ -19,6 +19,7 @@ canonical rebuild applies `003_room_lifecycle.sql` and
 | `recovery_requests` | Only the current approved owner/admin may submit during the 24-hour recovery window. Requests are reviewed through the protected database function. |
 | `room_permanent_requests` | Any current approved member may request permanence during the seven-day reopened period. Only the current owner/admin may review it. |
 | `room_notifications` | Notifications are readable and markable only by their intended recipient. |
+| `push_subscriptions` | A member may read and delete only their own devices. Rows are written only by `save_push_subscription` (signed-in members; the endpoint must be a known push service) and removed by `remove_push_subscription`. `push_deliveries`, `prune_push_subscription` and `prune_stale_push_subscriptions` are for the service role only. The `queue_push` trigger sends only `{kind, id}` to the app's webhook, using the URL and secret stored in Vault (`push_webhook_url`, `push_webhook_secret`), and can never fail the insert it follows. |
 
 ## Server-side helpers and lifecycle
 

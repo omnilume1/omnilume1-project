@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { deleteMyAccount } from '@/actions/account';
+import { disablePush } from '@/lib/push-client';
 import { unwrapAction } from '@/lib/action-result';
 import { ACCOUNT_DELETION_CONFIRMATION, ACCOUNT_DELETION_REAUTH_WINDOW_SECONDS } from '@/lib/account-deletion';
 import { OmniIcon } from '@/components/ui/OmniIcon';
@@ -46,6 +47,7 @@ export default function AccountControlActions({ className = '' }: { className?: 
   async function signInAgain() {
     setReauthenticating(true);
     const returnTo = `${window.location.pathname}${window.location.search}`;
+    await disablePush();
     await createClient().auth.signOut({ scope: 'local' }).catch(() => undefined);
     window.location.replace(`/login?next=${encodeURIComponent(returnTo)}`);
   }
@@ -55,6 +57,8 @@ export default function AccountControlActions({ className = '' }: { className?: 
     setLogoutError(null);
 
     try {
+      // This device stops receiving pushes for the account that is leaving (never blocks sign-out).
+      await disablePush();
       const { error } = await createClient().auth.signOut({ scope });
       if (error) throw error;
       window.location.replace('/login');
@@ -78,6 +82,8 @@ export default function AccountControlActions({ className = '' }: { className?: 
         setDeleting(false);
         return;
       }
+      // The account and its subscriptions are gone on the server; drop this browser's subscription too.
+      await disablePush();
       await createClient().auth.signOut({ scope: 'local' });
       router.replace('/');
     } catch (error) {

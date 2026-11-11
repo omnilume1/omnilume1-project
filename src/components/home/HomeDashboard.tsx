@@ -11,6 +11,7 @@ import { listMyRoomOverview } from '@/lib/management-data';
 import type { OverviewRoom } from '@/lib/room-management-model';
 import { useFriendsListening } from '@/hooks/useFriendsListening';
 import { useCloseOnBack } from '@/hooks/useCloseOnBack';
+import { disablePush } from '@/lib/push-client';
 import { createClient } from '@/utils/supabase/client';
 import FloatingDock from '@/components/ui/FloatingDock';
 import InternalTopbar from '@/components/ui/InternalTopbar';
@@ -73,6 +74,8 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
+      // This device stops receiving pushes for the account that is leaving (never blocks sign-out).
+      await disablePush();
       await supabase.auth.signOut();
       router.replace('/login');
     } catch {
@@ -82,6 +85,7 @@ export default function HomeDashboard({ account }: { account: CurrentAccount }) 
 
   const handleSwitchAccount = async () => {
     setSwitchingAccount(true);
+    await disablePush();
     const { error } = await supabase.auth.signOut({ scope: 'local' });
     if (error) {
       setSwitchingAccount(false);

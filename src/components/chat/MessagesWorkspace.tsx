@@ -20,6 +20,7 @@ import {
 import { saveUserPublicKey, getUserPublicKey, getOrCreatePrivateChat } from '@/actions/chat';
 import { unreadBadge } from '@/lib/room-chat-model';
 import { parseMessagesDeepLink, resolveMessagesDeepLink, type MessagesDeepLink } from '@/lib/messages-deep-link';
+import { clearPushNotifications } from '@/lib/push-client';
 import {
   getMyMessageInbox,
   sendMessageRequest,
@@ -311,6 +312,13 @@ export default function MessagesWorkspace() {
     setActiveChat(active?.chatId ?? null);
     return () => setActiveChat(null);
   }, [active?.chatId, setActiveChat]);
+
+  // Opening a thread clears its push notification from the device's notification shade.
+  const openGroupId = activeGroup?.group_id;
+  useEffect(() => {
+    if (active?.chatId) void clearPushNotifications(`dm:${active.chatId}`);
+    if (openGroupId) void clearPushNotifications(`group:${openGroupId}`);
+  }, [active?.chatId, openGroupId]);
 
   // Read state for the open private chat; refreshed with the inbox.
   useEffect(() => {

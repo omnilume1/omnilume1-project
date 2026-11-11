@@ -59,6 +59,8 @@ async function cleanupExpiredRooms(request: Request) {
     const music = musicStorage
       ? await cleanupMusicUploads(supabase, musicStorage)
       : await cleanupMusicUploads(supabase);
+    // Devices that have not opened the app for 60 days no longer get pushes. Never fails the cleanup.
+    const stalePush = await supabase.rpc('prune_stale_push_subscriptions', { p_days: 60 });
     const failures = [...media.failures, ...files.failures, ...rooms.failures, ...recordings.failures, ...music.failures];
 
     return NextResponse.json(
@@ -69,6 +71,7 @@ async function cleanupExpiredRooms(request: Request) {
         destroyedRoomsRemoved: rooms.removed,
         expiredRecordingsRemoved: recordings.removed,
         expiredMusicUploadsRemoved: music.removed,
+        stalePushSubscriptionsRemoved: stalePush.error ? null : stalePush.data,
         orphanMusicObjectsRemoved: music.orphansRemoved,
         // Items an overlapping run had already cleaned (not failures).
         alreadyCleanedSkipped: media.skipped + rooms.skipped,
