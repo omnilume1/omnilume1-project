@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import {
   countSpots,
+  publicUsersForViewer,
   heartbeatArgs,
   heartbeatLeader,
   heartbeatPaused,
@@ -55,7 +56,18 @@ test('ghosts are not on the public list, so they never change the counts or lead
   const presence = read('src/hooks/useRoomPresence.ts');
   assert.match(presence, /useRoomHeartbeat\(roomId, selfId, visiblePublicUsers\)/);
   assert.match(presence, /setPublicUsers\(uniqueUsers\(channelUsers\(publicChannel\)\)\)/);
+  assert.match(presence, /publicUsersForViewer\(publicUsers, selfId, isGhostMode\)/);
   assert.match(presence, /\(ghostMode && isPrivateScope\) \|\| \(!ghostMode && !isPrivateScope\)/);
+});
+
+test('a ghost viewer never counts their own stale public presence', () => {
+  const publicUsers = [
+    { user_id: 'a', spot: 'screen' },
+    { user_id: 'b', spot: 'desk' },
+  ];
+  assert.deepEqual(publicUsersForViewer(publicUsers, 'a', true), [publicUsers[1]]);
+  assert.equal(publicUsersForViewer(publicUsers, 'a', false), publicUsers);
+  assert.equal(publicUsersForViewer(publicUsers, null, true), publicUsers);
 });
 
 test('the status key changes only when counts or the door change', () => {
