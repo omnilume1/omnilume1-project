@@ -86,6 +86,24 @@ protected by its server-only secret and service-role configuration.
   10 minutes; the 61st raises `PT429` (HTTP 429). Buckets older than a day are
   deleted as the function runs.
 
+## Gate board (hostel roadmap phase 15)
+
+- `get_gate_metrics(p_since date)` (`20261111092811_phase15_gate_metrics.sql`)
+  returns one jsonb object of counts and ratios over `product_events` for
+  nights on or after `p_since`: activated nights and groups, hostel-proof
+  nights, G-D7, G-W4, median minutes, card shares and spots per night, the
+  funnel by `ref`, the `lp-a` / `lp-b` A/B and the K-factor inputs. The
+  migration's header defines each one.
+- It is SECURITY DEFINER with `search_path = ''`. Its first statement raises
+  `42501` unless `is_site_owner(auth.uid())`. EXECUTE is revoked from `PUBLIC`
+  and `anon` and granted to `authenticated` only, so a signed-in member gets
+  `42501` and a signed-out caller gets "permission denied for function".
+- It never returns a room id, and `product_events` holds no user ids. The only
+  strings returned are `ref` tags, which the table's CHECK limits to
+  `^[a-z0-9-]{1,40}$`.
+- `/admin/metrics` shows it. The page returns 404 to anyone who is not a site
+  owner, like `/admin/recovery`.
+
 ## Rebuild and deployment notes
 
 - Do not run only the historical base object dump when rebuilding a project.
