@@ -26,6 +26,9 @@ export type RoomPresenceValue = {
 
 type PresenceChannel = ReturnType<ReturnType<typeof createClient>['channel']>;
 
+const TRACK_LIMIT = 5;
+const TRACK_WINDOW_MS = 35_000;
+
 function uniqueUsers(users: RoomPresenceUser[]) {
   const byId = new Map<string, RoomPresenceUser>();
   users.forEach((user) => {
@@ -49,19 +52,40 @@ export function useRoomPresence(roomId: string, refreshKey = 0): RoomPresenceVal
   const [canViewGhostPresence, setCanViewGhostPresence] = useState(false);
   // What this browser tracks, and on which channel (public, or the
   // privileged one for ghosts), so setSpot/setDoor can re-track.
-  const trackedRef = useRef<{ channel: PresenceChannel; userId: string; onlineAt: string } | null>(null);
+  // `sent` holds this channel's track times (its first track included), for the spacing below.
+  const trackedRef = useRef<{ channel: PresenceChannel; userId: string; onlineAt: string; sent: number[] } | null>(null);
   const spotRef = useRef<RoomSpot>(DEFAULT_SPOT);
   const doorRef = useRef<RoomDoor>(DEFAULT_DOOR);
+  const retrackTimerRef = useRef<number | null>(null);
 
+  // Supabase Realtime closes a presence channel when one client tracks too often ("Client
+  // presence rate limit exceeded": measured on production, a 6th track within ~28 s closes it,
+  // 6 tracks over 32.5 s do not, so about 5 per 30 s) and the channel is not rejoined, so the member would vanish from the room.
+  // Re-tracks are spaced: at most TRACK_LIMIT per TRACK_WINDOW_MS on a channel. A change past
+  // that goes out once, with the latest spot and door, as soon as the window allows.
   const retrack = useCallback(() => {
     const tracked = trackedRef.current;
-    if (!tracked) return;
-    void tracked.channel.track({ user_id: tracked.userId, online_at: tracked.onlineAt, spot: spotRef.current, door: doorRef.current }).catch(() => undefined);
+    if (!tracked || retrackTimerRef.current !== null) return;
+    const now = Date.now();
+    const recent = tracked.sent.filter((at) => now - at < TRACK_WINDOW_MS);
+    const wait = recent.length < TRACK_LIMIT ? 0 : recent[recent.length - TRACK_LIMIT] + TRACK_WINDOW_MS - now;
+    const send = () => {
+      retrackTimerRef.current = null;
+      const current = trackedRef.current;
+      if (!current) return; // reconnecting: the new channel's first track carries the latest values
+      current.sent = [...current.sent.filter((at) => Date.now() - at < TRACK_WINDOW_MS), Date.now()];
+      void current.channel.track({ user_id: current.userId, online_at: current.onlineAt, spot: spotRef.current, door: doorRef.current }).catch(() => undefined);
+    };
+    if (wait <= 0) send();
+    else retrackTimerRef.current = window.setTimeout(send, wait);
   }, []);
+  useEffect(() => () => { if (retrackTimerRef.current !== null) window.clearTimeout(retrackTimerRef.current); }, []);
 
   const setSpot = useCallback((spot: RoomSpot) => {
-    spotRef.current = normalizeSpot(spot);
-    setMySpot(spotRef.current);
+    const next = normalizeSpot(spot);
+    if (next === spotRef.current) return; // a re-tap must not spend a track
+    spotRef.current = next;
+    setMySpot(next);
     retrack();
   }, [retrack]);
 
@@ -117,7 +141,7 @@ export function useRoomPresence(roomId: string, refreshKey = 0): RoomPresenceVal
           const isPrivateScope = channel === privilegedChannel;
           // Ghosts track only on the privileged channel, never the public one.
           if ((ghostMode && isPrivateScope) || (!ghostMode && !isPrivateScope)) {
-            trackedRef.current = { channel, userId: user.id, onlineAt: new Date().toISOString() };
+            trackedRef.current = { channel, userId: user.id, onlineAt: new Date().toISOString(), sent: [Date.now()] };
             await channel.track({
               user_id: user.id,
               online_at: trackedRef.current.onlineAt,

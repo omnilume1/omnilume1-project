@@ -36,7 +36,7 @@ export type DeskHandle = { tile: () => void; reset: () => void; focus: () => voi
 
 const LIMITS = { minW: 280, minH: 200 };
 const EDGES: Edge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
-const STACKED = '(max-width: 767px)';
+export const STACKED = '(max-width: 767px)';
 
 type Gesture =
   | { kind: 'move' | 'resize'; id: string; edge?: Edge; pointer: number; sx: number; sy: number; start: Box; box: Box; frame: number }

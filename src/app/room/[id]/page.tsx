@@ -37,7 +37,9 @@ import FloatingDock from '@/components/ui/FloatingDock';
 import NotificationBell from '@/components/ui/NotificationBell';
 import { OmniIcon, type OmniIconName } from '@/components/ui/OmniIcon';
 import OmniIntro from '@/components/ui/OmniIntro';
-import RoomDesk, { type DeskHandle } from '@/components/room/RoomDesk';
+import RoomDesk, { STACKED, type DeskHandle } from '@/components/room/RoomDesk';
+import RoomPhoneShell from '@/components/room/RoomPhoneShell';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { leaveRoom, transferRoomOwnership } from '@/actions/room-controls';
 import { getRoomMembersList } from '@/actions/members';
 import { clearRoomRealtimeCache, useRoomSync } from '@/hooks/useRoomSync';
@@ -345,6 +347,12 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const realtimeRoomId = accessStatus === 'approved' && !roomIsExpired ? (roomData?.id ?? '') : '';
   const roomSync = useRoomSync(realtimeRoomId, userRole === 'owner' || canControlMedia);
   const roomPresence = useRoomPresence(realtimeRoomId, presenceRefreshVersion);
+  // Phase 13: below 768 px the room is the phone shell instead of the desk (one or the other, never both).
+  // Chosen once per visit: rotating a phone past 768 px must not remount the player, timer and chat.
+  const narrow = useMediaQuery(STACKED);
+  const [latchedStacked, setLatchedStacked] = useState<boolean | null>(null);
+  if (roomData && latchedStacked === null) setLatchedStacked(narrow);
+  const stacked = latchedStacked ?? narrow;
   // D1: approved non-guest members can send the door link. A lock change
   // (here, or by anyone via invite_changed) re-fetches the token.
   const canShareDoor = Boolean(realtimeRoomId) && ['owner', 'admin', 'member'].includes(userRole ?? '');
@@ -449,7 +457,9 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   useEffect(() => {
     const onOpenWindow = (event: Event) => {
       const id = (event as CustomEvent<unknown>).detail;
-      if (isWinId(id)) openWindow(id);
+      if (!isWinId(id)) return;
+      // The phone shell has no windows: a cast that asks for Watch moves to the Screen tab.
+      if (stacked) { if (id === 'watch') roomPresence.setSpot('screen'); } else openWindow(id);
     };
     window.addEventListener('omni:open-window', onOpenWindow);
     return () => window.removeEventListener('omni:open-window', onOpenWindow);
@@ -599,6 +609,11 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
     );
   }
 
+  // Each sync-holding stage is created once and handed to the desk or the phone shell.
+  const mediaStage = <MediaStage roomId={roomData.id} canControlMedia={userRole === 'owner' || canControlMedia} />;
+  const studyStage = <StudyStage roomId={roomData.id} focusRoomPath={focusRoomPath} timerNavigationRequest={timerNavigationRequest} onOpenWatch={featureEnabled('watch') ? () => (stacked ? roomPresence.setSpot('screen') : openWindow('watch')) : undefined} />;
+  const roomChat = <RoomChat roomId={roomData.id} />;
+
   return (
     <RoomRealtimeProvider sync={roomSync} presence={roomPresence}>
     <VoiceRoomProvider roomId={roomData.id}>
@@ -614,7 +629,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           <span className="room-here"><span className="status-dot" aria-hidden="true" />{roomPresence.onlineUserIds.length} here</span>
         </div>
         <div className="room-actions">
-          {canShareDoor && <SendLinkButton roomId={roomData.id} nameplate={roomData.nameplate ?? null} door={door} />}
+          {canShareDoor && !stacked && <SendLinkButton roomId={roomData.id} nameplate={roomData.nameplate ?? null} door={door} />}
           {SURFACES.groupConversion && userRole === 'owner' && roomData && !roomData.is_group && roomData.expiration_type !== 'irreversible' && !roomData.deletion_scheduled_at && <button type="button" onClick={() => setShowConvertModal(true)} className="room-action">Convert to group</button>}
           {roomData.reopened_until && <button onClick={handlePermanentRequest} disabled={permanentSubmitting || permanentRequests.some((request) => request.status === 'pending')} className="room-action disabled:cursor-wait disabled:opacity-50">{permanentSubmitting ? 'Requesting...' : 'Request Permanent Room'}</button>}
           <div className="room-layout-menu" ref={layoutMenuRef}>
@@ -685,6 +700,27 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         {roomData.expiration_type === 'permanent' && roomData.deletion_scheduled_at && <p className="room-alert" role="status">This room is scheduled for permanent deletion on {new Date(roomData.deletion_scheduled_at).toLocaleString([], { dateStyle: 'full', timeStyle: 'short' })}. Chats and files will be deleted unless the owner cancels.</p>}
       </div>
 
+      {stacked ? (
+        <RoomPhoneShell
+          roomId={roomData.id}
+          roomName={roomData.name}
+          nameplate={roomData.nameplate ?? null}
+          presence={roomPresence}
+          study={featureEnabled('study') ? studyStage : null}
+          media={featureEnabled('watch') ? mediaStage : null}
+          chat={featureEnabled('chat') ? roomChat : null}
+          voice={windowEnabled('voice') ? <VoicePanel /> : null}
+          canShareDoor={canShareDoor}
+          door={door}
+          more={[
+            { id: 'members', label: 'Members', icon: 'users', enabled: windowEnabled('members'), content: <MembersTab roomId={roomData.id} currentUserRole={userRole} canManageMembers={canManageMembers} onChangeRole={(memberId) => { setControlCenterMemberId(memberId); setControlCenterTab('user-control'); setShowControlCenter(true); }} /> },
+            { id: 'files', label: 'Files', icon: 'file', enabled: windowEnabled('files'), content: <FilesTab roomId={roomData.id} currentUserRole={userRole} canControlMedia={userRole === 'owner' || canControlMedia} /> },
+            { id: 'whiteboard', label: 'Whiteboard', icon: 'pen', enabled: windowEnabled('whiteboard'), content: <div className="flex min-h-0 flex-1 flex-col p-3"><StudyWhiteboardPanel roomId={roomData.id} /></div> },
+            { id: 'collab', label: 'Collaborate', icon: 'poll', enabled: windowEnabled('collab'), content: <CollabPanel roomId={roomData.id} /> },
+            { id: 'settings', label: 'Room settings', icon: 'settings', enabled: true, onOpen: () => setShowControlCenter(true) },
+          ]}
+        />
+      ) : (
       <div className="room-stage">
         <nav className="room-rail glass" aria-label="Room windows">
           {[RAIL_STAGE, RAIL_TOOLS].map((group, groupIndex) => (
@@ -725,10 +761,10 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
             emptyHint={<><OmniIcon name="layout" size={22} /><p>Every window is closed. Open one from the rail.</p></>}
             windows={[
               { id: 'home', open: isOpen('home'), children: <div className="room-dashboard-layer flex min-h-0 flex-1 flex-col overflow-y-auto"><RoomDashboard roomId={roomData.id} room={roomData} timeLeft={timeLeft} featureFlags={featureFlags} onOpenActivity={openWindow} onOpenTool={openWindow} /></div> },
-              { id: 'watch', open: isOpen('watch'), keepMounted: featureEnabled('watch'), children: <MediaStage roomId={roomData.id} canControlMedia={userRole === 'owner' || canControlMedia} /> },
-              { id: 'study', open: isOpen('study'), keepMounted: featureEnabled('study'), children: <StudyStage roomId={roomData.id} focusRoomPath={focusRoomPath} timerNavigationRequest={timerNavigationRequest} onOpenWatch={featureEnabled('watch') ? () => openWindow('watch') : undefined} /> },
+              { id: 'watch', open: isOpen('watch'), keepMounted: featureEnabled('watch'), children: mediaStage },
+              { id: 'study', open: isOpen('study'), keepMounted: featureEnabled('study'), children: studyStage },
               { id: 'whiteboard', open: isOpen('whiteboard'), children: <div className="flex min-h-0 flex-1 flex-col p-3"><StudyWhiteboardPanel roomId={roomData.id} /></div> },
-              { id: 'chat', open: isOpen('chat'), keepMounted: featureEnabled('chat'), children: <RoomChat roomId={roomData.id} /> },
+              { id: 'chat', open: isOpen('chat'), keepMounted: featureEnabled('chat'), children: roomChat },
               { id: 'members', open: isOpen('members'), children: <MembersTab roomId={roomData.id} currentUserRole={userRole} canManageMembers={canManageMembers} onChangeRole={(memberId) => { setControlCenterMemberId(memberId); setControlCenterTab('user-control'); setShowControlCenter(true); }} /> },
               { id: 'voice', open: isOpen('voice'), children: <VoicePanel /> },
               { id: 'collab', open: isOpen('collab'), children: <CollabPanel roomId={roomData.id} /> },
@@ -750,6 +786,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
           </div>
         </div>
       </div>
+      )}
       </div>
       {showConvertModal && <RoomConversionDialog roomId={roomData.id} roomName={roomData.name} onClose={() => setShowConvertModal(false)} onConverted={(result: ConversionResult) => { applyConversion(result.name); setGroupInfo({ name: result.name, member_count: result.memberCount }); }} />}
       <RoomControlCenter
@@ -767,8 +804,11 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         onDoorLockChanged={() => setDoorRefresh((version) => version + 1)}
       />
       {showLeaveConfirmation && <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="leave-room-title"><section className="glass-strong w-full max-w-md rounded-2xl p-6"><p className="text-[10px] font-bold uppercase tracking-[.16em] text-amber-200">Membership</p>{userRole === 'owner' && ownerLeaveStep === 'choice' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Do you want to transfer ownership before leaving?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Choose No to leave the active workspace while retaining your room membership and ownership for later.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => { setShowLeaveConfirmation(false); minimizeActiveRoom(); }} className="omni-button omni-button-ghost">No</button><button type="button" disabled={leaving} onClick={() => void openOwnerTransfer()} className="omni-button omni-button-primary">Yes</button></div></> : userRole === 'owner' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Choose a new owner</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Only an approved permanent member can receive ownership.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<select value={ownerTransferTarget} onChange={(event) => setOwnerTransferTarget(event.target.value)} className="omni-input mt-4">{ownerTransferCandidates.map((member) => <option key={member.user_id} value={member.user_id}>User {member.user_id.slice(0, 8)}</option>)}</select><div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setOwnerLeaveStep('choice')} className="omni-button omni-button-ghost">Back</button><button type="button" disabled={leaving || !ownerTransferTarget} onClick={() => void completeOwnerTransferAndLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Transfer and leave'}</button></div></> : <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Leave this room?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">You can rejoin later when the room is open and you are not restricted.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => void handleLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Leave room'}</button></div></>}</section></div>}
-      {featureEnabled('chat') && <VoiceDock panelOpen={isOpen('voice')} onOpen={() => openWindow('voice')} />}
-      <FloatingDock />
+      {featureEnabled('chat') && (stacked
+        ? <VoiceDock panelOpen={roomPresence.mySpot === 'bed'} onOpen={() => roomPresence.setSpot('bed')} />
+        : <VoiceDock panelOpen={isOpen('voice')} onOpen={() => openWindow('voice')} />)}
+      {/* The phone shell has its own bottom bar; the header's back button leaves the room. */}
+      {!stacked && <FloatingDock />}
     </VoiceRoomProvider>
     </RoomRealtimeProvider>
   );
