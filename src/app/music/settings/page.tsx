@@ -1,6 +1,7 @@
 import { PageTitle } from '@/components/music/MusicParts';
 import { SourcesSetting } from '@/components/music/MusicSources';
 import { PresenceSetting } from '@/components/music/MusicTogether';
+import { SURFACES } from '@/lib/surface-flags';
 
 const SHORTCUTS: [string, string][] = [
   ['Space', 'Play / pause'],
@@ -30,7 +31,7 @@ export default function MusicSettingsPage() {
           You can share an upload to a room or group you belong to; only its members can play it, and you can stop sharing at any time.
           Playlists and listening history are visible only to you; clear history from Recently Played. Shuffle, repeat and volume are remembered on this device.
         </p>
-        <SourcesSetting />
+        {SURFACES.musicSources && <SourcesSetting />}
       </section>
     </>
   );

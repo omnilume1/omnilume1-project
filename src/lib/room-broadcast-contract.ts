@@ -57,8 +57,8 @@ type FieldKind = 'uuid' | 'id' | 'number' | 'version' | 'boolean' | 'source' | '
 
 export const STUDY_CHANGE_KINDS = ['notes', 'tasks', 'resources', 'pdf'] as const;
 export const COLLAB_CHANGE_KINDS = ['hands', 'polls', 'countdowns', 'events', 'voice', 'recordings'] as const;
-// 'who' asks members who are sharing to announce it (sent once on connect, so
-// people who just opened the room see a live tab without waiting for a heartbeat).
+// 'who' asks members in voice to announce themselves (sent on connect and before
+// joining voice, so people see a live tab and count the chairs without waiting for a heartbeat).
 export const RTC_SIGNAL_KINDS = ['hello', 'bye', 'offer', 'answer', 'ice', 'who'] as const;
 // Session descriptions and ICE candidates are WebRTC connection data (codecs,
 // fingerprints, candidate addresses), never room content. They are bounded and
@@ -128,7 +128,8 @@ const EVENT_FIELDS: Record<RoomBroadcastEventType, Record<string, FieldKind>> = 
   pdf_follow: { fileId: 'uuid', page: 'page' },
   // `watching`: whether the member can see a shared screen right now (voice-mesh.ts sends a
   // hidden viewer a 2 fps trickle). Without it here, the flag was stripped and never arrived.
-  rtc_signal: { to: 'uuid', kind: 'rtc_kind', sdp: 'sdp', candidate: 'candidate', sdpMid: 'id', sdpMLineIndex: 'index', screen: 'boolean', mic: 'boolean', watching: 'boolean' },
+  // `at`: when this member joined voice (ms); the first VOICE_CHAIRS by `at` hold the seats (voice-seats.ts).
+  rtc_signal: { to: 'uuid', kind: 'rtc_kind', sdp: 'sdp', candidate: 'candidate', sdpMid: 'id', sdpMLineIndex: 'index', screen: 'boolean', mic: 'boolean', watching: 'boolean', at: 'number' },
 };
 
 // Fields an event is useless without.

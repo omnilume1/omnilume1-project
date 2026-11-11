@@ -4,7 +4,7 @@ import { unwrapAction } from '@/lib/action-result';
 import type { FormEvent } from 'react';
 import { useState } from 'react';
 import { updateMyProfile } from '@/actions/profiles';
-import { MINIMUM_AGE_YEARS, PROFILE_GENDERS, latestAllowedDateOfBirth, type ProfileGender, type ProfileInput } from '@/lib/profile-validation';
+import { MINIMUM_AGE_YEARS, PROFILE_GENDERS, latestAllowedDateOfBirth, saveWithUsernameRetry, type ProfileGender, type ProfileInput } from '@/lib/profile-validation';
 import { OmniIcon } from '@/components/ui/OmniIcon';
 
 interface ProfileRecord {
@@ -30,17 +30,15 @@ function avatarInitials(name: string, username: string) {
   return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
 }
 
-function SetupSteps({ activeStep }: { activeStep: number }) {
-  const steps = ['Basic info', 'Preferences', 'Complete'];
-  return (
-    <ol className="profile-setup-steps" aria-label="Profile setup progress">
-      {steps.map((label, index) => {
-        const step = index + 1;
-        const state = step < activeStep ? 'is-complete' : step === activeStep ? 'is-current' : '';
-        return <li key={label} className={state} aria-current={step === activeStep ? 'step' : undefined}><span>{step < activeStep ? '✓' : step}</span><small>{label}</small></li>;
-      })}
-    </ol>
-  );
+type SaveOutcome = { success: true; profile: unknown } | { success: false; error: string };
+
+async function saveProfile(input: ProfileInput): Promise<SaveOutcome> {
+  try {
+    const result = await updateMyProfile(input).then(unwrapAction);
+    return result.success ? { success: true, profile: result.profile } : { success: false, error: result.error };
+  } catch (error) {
+    return { success: false, error: error instanceof Error && error.message === 'That username is already in use.' ? error.message : 'We could not save your profile. Please review the fields and try again.' };
+  }
 }
 
 export default function ProfileForm({
@@ -48,32 +46,25 @@ export default function ProfileForm({
   onSaved,
   onCancel,
   setup = false,
+  prefill,
 }: {
   initialProfile: ProfileRecord | null;
   onSaved?: (profile: ProfileRecord) => void | Promise<void>;
   onCancel?: () => void;
   setup?: boolean;
+  prefill?: { displayName: string; avatarUrl: string; username: string };
 }) {
-  const [displayName, setDisplayName] = useState(initialProfile?.display_name ?? '');
-  const [username, setUsername] = useState(initialProfile?.username ?? '');
+  const [displayName, setDisplayName] = useState(prefill?.displayName ?? initialProfile?.display_name ?? '');
+  const [username, setUsername] = useState(prefill?.username ?? initialProfile?.username ?? '');
   const [dateOfBirth, setDateOfBirth] = useState(initialProfile?.date_of_birth ?? '');
   const [gender, setGender] = useState<ProfileGender>(initialProfile?.gender ?? 'prefer_not_to_say');
-  const [avatarUrl, setAvatarUrl] = useState(initialProfile?.avatar_url ?? '');
+  const [avatarUrl, setAvatarUrl] = useState(prefill?.avatarUrl ?? initialProfile?.avatar_url ?? '');
   const [bio, setBio] = useState(initialProfile?.bio ?? '');
   const [isPrivate, setIsPrivate] = useState(initialProfile?.is_private ?? true);
-  const [step, setStep] = useState(1);
+  const [changePhoto, setChangePhoto] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-  function advanceSetup() {
-    setErrorMessage(null);
-    if (step === 1 && (!displayName.trim() || !username.trim() || !dateOfBirth)) {
-      setErrorMessage('Add your name, username and date of birth before continuing.');
-      return;
-    }
-    setStep((current) => Math.min(3, current + 1));
-  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -92,7 +83,17 @@ export default function ProfileForm({
     };
 
     try {
-      const result = await updateMyProfile(input).then(unwrapAction);
+      let saved: SaveOutcome;
+      if (setup) {
+        // Hidden fields (gender, bio, private) keep their defaults and are still
+        // submitted: the profile-complete flag needs a gender.
+        const outcome = await saveWithUsernameRetry(saveProfile, input, { suggested: prefill?.username ?? '' });
+        if (outcome.input.username !== input.username) setUsername(outcome.input.username);
+        saved = outcome.result;
+      } else {
+        saved = await updateMyProfile(input).then(unwrapAction) as SaveOutcome;
+      }
+      const result = saved;
       if (!result.success) {
         setErrorMessage(result.error);
         return;
@@ -120,11 +121,15 @@ export default function ProfileForm({
         </span>
         <span className="profile-avatar-camera"><OmniIcon name="camera" size={15} /></span>
       </label>
-      <div>
-        <label htmlFor="profile-avatar" className="form-label">Profile photo URL <span className="text-neutral-500">(optional)</span></label>
-        <input id="profile-avatar" type="url" value={avatarUrl} onChange={(event) => setAvatarUrl(event.target.value)} className="omni-input" placeholder="https://..." inputMode="url" />
-        <p className="form-help">Use a secure image URL or an existing application path.</p>
-      </div>
+      {setup && !changePhoto ? (
+        <button type="button" onClick={() => setChangePhoto(true)} className="omni-button omni-button-ghost">Change photo</button>
+      ) : (
+        <div>
+          <label htmlFor="profile-avatar" className="form-label">Profile photo URL <span className="text-neutral-500">(optional)</span></label>
+          <input id="profile-avatar" type="url" value={avatarUrl} onChange={(event) => setAvatarUrl(event.target.value)} className="omni-input" placeholder="https://..." inputMode="url" />
+          <p className="form-help">Use a secure image URL or an existing application path.</p>
+        </div>
+      )}
     </div>
   );
 
@@ -157,12 +162,6 @@ export default function ProfileForm({
 
   const preferencesFields = (
     <div className="profile-form-grid">
-      {setup && <div className="profile-form-span">
-        <label htmlFor="profile-gender" className="form-label">Gender</label>
-        <select id="profile-gender" value={gender} onChange={(event) => setGender(event.target.value as ProfileGender)} className="omni-select" required>
-          {PROFILE_GENDERS.map((option) => <option key={option} value={option}>{genderLabels[option]}</option>)}
-        </select>
-      </div>}
       <div className="profile-form-span">
         <label htmlFor="profile-bio" className="form-label">Bio <span className="text-neutral-500">(optional)</span></label>
         <textarea id="profile-bio" value={bio} onChange={(event) => setBio(event.target.value)} className="omni-textarea" rows={4} maxLength={500} placeholder="What are you making space for?" />
@@ -178,12 +177,11 @@ export default function ProfileForm({
 
   return (
     <form onSubmit={(event) => void handleSubmit(event)} className={`profile-editor ${setup ? 'profile-setup-editor glass-card-ambient' : 'glass-panel'}`}>
-      {setup && <SetupSteps activeStep={step} />}
       <div className="profile-editor-heading">
         <div>
-          <p className="section-kicker">{setup ? `Step ${step} of 3` : 'Profile details'}</p>
-          <h2>{setup ? (step === 1 ? "Let's get to know you." : step === 2 ? 'Choose your preferences.' : 'Ready to join OmniLume?') : 'Edit your profile'}</h2>
-          <p className="section-copy">{setup ? (step === 1 ? 'This helps others find and connect with you.' : step === 2 ? 'Control the details people can discover.' : 'Review your details. They are validated securely when you save.') : 'Your name, username and privacy choices are validated securely before they are saved.'}</p>
+          <p className="section-kicker">{setup ? 'Your details' : 'Profile details'}</p>
+          <h2>{setup ? "Let's get to know you." : 'Edit your profile'}</h2>
+          <p className="section-copy">{setup ? 'This helps others find and connect with you.' : 'Your name, username and privacy choices are validated securely before they are saved.'}</p>
         </div>
         {!setup && onCancel && <button type="button" onClick={onCancel} className="icon-button" aria-label="Close profile editor"><OmniIcon name="close" size={17} /></button>}
       </div>
@@ -191,19 +189,12 @@ export default function ProfileForm({
       {errorMessage && <p className="form-error" role="alert">{errorMessage}</p>}
       {successMessage && <p className="form-success" role="status">{successMessage}</p>}
 
-      {!setup && <>
-        {basicFields}
-        {preferencesFields}
-      </>}
-
-      {setup && step === 1 && basicFields}
-      {setup && step === 2 && preferencesFields}
-      {setup && step === 3 && <div className="profile-setup-review"><div className="profile-avatar-preview">{avatarUrl ? <img src={avatarUrl} alt="" /> : avatarInitials(displayName, username)}</div><div><strong>{displayName || 'Your name'}</strong><p>{username ? `@${username}` : 'Choose a username'}</p><p>{isPrivate ? 'Private profile' : 'Public profile'}</p></div></div>}
+      {basicFields}
+      {!setup && preferencesFields}
 
       <div className="profile-form-actions">
         {!setup && onCancel && <button type="button" onClick={onCancel} className="omni-button omni-button-ghost">Cancel</button>}
-        {setup && step > 1 && <button type="button" onClick={() => setStep((current) => current - 1)} disabled={saving} className="omni-button omni-button-ghost">Back</button>}
-        {setup && step < 3 ? <button type="button" onClick={advanceSetup} className="omni-button omni-button-primary">Continue <OmniIcon name="arrow" size={15} /></button> : <button type="submit" disabled={saving} className="omni-button omni-button-primary">{saving ? 'Saving...' : setup ? 'Continue to OmniLume' : 'Save profile'} <OmniIcon name="arrow" size={15} /></button>}
+        <button type="submit" disabled={saving} className="omni-button omni-button-primary">{saving ? 'Saving...' : setup ? 'Enter OmniLume' : 'Save profile'} <OmniIcon name="arrow" size={15} /></button>
       </div>
     </form>
   );

@@ -20,6 +20,7 @@ import type { TimerState } from '@/hooks/useRoomSync';
 import { ROOM_TIMER_SUBJECT_MAX_CHARS } from '@/lib/room-broadcast-contract';
 import { logProductEventFromBrowser } from '@/lib/product-events';
 import { createClient } from '@/utils/supabase/client';
+import { SURFACES } from '@/lib/surface-flags';
 import {
   FOCUS_LOCK_EVENT,
   activateFocusLock,
@@ -30,7 +31,7 @@ import {
 } from '@/lib/focus-lock';
 
 type StudyTab = 'TIMER' | 'NOTES' | 'WHITEBOARD' | 'PDF' | 'TASKS' | 'RESOURCES';
-const STUDY_TABS: ReadonlyArray<readonly [StudyTab, string]> = [['TIMER', 'Timer'], ['NOTES', 'Notes'], ['WHITEBOARD', 'Whiteboard'], ['PDF', 'PDF'], ['TASKS', 'Tasks'], ['RESOURCES', 'Resources']];
+const STUDY_TABS: ReadonlyArray<readonly [StudyTab, string]> = [['TIMER', 'Timer'], ['NOTES', 'Notes'], ['WHITEBOARD', 'Whiteboard'], ['PDF', 'PDF'], ...(SURFACES.studyTasks ? [['TASKS', 'Tasks'] as const] : []), ['RESOURCES', 'Resources']];
 
 interface StudyStageProps {
   roomId: string;

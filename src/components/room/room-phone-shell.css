@@ -1,0 +1,83 @@
+/* Phase 13: the phone room (RoomPhoneShell, below 768 px only). Frosted floating chrome like
+   the dock and the top bar; existing glass values only, no new colours. */
+/* Bottom room clears the bar and the mini player; the voice dock adds its own height. */
+.phone-shell { display: grid; gap: 12px; padding: 0 12px calc(var(--omni-dock-clearance) + env(safe-area-inset-bottom)); }
+body:has(.voice-dock) .phone-shell { padding-bottom: calc(196px + env(safe-area-inset-bottom)); }
+/* The layout is chosen once per visit, so a phone turned to landscape (768 px+) keeps the shell:
+   repeat the stacked rules app.css applies only below 768 px. */
+.room-shell:has(.phone-shell) { height: auto; min-height: 100dvh; overflow: visible; }
+.phone-shell :is(.room-cast-resizable, .room-study-resizable) { min-height: 0; max-height: none; height: auto !important; flex: none !important; overflow: visible; width: 100%; max-width: 100%; }
+.phone-shell [data-stage-card] { flex: none; height: auto; overflow: visible; resize: none; }
+.phone-shell [data-media-area] { flex: none; height: 46vh; }
+.phone-shell :is([data-media-history], [data-study-history]) { position: static; order: 4; width: 100%; max-height: none; margin-top: 12px; }
+/* Older panels' tiny tracked capitals speak in sentence case here, as they did inside desk windows. */
+.phone-shell .uppercase { text-transform: none; }
+.phone-shell [class*="tracking-w"] { letter-spacing: 0; }
+.phone-shell :is(.text-\[10px\], .text-\[11px\]) { font-size: 12px; }
+
+.phone-tabs, .phone-bar { border: 1px solid rgba(255,255,255,.16); background: linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.03)); box-shadow: inset 0 1px 0 rgba(255,255,255,.18), inset 0 -1px 0 rgba(255,255,255,.04), 0 20px 44px rgb(var(--pal-06040e) / .4); backdrop-filter: blur(26px) saturate(190%); -webkit-backdrop-filter: blur(26px) saturate(190%); }
+/* The tab strip is sticky over the video: give it the top bar's frost base so labels stay readable. */
+.phone-tabs { background: var(--omni-frost); }
+@supports not (backdrop-filter: blur(1px)) { .phone-tabs, .phone-bar { background: linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.03)), rgb(var(--pal-2c2442)); } }
+
+.phone-tabs { position: sticky; top: max(8px, env(safe-area-inset-top)); z-index: 55; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 5px; border-radius: 18px; }
+.phone-tab { position: relative; display: flex; min-width: 0; min-height: 50px; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 4px 2px; border: 0; border-radius: 13px; background: transparent; color: var(--omni-muted); font-size: 11px; font-weight: 600; cursor: pointer; transition: color 160ms ease, background-color 160ms ease, transform 160ms var(--omni-ease); }
+.phone-tab > span:not(.phone-tab-count) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-tab svg { flex: none; }
+.phone-tab[aria-selected="true"] { background: rgba(255,255,255,.13); color: var(--omni-text); box-shadow: inset 0 1px 0 rgba(255,255,255,.16); }
+.phone-tab:active { transform: scale(.96); }
+.phone-tab-count { position: absolute; top: 4px; right: 8px; min-width: 16px; padding: 0 4px; border-radius: 8px; background: rgba(255,255,255,.08); font-size: 10px; line-height: 16px; text-align: center; }
+
+.phone-stage { min-width: 0; }
+.phone-pane { display: flex; min-width: 0; flex-direction: column; animation: phone-pane-in 200ms var(--omni-ease) both; }
+.phone-pane[hidden] { display: none; }
+.phone-pane > * { min-width: 0; }
+@keyframes phone-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.phone-off { margin: 0; padding: 28px 16px; border: 1px solid var(--omni-line); border-radius: 16px; color: var(--omni-muted); font-size: 13px; text-align: center; }
+
+.phone-speaker { display: grid; gap: 12px; justify-items: start; padding: 18px; }
+.phone-speaker h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.phone-speaker p { margin: 0; color: var(--omni-text-2); font-size: 13px; }
+.phone-speaker-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.phone-error { margin: 0; color: #fca5a5; font-size: 12px; }
+.phone-voice-error { position: fixed; z-index: 60; left: 12px; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); padding: 8px 12px; border: 1px solid rgba(248,113,113,.28); border-radius: 12px; background: var(--omni-frost-solid); cursor: pointer; }
+.phone-speaker p { min-width: 0; overflow-wrap: anywhere; }
+
+.phone-chat { display: flex; height: 62vh; min-height: 320px; flex-direction: column; overflow: hidden; border: 1px solid rgba(255,255,255,.13); border-radius: 16px; background: var(--omni-frost-solid); }
+.phone-chat > * { min-height: 0; flex: 1; }
+
+.phone-bar { position: fixed; z-index: 60; left: 50%; bottom: max(10px, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 6px; max-width: calc(100vw - 24px); padding: 6px; border-radius: 20px; transform: translateX(-50%); }
+.phone-bar-btn { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border: 0; border-radius: 14px; background: transparent; color: var(--omni-text); cursor: pointer; transition: background-color 160ms ease, transform 160ms var(--omni-ease), opacity 160ms ease; }
+.phone-bar-btn:active:not(:disabled) { transform: scale(.94); }
+.phone-bar-btn:disabled { cursor: not-allowed; opacity: .4; }
+.phone-bar-btn.is-live { background: rgba(255,255,255,.13); }
+.phone-bar-btn.is-off { position: relative; color: #fca5a5; }
+/* Muted is a slashed mic, not only a tint. */
+.phone-bar-btn.is-off::after { content: ""; position: absolute; top: 50%; left: 50%; width: 24px; height: 2px; border-radius: 1px; background: currentColor; transform: translate(-50%, -50%) rotate(45deg); }
+/* SendLinkButton's toast is fixed, but the bar's transform makes the bar its containing block: put it just above the bar. */
+.phone-bar .personal-message-toast-stack { position: absolute; top: auto; right: auto; bottom: calc(100% + 8px); left: 50%; width: min(360px, calc(100vw - 24px)); transform: translateX(-50%); }
+/* Touch phones: in-flow panels keep saturate only; blur over a long scrolling stage costs the GPU (app.css). */
+@media (hover: none) and (pointer: coarse) {
+  .phone-pane :is(.glass-panel, .watch-panel) { -webkit-backdrop-filter: saturate(150%); backdrop-filter: saturate(150%); }
+}
+.phone-bar-share { display: flex; min-width: 0; }
+.phone-bar-share .room-action { height: 44px; border-radius: 14px; }
+
+/* 66/67: above the bar (60) and voice dock (65), below the page's z-70 dialogs (Control Center from Members). */
+.phone-sheet-scrim { position: fixed; inset: 0; z-index: 66; background: rgba(0,0,0,.5); animation: phone-fade-in 180ms ease both; }
+.phone-sheet { position: fixed; z-index: 67; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); left: 8px; display: flex; max-height: calc(88dvh - env(safe-area-inset-top)); flex-direction: column; overflow: hidden; border-radius: 22px; animation: phone-sheet-in 240ms var(--omni-ease) both; }
+.phone-sheet-head { display: flex; flex: none; align-items: center; gap: 10px; padding: 12px 12px 8px; }
+.phone-sheet-head h2 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; }
+.phone-sheet-body { display: flex; min-height: 0; height: 70dvh; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
+.phone-sheet-list { display: grid; gap: 4px; margin: 0; padding: 4px 8px 12px; list-style: none; }
+.phone-sheet-item { display: flex; width: 100%; min-height: 48px; align-items: center; gap: 12px; padding: 0 12px; border: 0; border-radius: 14px; background: transparent; color: var(--omni-text); font-size: 14px; text-align: left; cursor: pointer; transition: background-color 160ms ease; }
+.phone-sheet-item:active:not(:disabled) { background: rgba(255,255,255,.08); }
+.phone-sheet-item:disabled { cursor: not-allowed; opacity: .45; }
+.phone-sheet-item small { margin-left: auto; color: var(--omni-muted); font-size: 11px; }
+@keyframes phone-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes phone-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Reduced motion: no transitions or entrance motion in the shell. Kept here, not in app.css. */
+@media (prefers-reduced-motion: reduce) {
+  .phone-shell, .phone-shell * { transition-duration: 0s !important; animation-duration: 0s !important; }
+}

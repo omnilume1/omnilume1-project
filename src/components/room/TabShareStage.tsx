@@ -33,6 +33,7 @@ export function ShareTabButton() {
             Share a tab
           </button>
           <p className="tab-share-hint">Show any site you have open, with its sound. Works best in Chrome or Edge.</p>
+          <p className="tab-share-hint">Netflix, Hotstar and other streaming apps show black when shared.</p>
         </>
       ) : <p className="tab-share-hint">Sharing a tab needs Chrome or Edge on a computer.</p>}
       {voice.error && <p role="alert" className="tab-share-error">{voice.error}</p>}

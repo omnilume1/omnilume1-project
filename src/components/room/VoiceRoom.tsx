@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRoomRealtime } from '@/components/room/RoomRealtimeProvider';
 import { PEER_TIMEOUT_MS, VoiceMesh, loadIceServers, type RtcSignal, type VoicePeer } from '@/lib/voice-mesh';
+import { VOICE_CHAIRS, chairsTakenMessage, isFull, nextChairStep, pruneSeen, screenFullMessage, seatedIds } from '@/lib/voice-seats';
 import { useAnnounce, useHintedLoad, useRoomCapabilities } from '@/lib/collab-hooks';
 import {
   finishRecording, listConsents, listHands, listRecordings, listVoiceModeration, uploadRecording,
@@ -41,6 +42,11 @@ type VoiceContextValue = {
   memberVolumes: Record<string, number>;
   setMemberVolume: (userId: string, volume: number) => void;
   resumeShareSound: () => void;
+  // Set when a join was refused because every chair is taken ('mic' or watch-only).
+  floor: 'mic' | 'watch' | null;
+  // "Take the next chair": join on our own when a chair frees up.
+  nextChair: boolean;
+  takeNextChair: (on: boolean) => Promise<void>;
   join: (options?: { mic?: boolean }) => Promise<void>;
   enableMic: () => Promise<void>;
   leave: () => void;
@@ -134,6 +140,18 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
   const [hasMic, setHasMic] = useState(false);
   const [sharerSeen, setSharerSeen] = useState<Set<string>>(() => new Set());
   const sharerSeenAt = useRef(new Map<string, number>());
+  // Six chairs: everyone heard saying `hello` (so in voice), with their join time.
+  const voicers = useRef(new Map<string, { at?: number; seen: number }>());
+  const [floor, setFloorState] = useState<'mic' | 'watch' | null>(null);
+  const floorRef = useRef<'mic' | 'watch' | null>(null);
+  const [nextChair, setNextChairState] = useState(false);
+  const nextChairRef = useRef(false);
+  const joinBusy = useRef(false);
+  // When another member's rtc_signal was last heard: silence from everyone is not a free chair.
+  const heardAt = useRef(0);
+  // False once the room page has gone, so a join still waiting opens nothing.
+  const alive = useRef(true);
+  const seatCheck = useRef<() => void>(() => undefined);
   const [shareVolume, setShareVolume] = useState(1);
   const [shareMuted, setShareMuted] = useState(false);
   const [shareSoundBlocked, setShareSoundBlocked] = useState(false);
@@ -181,6 +199,7 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
   useEffect(() => subscribeRoomEvents((event) => {
     if (event.type !== 'rtc_signal') return;
     const signal = event.payload as RtcSignal;
+    if (event.senderId !== currentUserId) heardAt.current = Date.now();
     if (event.senderId !== currentUserId && (signal.kind === 'bye' || (signal.kind === 'hello' && typeof signal.screen === 'boolean'))) {
       const id = event.senderId;
       const sharing = signal.kind === 'hello' && signal.screen === true;
@@ -193,10 +212,28 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
         return next;
       });
     }
+    // Seats: any hello (heartbeat, introduction or `who` answer) means that member is in voice.
+    if (event.senderId !== currentUserId && (signal.kind === 'hello' || signal.kind === 'bye')) {
+      const id = event.senderId;
+      const before = voicers.current.get(id);
+      if (signal.kind === 'bye') {
+        if (voicers.current.delete(id)) seatCheck.current();
+      } else {
+        const at = typeof signal.at === 'number' ? signal.at : undefined;
+        voicers.current.set(id, { at, seen: Date.now() });
+        if (!before || before.at !== at) seatCheck.current();
+      }
+    }
     void meshRef.current?.handleSignal(event.senderId, signal);
   }), [currentUserId, subscribeRoomEvents]);
 
-  // Ask who is sharing whenever the room connection (re)opens.
+  // A member in voice who stops sending heartbeats frees their chair after PEER_TIMEOUT_MS.
+  useEffect(() => {
+    const timer = window.setInterval(() => { if (pruneSeen(voicers.current, Date.now(), PEER_TIMEOUT_MS)) seatCheck.current(); }, 4_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  // Ask who is in voice (and sharing) whenever the room connection (re)opens.
   useEffect(() => {
     if (connectionState === 'connected' && capabilities.chat) sendRoomEvent('rtc_signal', { kind: 'who' });
   }, [capabilities.chat, connectionGeneration, connectionState, sendRoomEvent]);
@@ -233,34 +270,71 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
   // Joins the mesh synchronously (no await) so a screen picker opened in the
   // same click still has the user's gesture.
   const openMesh = useCallback((local: MediaStream | null) => {
-    if (!currentUserId) return null;
+    if (!currentUserId || !alive.current) { local?.getTracks().forEach((track) => track.stop()); return null; }
     const mesh = new VoiceMesh(currentUserId, (signal) => sendRoomEvent('rtc_signal', signal as unknown as Record<string, unknown>), syncFromMesh);
     meshRef.current = mesh;
     mesh.join(local);
     mesh.setMicEnabled(!forcedMute && micEnabled);
     setJoined(true);
     setError(null);
+    floorRef.current = null;
+    setFloorState(null);
+    // A newcomer who joined in the same moment may hold an earlier chair (checked once the hellos land).
+    window.setTimeout(() => seatCheck.current(), 0);
     return mesh;
   }, [currentUserId, forcedMute, micEnabled, sendRoomEvent, syncFromMesh]);
 
+  // Six chairs: ask who is in voice, give the answers about 1.5 s, then count.
+  // An automatic join also needs the question to have been sent (no answers from a dead channel).
+  const chairFree = useCallback(async (auto = false) => {
+    const sent = sendRoomEvent('rtc_signal', { kind: 'who' });
+    await new Promise((resolve) => window.setTimeout(resolve, 1_500));
+    pruneSeen(voicers.current, Date.now(), PEER_TIMEOUT_MS);
+    return (sent || !auto) && !isFull(voicers.current.size, VOICE_CHAIRS);
+  }, [sendRoomEvent]);
+
+  const toFloor = useCallback((mode: 'mic' | 'watch') => {
+    floorRef.current = mode;
+    setFloorState(mode);
+    setError(mode === 'watch' ? screenFullMessage(VOICE_CHAIRS) : chairsTakenMessage(VOICE_CHAIRS));
+  }, []);
+
   // `mic: false` joins only to watch and listen; the browser asks for nothing.
-  const join = useCallback(async (options?: { mic?: boolean }) => {
-    if (!currentUserId || meshRef.current?.isJoined || joining) return;
+  // When every chair is taken no mesh is made at all: the member stays on the floor.
+  // `auto` is "Take the next chair" joining on its own: turning the toggle off
+  // while it waits cancels it.
+  const join = useCallback(async (options?: { mic?: boolean; auto?: boolean }) => {
+    if (!currentUserId || meshRef.current?.isJoined || joinBusy.current) return;
     const unavailable = voiceUnavailable(capabilities.chat);
     if (unavailable) { setError(unavailable); return; }
-    if (options?.mic === false) { openMesh(null); return; }
-    if (!navigator.mediaDevices?.getUserMedia) { setError('This browser does not support voice.'); return; }
+    const watchOnly = options?.mic === false;
+    const auto = Boolean(options?.auto);
+    if (!watchOnly && !navigator.mediaDevices?.getUserMedia) { setError('This browser does not support voice.'); return; }
+    const cancelled = () => !alive.current || (auto && !nextChairRef.current);
+    joinBusy.current = true;
     setJoining(true);
     try {
+      const free = await chairFree(auto);
+      if (cancelled()) return;
+      if (!free) { if (!meshRef.current?.isJoined) toFloor(watchOnly ? 'watch' : 'mic'); return; }
+      if (watchOnly) { if (!meshRef.current?.isJoined) openMesh(null); return; }
       const stream = await getMic();
-      if (meshRef.current?.isJoined) meshRef.current.addMic(stream);
-      else openMesh(stream);
+      if (meshRef.current?.isJoined) { meshRef.current.addMic(stream); return; }
+      // The mic prompt can stay open for seconds: count again, so a room that filled meanwhile gets no 7th peer.
+      pruneSeen(voicers.current, Date.now(), PEER_TIMEOUT_MS);
+      const full = isFull(voicers.current.size, VOICE_CHAIRS);
+      if (cancelled() || full) { stream.getTracks().forEach((track) => track.stop()); if (full && alive.current) toFloor('mic'); return; }
+      openMesh(stream);
     } catch (joinError) {
       setError(mediaErrorMessage(joinError, 'mic'));
+      // A refused or missing mic would fail every automatic try too.
+      nextChairRef.current = false;
+      setNextChairState(false);
     } finally {
+      joinBusy.current = false;
       setJoining(false);
     }
-  }, [capabilities.chat, currentUserId, joining, openMesh]);
+  }, [capabilities.chat, chairFree, currentUserId, openMesh, toFloor]);
 
   const enableMic = useCallback(async () => {
     const mesh = meshRef.current;
@@ -301,7 +375,7 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
     reload();
   }, [announce, reload, roomId]);
 
-  const leave = useCallback(() => {
+  const leaveMesh = useCallback(() => {
     void stopRecorder(true);
     meshRef.current?.leave();
     meshRef.current = null;
@@ -309,9 +383,73 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
     syncFromMesh();
   }, [stopRecorder, syncFromMesh]);
 
-  useEffect(() => () => {
-    meshRef.current?.leave();
-    meshRef.current = null;
+  // Leaving on purpose also stops waiting for a chair.
+  const leave = useCallback(() => {
+    leaveMesh();
+    nextChairRef.current = false;
+    setNextChairState(false);
+  }, [leaveMesh]);
+
+  // Runs whenever the members in voice change. In voice: if two people took the
+  // last chair at once, the later `at` (then the higher id) gives it up and goes
+  // to the floor. On the floor with "Take the next chair" on: join when one frees.
+  useEffect(() => {
+    seatCheck.current = () => {
+      const mesh = meshRef.current;
+      if (!currentUserId) return;
+      pruneSeen(voicers.current, Date.now(), PEER_TIMEOUT_MS);
+      const members = [...voicers.current].map(([id, entry]) => ({ id, at: entry.at }));
+      if (mesh?.isJoined) {
+        if (seatedIds([...members, { id: currentUserId, at: mesh.joinedTime }], VOICE_CHAIRS).has(currentUserId)) return;
+        const mode = mesh.hasMic ? 'mic' : 'watch';
+        leaveMesh();
+        toFloor(mode);
+        return;
+      }
+      if (!nextChairRef.current || joinBusy.current) return;
+      const watchOnly = floorRef.current === 'watch';
+      const step = nextChairStep({
+        count: members.length, cap: VOICE_CHAIRS, watchOnly, shareLive: sharerSeenAt.current.size > 0,
+        connected: connectionState === 'connected', heardAgoMs: Date.now() - heardAt.current, timeoutMs: PEER_TIMEOUT_MS,
+      });
+      if (step === 'join') void join(watchOnly ? { mic: false, auto: true } : { auto: true });
+      // The answers (hellos) run this check again.
+      else if (step === 'ask') sendRoomEvent('rtc_signal', { kind: 'who' });
+      else if (step === 'give-up') {
+        nextChairRef.current = false;
+        setNextChairState(false);
+        floorRef.current = null;
+        setFloorState(null);
+        setError((current) => (current === screenFullMessage(VOICE_CHAIRS) ? null : current));
+      }
+    };
+  });
+
+  // The toggle tap is the user gesture, so the mic permission is asked for now
+  // (and released at once); the automatic join later needs no prompt.
+  const takeNextChair = useCallback(async (on: boolean) => {
+    if (on && floorRef.current !== 'watch') {
+      if (!navigator.mediaDevices?.getUserMedia) { setError('This browser does not support voice.'); return; }
+      try {
+        const probe = await getMic();
+        probe.getTracks().forEach((track) => track.stop());
+      } catch (micError) {
+        setError(mediaErrorMessage(micError, 'mic'));
+        return;
+      }
+    }
+    nextChairRef.current = on;
+    setNextChairState(on);
+    if (on) seatCheck.current();
+  }, []);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      meshRef.current?.leave();
+      meshRef.current = null;
+    };
   }, [roomId]);
 
   const toggleMic = useCallback(() => {
@@ -333,11 +471,17 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
       setError(mediaErrorMessage(screenError, 'screen'));
       return;
     }
+    // Sharing from outside voice joins watch-only, so it needs a free chair too.
+    if (!meshRef.current?.isJoined && !(await chairFree())) {
+      stream.getTracks().forEach((track) => track.stop());
+      if (!meshRef.current?.isJoined) toFloor('watch');
+      return;
+    }
     const mesh = meshRef.current?.isJoined ? meshRef.current : openMesh(null);
     if (!mesh) { stream.getTracks().forEach((track) => track.stop()); return; }
     mesh.startScreen(stream);
     setError(null);
-  }, [capabilities.chat, openMesh, screenBlocked]);
+  }, [capabilities.chat, chairFree, openMesh, screenBlocked, toFloor]);
 
   // Remote tab sound plays from one hidden element per sharer; a browser that
   // blocks it until the next click reports it so the stage can offer a button.
@@ -397,9 +541,9 @@ export function VoiceRoomProvider({ roomId, children }: { roomId: string; childr
     roomId, joined, joining, micEnabled: micEnabled && !forcedMute, sharingScreen, peers, error, moderation, hands,
     recordings, consents, recordingActive: Boolean(activeRecording), recorderRunning, savingRecording,
     localStream, screenStream, hasMic, canUseVoice: capabilities.chat, liveSharers, shareVolume, shareMuted, shareSoundBlocked,
-    setShareVolume, setShareMuted, resumeShareSound, memberVolumes, setMemberVolume,
+    setShareVolume, setShareMuted, resumeShareSound, memberVolumes, setMemberVolume, floor, nextChair, takeNextChair,
     join, enableMic, leave, toggleMic, startScreen, stopScreen, stopRecording, reload, setError,
-  }), [activeRecording, capabilities.chat, consents, enableMic, error, forcedMute, hands, hasMic, join, joined, joining, leave, liveSharers, localStream, memberVolumes, micEnabled, moderation, peers, recorderRunning, recordings, reload, resumeShareSound, roomId, savingRecording, screenStream, setMemberVolume, shareMuted, shareSoundBlocked, shareVolume, sharingScreen, startScreen, stopRecording, stopScreen, toggleMic]);
+  }), [activeRecording, capabilities.chat, consents, enableMic, error, floor, forcedMute, hands, hasMic, join, joined, joining, leave, liveSharers, localStream, memberVolumes, micEnabled, moderation, nextChair, peers, recorderRunning, recordings, reload, resumeShareSound, roomId, savingRecording, screenStream, setMemberVolume, shareMuted, shareSoundBlocked, shareVolume, sharingScreen, startScreen, stopRecording, stopScreen, takeNextChair, toggleMic]);
 
   return (
     <VoiceContext.Provider value={value}>

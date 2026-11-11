@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { OmniIcon } from '@/components/ui/OmniIcon';
+import { SURFACES } from '@/lib/surface-flags';
 import SiteLinks from '@/components/room/SiteLinks';
 import { hasYouTubeVideo, normalizeCastUrl, youtubePlaylistId } from '@/lib/cast-url';
 import { fetchPlaylist, importPlaylist, queueLink as queueLinkInRoom } from '@/lib/watch-links';
@@ -175,7 +176,7 @@ export default function WatchQueuePanel({
       <header className="watch-panel-header">
         <div role="tablist" aria-label="Watch lists" className="watch-panel-tabs">
           <button type="button" role="tab" aria-selected={tab === 'queue'} onClick={() => setTab('queue')}>Queue{queue.length ? ` · ${queue.length}` : ''}</button>
-          <button type="button" role="tab" aria-selected={tab === 'clips'} onClick={() => setTab('clips')}>Clips{clips.length ? ` · ${clips.length}` : ''}</button>
+          {SURFACES.clips && <button type="button" role="tab" aria-selected={tab === 'clips'} onClick={() => setTab('clips')}>Clips{clips.length ? ` · ${clips.length}` : ''}</button>}
         </div>
         <button type="button" onClick={onClose} className="watch-panel-close" aria-label="Close queue and clips"><OmniIcon name="close" size={13} /></button>
       </header>

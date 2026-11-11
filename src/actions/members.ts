@@ -24,7 +24,9 @@ async function getRoomAccessImpl(identifier: string) {
   );
   if (eligibilityError) throw new Error(eligibilityError.message);
   const eligibility = eligibilityData?.[0];
-  const member = eligibility?.join_status
+  // For a non-member the RPC returns the status they WOULD get (join_status set, role null);
+  // only a real membership row has a role.
+  const member = eligibility?.role && eligibility?.join_status
     ? { role: eligibility.role, join_status: eligibility.join_status }
     : null;
 
