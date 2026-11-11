@@ -1,3 +1,5 @@
+import { swPushPlan } from './sw-push';
+
 // The service worker's rules. public/sw.js is generated from this file
 // (scripts/write-sw.mjs) and a unit test fails when it is stale, so the worker
 // that ships is exactly what is tested here.
@@ -118,6 +120,53 @@ self.addEventListener('fetch', (event) => {
   }, self.location.origin);
   if (decision === 'static') event.respondWith(staticFile(event));
   else if (decision === 'navigate') event.respondWith(pageOrOffline(event));
+});
+
+// Push notifications. The payload never carries message text (see src/lib/push-payload.ts).
+${swPushPlan.toString()}
+
+self.addEventListener('push', (event) => {
+  event.waitUntil((async () => {
+    let payload = null;
+    try {
+      payload = event.data ? event.data.json() : null;
+    } catch {
+      payload = null;
+    }
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const focused = windows.filter((client) => client.focused && client.visibilityState === 'visible').map((client) => client.url);
+    const tag = payload && typeof payload.tag === 'string' ? payload.tag : '';
+    const showing = tag ? await self.registration.getNotifications({ tag }) : [];
+    const existing = showing.length ? Number((showing[0].data && showing[0].data.count) || 1) : 0;
+    const plan = swPushPlan(payload, self.location.origin, focused, existing);
+    if (plan) await self.registration.showNotification(plan.title, plan.options);
+  })());
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const data = event.notification.data;
+  event.waitUntil((async () => {
+    let target;
+    try {
+      target = new URL(data && typeof data.url === 'string' ? data.url : '/home', self.location.origin);
+    } catch {
+      return;
+    }
+    // Only this site is ever opened by a tap.
+    if (target.origin !== self.location.origin) return;
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) {
+      try {
+        await client.focus();
+        await client.navigate(target.href);
+        return;
+      } catch {
+        // That window cannot be reused: try the next one, then open a new one.
+      }
+    }
+    await self.clients.openWindow(target.href);
+  })());
 });
 `;
 }

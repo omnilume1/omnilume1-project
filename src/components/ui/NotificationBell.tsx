@@ -5,6 +5,7 @@ import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as 
 import { OmniIcon } from '@/components/ui/OmniIcon';
 import { useNotificationCenter } from '@/hooks/useNotificationCenter';
 import { useCloseOnBack } from '@/hooks/useCloseOnBack';
+import { PushOfferRow } from '@/components/ui/PushControls';
 import {
   bellAccessibleLabel,
   itemStaggerDelay,
@@ -147,6 +148,8 @@ export default function NotificationBell({ roomId }: { roomId?: string } = {}) {
             </div>
             <button type="button" className="notification-popover-text-button" onClick={() => void center.markRead(null)} disabled={center.unreadCount === 0}>Mark all read</button>
           </div>
+
+          <PushOfferRow />
 
           <div className="notification-popover-body">
             {center.status === 'loading' || center.status === 'idle' ? (
