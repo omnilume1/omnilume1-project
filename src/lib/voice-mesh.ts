@@ -27,6 +27,8 @@ export type RtcSignal = {
   screen?: boolean;
   mic?: boolean;
   watching?: boolean;
+  // On hello: when this member joined voice (ms). Older clients do not send it.
+  at?: number;
 };
 
 export type VoicePeer = {
@@ -126,6 +128,8 @@ export class VoiceMesh {
   private joined = false;
   private watching = true;
   private iceServers: RTCIceServer[] = ICE_SERVERS;
+  // When this member joined (ms), sent on every hello as `at`; seats go by it (voice-seats.ts).
+  private joinedAt = 0;
 
   constructor(
     private readonly selfId: string,
@@ -138,13 +142,14 @@ export class VoiceMesh {
   get hasMic() { return Boolean(this.local?.getAudioTracks().length); }
   get localStream() { return this.local; }
   get screenStream() { return this.screen; }
+  get joinedTime() { return this.joinedAt; }
 
   peerList(): VoicePeer[] {
     return [...this.peers.entries()].map(([id, peer]) => ({ id, audio: peer.audio, screen: peer.screen, state: peer.pc.connectionState, sharingScreen: peer.sharingScreen, hasMic: peer.hasMic }));
   }
 
   private hello(to?: string) {
-    this.send({ kind: 'hello', ...(to ? { to } : {}), screen: this.screen !== null, mic: this.hasMic, watching: this.watching });
+    this.send({ kind: 'hello', ...(to ? { to } : {}), screen: this.screen !== null, mic: this.hasMic, watching: this.watching, at: this.joinedAt });
   }
 
   // Whether this member can see a shared picture right now; sharers slow
@@ -169,6 +174,7 @@ export class VoiceMesh {
   join(local: MediaStream | null) {
     this.local = local;
     this.joined = true;
+    this.joinedAt = Date.now();
     this.watching = typeof document === 'undefined' || document.visibilityState === 'visible' || Boolean(document.pictureInPictureElement);
     this.watchVisibility(true);
     // Stays synchronous (a screen picker may need this click's gesture); the
@@ -249,7 +255,9 @@ export class VoiceMesh {
   async handleSignal(senderId: string, signal: RtcSignal) {
     if (!this.joined || senderId === this.selfId) return;
     if (signal.to && signal.to !== this.selfId) return;
-    if (signal.kind === 'who') { if (this.screen) this.hello(); return; }
+    // Every joined member answers, to the asker only, so a newcomer counts the chairs in about a second.
+    // A sharer still answers everyone (as before), so a watch-only asker that lost it gets the picture back at once.
+    if (signal.kind === 'who') { this.hello(this.screen ? undefined : senderId); return; }
     if (signal.kind === 'bye') { this.dropPeer(senderId); this.onChange(); return; }
 
     const known = this.peers.has(senderId);

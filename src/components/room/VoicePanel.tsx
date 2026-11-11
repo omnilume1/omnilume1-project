@@ -60,6 +60,7 @@ export default function VoicePanel() {
         <button type="button" className={`voice-button ${myHand ? 'is-live' : ''}`} onClick={() => void toggleHand()} aria-pressed={myHand} disabled={!capabilities.chat}>{myHand ? 'Lower hand' : 'Raise hand'}</button>
       </div>
       {voice.error && <p role="alert" className="collab-error">{voice.error}</p>}
+      <NextChairToggle />
       {!voice.joined && <p className="collab-meta">Voice is peer-to-peer between members in this room. Your browser asks for microphone access when you join.</p>}
 
       {voice.sharingScreen && voice.screenStream && (
@@ -99,7 +100,7 @@ export default function VoicePanel() {
             </li>
           );
         })}
-        {!voice.joined && voice.peers.length === 0 && <li className="collab-empty">Nobody is in voice. Join to start.</li>}
+        {!voice.joined && !voice.floor && voice.peers.length === 0 && <li className="collab-empty">Nobody is in voice. Join to start.</li>}
       </ul>
       {capabilities.manageMembers && [...voice.moderation.values()].some((row) => (row.audio_muted || row.screen_blocked) && !voice.peers.some((peer) => peer.id === row.user_id)) && (
         <div className="voice-muted-list">
@@ -128,6 +129,19 @@ export default function VoicePanel() {
       {/* Hidden, except while a recording runs or waits for consent: the answer buttons live here. */}
       {(SURFACES.recordings || voice.recordings.some((item) => item.status === 'recording' || item.status === 'consent')) && <RecordingsSection names={name} canManage={capabilities.manageMembers} />}
     </section>
+  );
+}
+
+// Six chairs: shown on the floor (a join was refused because every chair is
+// taken). On, it joins by itself the moment a chair frees up.
+export function NextChairToggle({ className = 'collab-meta' }: { className?: string }) {
+  const voice = useVoiceRoom();
+  if (!voice.floor || voice.joined) return null;
+  return (
+    <label className={`${className} flex items-center gap-2`}>
+      <input type="checkbox" checked={voice.nextChair} onChange={(event) => void voice.takeNextChair(event.target.checked)} />
+      Take the next chair
+    </label>
   );
 }
 

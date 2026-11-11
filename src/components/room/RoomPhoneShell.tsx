@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { OmniIcon, type OmniIconName } from '@/components/ui/OmniIcon';
 import { SendLinkButton } from '@/components/room/DoorShare';
 import { useVoiceRoom } from '@/components/room/VoiceRoom';
+import { NextChairToggle } from '@/components/room/VoicePanel';
 import { useCloseOnBack } from '@/hooks/useCloseOnBack';
 import { useListenTogether } from '@/hooks/useListenTogether';
 import { countSpots, ROOM_SPOTS, type RoomSpot } from '@/lib/room-live-status';
@@ -123,8 +124,14 @@ export default function RoomPhoneShell({ roomId, roomName, nameplate, presence, 
 
       {chat && <section className="phone-chat" aria-label="Room chat">{chat}</section>}
 
-      {/* Pinned above the bar so a refused mic tap is seen; tap to dismiss (it only clears on the next voice success). */}
-      {voice.error && active !== 'bed' && <p role="alert" className="phone-error phone-voice-error" onClick={() => voice.setError(null)}>{voice.error}</p>}
+      {/* Pinned above the bar so a refused mic tap is seen; tap to dismiss (it only clears on the next voice success).
+          A tap refused because every chair is taken also offers "Take the next chair" here. */}
+      {voice.error && active !== 'bed' && (
+        <p role="alert" className="phone-error phone-voice-error" onClick={() => voice.setError(null)}>
+          {voice.error}
+          {voice.floor && !voice.joined && <span className="mt-2 block" onClick={(event) => event.stopPropagation()}><NextChairToggle className="text-sm text-neutral-200" /></span>}
+        </p>
+      )}
 
       <div className="phone-bar" role="toolbar" aria-label="Room controls">
         <button type="button" className={`phone-bar-btn ${voice.joined && voice.hasMic && !voice.micEnabled ? 'is-off' : ''} ${voice.joined ? 'is-live' : ''}`} onClick={onMic} disabled={!voicePanel || voice.joining} aria-pressed={voice.joined && voice.hasMic ? !voice.micEnabled : undefined} aria-label={voice.joining ? 'Joining voice' : micLabel} title={micLabel}>
