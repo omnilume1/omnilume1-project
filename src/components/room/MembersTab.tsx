@@ -18,6 +18,7 @@ import { useRoomRealtime } from "@/components/room/RoomRealtimeProvider";
 import { useFriendsListening } from "@/hooks/useFriendsListening";
 import { OmniIcon } from "@/components/ui/OmniIcon";
 import { getRoomTrustLevels } from "@/lib/management-data";
+import { SURFACES } from "@/lib/surface-flags";
 import { TRUST_HINTS, TRUST_LABELS, type TrustLevel } from "@/lib/room-management-model";
 
 interface MembersTabProps {
@@ -102,7 +103,7 @@ export default function MembersTab({
         getRoomMembersList(roomId).then(unwrapAction),
         getRoomMemberControlStates(roomId).then(unwrapAction),
         getRoomMemberIdentities(roomId).then(unwrapAction),
-        getRoomTrustLevels(roomId),
+        SURFACES.trustBadges ? getRoomTrustLevels(roomId) : Promise.resolve({ ok: false as const }),
       ]);
       // Trust is derived by the database: managers receive everyone, members
       // only themselves. A failure only hides the badges.
@@ -318,7 +319,7 @@ export default function MembersTab({
                       >
                         {member.role}
                       </span>
-                      {trust.get(member.user_id) && (
+                      {SURFACES.trustBadges && trust.get(member.user_id) && (
                         <span className="ml-2 rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-neutral-300" title={TRUST_HINTS[trust.get(member.user_id) as TrustLevel]}>
                           {TRUST_LABELS[trust.get(member.user_id) as TrustLevel]}
                         </span>

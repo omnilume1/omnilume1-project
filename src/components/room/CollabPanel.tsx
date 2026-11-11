@@ -12,11 +12,12 @@ import {
 import { formatDuration } from '@/lib/collab-hooks';
 import { listEventRsvpCounts, setEventRsvp, type RsvpCounts } from '@/lib/management-data';
 import { RSVP_LABELS, type RsvpResponse } from '@/lib/room-management-model';
+import { SURFACES } from '@/lib/surface-flags';
 
 type Tab = 'polls' | 'countdowns' | 'events' | 'search';
 const TABS: Array<{ id: Tab; label: string }> = [
-  { id: 'polls', label: 'Polls' },
-  { id: 'countdowns', label: 'Countdowns' },
+  ...(SURFACES.polls ? [{ id: 'polls' as const, label: 'Polls' }] : []),
+  ...(SURFACES.countdowns ? [{ id: 'countdowns' as const, label: 'Countdowns' }] : []),
   { id: 'events', label: 'Events' },
   { id: 'search', label: 'Search' },
 ];
@@ -25,7 +26,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
 // searchable room history. Everything is re-read through RLS/RPC; Broadcast
 // only carries "something changed" hints.
 export default function CollabPanel({ roomId }: { roomId: string }) {
-  const [tab, setTab] = useState<Tab>('polls');
+  const [tab, setTab] = useState<Tab>(TABS[0].id);
   return (
     <section className="collab-panel" aria-label="Collaborate">
       <div className="collab-tabs" role="tablist" aria-label="Collaboration tools">

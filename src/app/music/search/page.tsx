@@ -2,6 +2,7 @@ import Form from 'next/form';
 import { MusicIcon } from '@/components/music/MusicIcon';
 import { PageTitle } from '@/components/music/MusicParts';
 import { SourceResults } from '@/components/music/MusicSources';
+import { SURFACES } from '@/lib/surface-flags';
 import { SearchResults } from '@/components/music/MusicViews';
 
 export default async function MusicSearchPage({ searchParams }: { searchParams: Promise<{ q?: string | string[] }> }) {
@@ -19,7 +20,7 @@ export default async function MusicSearchPage({ searchParams }: { searchParams: 
       {query ? (
         <>
           <SearchResults query={query} />
-          <SourceResults key={query} query={query} />
+          {SURFACES.musicSources && <SourceResults key={query} query={query} />}
         </>
       ) : (
         <>

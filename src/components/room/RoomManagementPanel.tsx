@@ -8,6 +8,7 @@ import {
   type RoomTemplate, type TrustRow,
 } from '@/lib/management-data';
 import { TRUST_HINTS, TRUST_LABELS } from '@/lib/room-management-model';
+import { SURFACES } from '@/lib/surface-flags';
 
 // Templates, backup/export and the caller's own trust level (Action 13).
 // Visible to owners/admins; every action is checked again in the database.
@@ -33,7 +34,7 @@ export default function RoomManagementPanel({ roomId, role, currentUserId }: { r
   }, [load]);
 
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!currentUserId || !SURFACES.trustBadges) return;
     let active = true;
     void getRoomTrustLevels(roomId).then((result) => { if (active && result.ok) setMine(result.data.find((row) => row.user_id === currentUserId) ?? null); });
     return () => { active = false; };
@@ -91,18 +92,18 @@ export default function RoomManagementPanel({ roomId, role, currentUserId }: { r
         )}
       </section>
 
-      <section aria-labelledby="mgmt-export">
+      {SURFACES.roomExport && <section aria-labelledby="mgmt-export">
         <h3 id="mgmt-export" className="text-sm font-bold text-white">Backup / export</h3>
         <p className="mt-1 text-xs text-neutral-500">Downloads room details, members, announcements, plaintext chat, shared notes, tasks, polls, events and a file list. Encrypted messages, keys, storage paths and links are never included. Limited to 3 exports an hour and recorded.</p>
         <button type="button" className="omni-button omni-button-primary mt-3" onClick={download} disabled={busy === 'export'}>{busy === 'export' ? 'Preparing export…' : 'Download room export'}</button>
         {exportInfo && <p className="mt-3 break-all text-xs text-neutral-400" role="status">Saved {exportInfo.fileName}. SHA-256: <code>{exportInfo.sha256}</code></p>}
-      </section>
+      </section>}
 
-      <section aria-labelledby="mgmt-trust">
+      {SURFACES.trustBadges && <section aria-labelledby="mgmt-trust">
         <h3 id="mgmt-trust" className="text-sm font-bold text-white">Your trust level</h3>
         {mine ? <p className="mt-1 text-xs text-neutral-400"><strong className="text-white">{TRUST_LABELS[mine.level]}</strong> · {TRUST_HINTS[mine.level]} It is calculated from tenure and contributions and grants no permissions.</p>
           : <p className="mt-1 text-xs text-neutral-500">Not available yet.</p>}
-      </section>
+      </section>}
 
       {message && <p role={message.kind === 'error' ? 'alert' : 'status'} className={message.kind === 'error' ? 'text-xs text-red-300' : 'text-xs text-emerald-300'}>{message.text}</p>}
     </div>

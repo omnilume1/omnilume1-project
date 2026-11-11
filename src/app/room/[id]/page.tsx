@@ -42,6 +42,7 @@ import { clearRoomRealtimeCache, useRoomSync } from '@/hooks/useRoomSync';
 import { useRoomPresence } from '@/hooks/useRoomPresence';
 import { useRootAttribute } from '@/hooks/useAppTheme';
 import { clearFocusLock } from '@/lib/focus-lock';
+import { SURFACES } from '@/lib/surface-flags';
 import { isRoomExpired } from '@/lib/room-lifecycle';
 import { roomWorkspacePreferenceKey } from '@/lib/room-workspace-preferences';
 import { minimizeRoom } from '@/lib/minimized-rooms';
@@ -558,7 +559,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         </div>
         <div className="room-actions">
           {canShareDoor && <SendLinkButton roomId={roomData.id} nameplate={roomData.nameplate ?? null} door={door} />}
-          {userRole === 'owner' && roomData && !roomData.is_group && roomData.expiration_type !== 'irreversible' && !roomData.deletion_scheduled_at && <button type="button" onClick={() => setShowConvertModal(true)} className="room-action">Convert to group</button>}
+          {SURFACES.groupConversion && userRole === 'owner' && roomData && !roomData.is_group && roomData.expiration_type !== 'irreversible' && !roomData.deletion_scheduled_at && <button type="button" onClick={() => setShowConvertModal(true)} className="room-action">Convert to group</button>}
           {roomData.reopened_until && <button onClick={handlePermanentRequest} disabled={permanentSubmitting || permanentRequests.some((request) => request.status === 'pending')} className="room-action disabled:cursor-wait disabled:opacity-50">{permanentSubmitting ? 'Requesting...' : 'Request Permanent Room'}</button>}
           <div className="room-layout-menu" ref={layoutMenuRef}>
             <button type="button" className="room-action" aria-haspopup="dialog" aria-expanded={showLayoutMenu} onClick={() => setShowLayoutMenu((open) => !open)} title="Layout and theme"><OmniIcon name="layout" size={15} /><span>Layout</span><OmniIcon name="chevron" size={14} /></button>

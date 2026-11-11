@@ -9,6 +9,7 @@ import {
   cancelRecording, deleteRecording, getTranscript, lowerHand, raiseHand, recordingUrl, requestRecording,
   respondRecording, saveTranscript, setVoiceModeration, type Recording,
 } from '@/lib/collab-data';
+import { SURFACES } from '@/lib/surface-flags';
 
 // Voice side tool (Action 12): P2P voice with owner/manager mute, screen
 // sharing, raise hand, and consented recordings with manual transcripts.
@@ -124,7 +125,8 @@ export default function VoicePanel() {
         </ol>
       )}
 
-      <RecordingsSection names={name} canManage={capabilities.manageMembers} />
+      {/* Hidden, except while a recording runs or waits for consent: the answer buttons live here. */}
+      {(SURFACES.recordings || voice.recordings.some((item) => item.status === 'recording' || item.status === 'consent')) && <RecordingsSection names={name} canManage={capabilities.manageMembers} />}
     </section>
   );
 }
