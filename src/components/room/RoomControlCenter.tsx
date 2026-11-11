@@ -2,12 +2,15 @@
 
 import { unwrapAction } from '@/lib/action-result';
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { NAMEPLATE_RULE, normalizeNameplate } from '@/lib/door-key';
 import {
+  changeRoomLock,
   createRoomAnnouncement,
   createRoomInvite,
   getRoomControlState,
   listRoomInviteHistory,
   revokeRoomInvite,
+  setRoomNameplate,
   setRoomRolePermission,
   setRoomMemberRole,
   setRoomGhostMode,
@@ -174,6 +177,9 @@ export default function RoomControlCenter({
   selectedMemberId,
   roomLifecycle,
   onRoomLifecycleChange,
+  nameplate = null,
+  onNameplateChange,
+  onDoorLockChanged,
 }: {
   open: boolean;
   roomId: string;
@@ -191,6 +197,11 @@ export default function RoomControlCenter({
   // Lifecycle facts the owner's deletion controls need (master plan §9).
   roomLifecycle?: { expirationType: string; deletionScheduledAt: string | null };
   onRoomLifecycleChange?: (deletionScheduledAt: string | null) => void;
+  // Phase 07: the door's nameplate and lock. The new token never comes back
+  // here; the room header re-fetches it after onDoorLockChanged.
+  nameplate?: string | null;
+  onNameplateChange?: (nameplate: string) => void;
+  onDoorLockChanged?: () => void;
 }) {
   const { roomControlVersion, currentUserId } = useRoomRealtime();
   const [tab, setTab] = useState<Tab>("overview");
@@ -224,6 +235,8 @@ export default function RoomControlCenter({
   const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
   const [profileBio, setProfileBio] = useState("");
   const [isGhostMode, setIsGhostMode] = useState(false);
+  const [draftNameplate, setDraftNameplate] = useState<string | null>(null);
+  const [confirmLockChange, setConfirmLockChange] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(
     selectedMemberId ?? null,
   );
@@ -406,6 +419,36 @@ export default function RoomControlCenter({
     }
   };
 
+  const saveNameplate = () => {
+    const next = normalizeNameplate(draftNameplate ?? nameplate ?? "");
+    if (!next) {
+      setNotice(null);
+      setError(NAMEPLATE_RULE);
+      return;
+    }
+    void run(
+      "nameplate",
+      async () => {
+        const saved = await setRoomNameplate(roomId, next).then(unwrapAction);
+        onNameplateChange?.(saved);
+        setDraftNameplate(null);
+      },
+      `Nameplate changed to Room ${next}.`,
+    );
+  };
+
+  const changeLock = () => {
+    setConfirmLockChange(false);
+    void run(
+      "door-lock",
+      async () => {
+        await changeRoomLock(roomId).then(unwrapAction);
+        onDoorLockChanged?.();
+      },
+      "Lock changed. The old link now says this door's been changed.",
+    );
+  };
+
   if (!open) return null;
 
   return (
@@ -503,6 +546,75 @@ export default function RoomControlCenter({
                         isOwner={isOwner}
                         onChanged={(value) => onRoomLifecycleChange?.(value)}
                       />
+                    )}
+                    {(canManageSettings || canManageInvites) && (
+                      <section className="space-y-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4" aria-label="Room door">
+                        {canManageSettings && (
+                          <div>
+                            <label htmlFor="room-nameplate" className="font-semibold text-white">
+                              Nameplate
+                            </label>
+                            <p className="mt-1 text-sm text-neutral-500">
+                              Shown on the door and in the link: “Room {normalizeNameplate(draftNameplate ?? nameplate ?? "") ?? "…"} · door&apos;s open”.
+                            </p>
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <span className="text-sm text-neutral-400">Room</span>
+                              <input
+                                id="room-nameplate"
+                                value={draftNameplate ?? nameplate ?? ""}
+                                onChange={(event) => setDraftNameplate(event.target.value)}
+                                onKeyDown={(event) => { if (event.key === "Enter") saveNameplate(); }}
+                                maxLength={12}
+                                aria-describedby="room-nameplate-rule"
+                                className="omni-input mono w-40"
+                              />
+                              <button
+                                type="button"
+                                disabled={working === "nameplate" || draftNameplate === null}
+                                onClick={saveNameplate}
+                                className="omni-button omni-button-ghost"
+                              >
+                                {working === "nameplate" ? "Saving…" : "Rename"}
+                              </button>
+                            </div>
+                            <p id="room-nameplate-rule" className="mt-2 text-xs text-neutral-500">
+                              {NAMEPLATE_RULE}
+                            </p>
+                          </div>
+                        )}
+                        {canManageInvites && (
+                          <div className={`flex flex-wrap items-center justify-between gap-3 ${canManageSettings ? "border-t border-white/10 pt-4" : ""}`}>
+                            <div>
+                              <h3 className="font-semibold text-white">Change the lock</h3>
+                              <p className="mt-1 text-sm text-neutral-500">
+                                The room&apos;s link stops working and a new one is made. Members already inside stay.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={working === "door-lock"}
+                              onClick={() => setConfirmLockChange(true)}
+                              className="omni-button omni-button-ghost text-red-200"
+                            >
+                              {working === "door-lock" ? "Changing…" : "Change the lock"}
+                            </button>
+                          </div>
+                        )}
+                      </section>
+                    )}
+                    {confirmLockChange && (
+                      <div className="fixed inset-0 z-[80] grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="change-lock-title">
+                        <section className="glass-strong w-full max-w-md rounded-2xl p-6">
+                          <h2 id="change-lock-title" className="text-xl font-semibold text-white">Change the lock?</h2>
+                          <p className="mt-3 text-sm leading-6 text-neutral-400">
+                            Anyone who opens the old link will see “This door&apos;s been changed. Ask for a new link.” You&apos;ll need to send the new link to anyone still coming.
+                          </p>
+                          <div className="mt-6 flex flex-wrap justify-end gap-3">
+                            <button type="button" onClick={() => setConfirmLockChange(false)} className="omni-button omni-button-ghost">Cancel</button>
+                            <button type="button" onClick={changeLock} className="omni-button omni-button-primary">Change the lock</button>
+                          </div>
+                        </section>
+                      </div>
                     )}
                     <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">

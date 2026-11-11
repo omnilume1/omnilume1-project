@@ -60,7 +60,7 @@ export default function CreateRoomPage() {
       const roomId = await createRoom(formData).then(unwrapAction);
       setDone(true);
       await new Promise((resolve) => setTimeout(resolve, 650));
-      router.push(`/room/${roomId}`);
+      router.push(`/room/${roomId}?new=1`);
     } catch (error: unknown) {
       alert(error instanceof Error ? error.message : "Failed to create room.");
     } finally {

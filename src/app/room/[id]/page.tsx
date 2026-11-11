@@ -30,6 +30,7 @@ import RoomControlCenter from '@/components/room/RoomControlCenter';
 import RoomEntryPrompts from '@/components/room/RoomEntryPrompts';
 import RoomAnnouncementBanner from '@/components/room/RoomAnnouncementBanner';
 import RoomRoleChangeNotification from '@/components/room/RoomRoleChangeNotification';
+import { NewRoomShareCard, SendLinkButton, useDoorToken } from '@/components/room/DoorShare';
 import FloatingDock from '@/components/ui/FloatingDock';
 import NotificationBell from '@/components/ui/NotificationBell';
 import { OmniIcon, type OmniIconName } from '@/components/ui/OmniIcon';
@@ -84,6 +85,7 @@ type RoomData = {
   scheduled_for?: string | null;
   is_group?: boolean;
   deletion_scheduled_at?: string | null;
+  nameplate?: string | null;
 };
 
 type RoomFeature = 'chat' | 'watch' | 'files' | 'study' | 'announcements';
@@ -167,6 +169,17 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   // pinned. The pin is saved on this device. The room shell only renders client-side, after access is
   // checked, so reading storage here never mismatches the server markup.
   const [railPinned, setRailPinned] = useState(() => typeof window !== 'undefined' && window.localStorage.getItem(ROOM_RAIL_PIN_KEY) === 'pinned');
+  // Phase 07: create-room lands on ?new=1 to show the "Send the link" card once.
+  const [showNewRoomCard, setShowNewRoomCard] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
+  const [doorRefresh, setDoorRefresh] = useState(0);
+  useEffect(() => {
+    if (!showNewRoomCard) return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('new')) return;
+    params.delete('new');
+    const query = params.toString();
+    router.replace(`${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`, { scroll: false });
+  }, [router, showNewRoomCard]);
   const toggleRailPin = () => setRailPinned((pinned) => {
     try { window.localStorage.setItem(ROOM_RAIL_PIN_KEY, pinned ? 'auto' : 'pinned'); } catch { /* storage off: still toggles for this visit */ }
     return !pinned;
@@ -296,6 +309,11 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   const realtimeRoomId = accessStatus === 'approved' && !roomIsExpired ? (roomData?.id ?? '') : '';
   const roomSync = useRoomSync(realtimeRoomId, userRole === 'owner' || canControlMedia);
   const roomPresence = useRoomPresence(realtimeRoomId, presenceRefreshVersion);
+  // D1: approved non-guest members can send the door link. A lock change
+  // (here, or by anyone via invite_changed) re-fetches the token.
+  const canShareDoor = Boolean(realtimeRoomId) && ['owner', 'admin', 'member'].includes(userRole ?? '');
+  const inviteChanges = roomSync.roomControlEvents.filter((event) => event.eventType === 'invite_changed').length;
+  const door = useDoorToken(canShareDoor ? realtimeRoomId : null, doorRefresh + inviteChanges);
   const deskPreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'desk');
   const windowsPreferenceKey = roomWorkspacePreferenceKey(roomData?.id ?? '', roomSync.currentUserId, 'desk-windows');
   useEffect(() => {
@@ -527,11 +545,13 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         <button type="button" onClick={minimizeActiveRoom} className="icon-button room-back" aria-label="Minimize room" title="Return to Rooms without leaving"><OmniIcon name="back" size={16} /></button>
         <div className="room-header-title">
           <h1>{roomData?.name || identifier}</h1>
+          {roomData.nameplate && <span className="room-chip mono">Room {roomData.nameplate}</span>}
           {roomData?.is_group && <span className="room-chip">Group</span>}
           <span className={`room-chip ${roomData?.expiration_type === 'permanent' ? '' : 'is-temp mono'}`}>{roomData?.expiration_type === 'permanent' ? 'Permanent' : `Temp · ${timeLeft}`}</span>
           <span className="room-here"><span className="status-dot" aria-hidden="true" />{roomPresence.onlineUserIds.length} here</span>
         </div>
         <div className="room-actions">
+          {canShareDoor && <SendLinkButton roomId={roomData.id} nameplate={roomData.nameplate ?? null} door={door} />}
           {userRole === 'owner' && roomData && !roomData.is_group && roomData.expiration_type !== 'irreversible' && !roomData.deletion_scheduled_at && <button type="button" onClick={() => setShowConvertModal(true)} className="room-action">Convert to group</button>}
           {roomData.reopened_until && <button onClick={handlePermanentRequest} disabled={permanentSubmitting || permanentRequests.some((request) => request.status === 'pending')} className="room-action disabled:cursor-wait disabled:opacity-50">{permanentSubmitting ? 'Requesting...' : 'Request Permanent Room'}</button>}
           <div className="room-layout-menu" ref={layoutMenuRef}>
@@ -575,6 +595,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
       </header>
 
       <div className="room-notices">
+        {showNewRoomCard && canShareDoor && <NewRoomShareCard roomId={roomData.id} nameplate={roomData.nameplate ?? null} door={door} onDismiss={() => setShowNewRoomCard(false)} />}
         <RoomNotifications roomId={roomData.id} />
         <RoomRoleChangeNotification events={roomSync.roomControlEvents} currentUserId={roomSync.currentUserId} />
         {roomData.is_group && <p className="group-banner" role="status">This room is now a group{groupInfo ? `: “${groupInfo.name}”` : ''}. Members and history are kept; new joins are closed.</p>}
@@ -678,6 +699,9 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
         selectedMemberId={controlCenterMemberId}
         roomLifecycle={{ expirationType: roomData.expiration_type, deletionScheduledAt: roomData.deletion_scheduled_at ?? null }}
         onRoomLifecycleChange={(deletionScheduledAt) => setRoomData((current) => current ? { ...current, deletion_scheduled_at: deletionScheduledAt } : current)}
+        nameplate={roomData.nameplate ?? null}
+        onNameplateChange={(nameplate) => setRoomData((current) => current ? { ...current, nameplate } : current)}
+        onDoorLockChanged={() => setDoorRefresh((version) => version + 1)}
       />
       {showLeaveConfirmation && <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="leave-room-title"><section className="glass-strong w-full max-w-md rounded-2xl p-6"><p className="text-[10px] font-bold uppercase tracking-[.16em] text-amber-200">Membership</p>{userRole === 'owner' && ownerLeaveStep === 'choice' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Do you want to transfer ownership before leaving?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Choose No to leave the active workspace while retaining your room membership and ownership for later.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => { setShowLeaveConfirmation(false); minimizeActiveRoom(); }} className="omni-button omni-button-ghost">No</button><button type="button" disabled={leaving} onClick={() => void openOwnerTransfer()} className="omni-button omni-button-primary">Yes</button></div></> : userRole === 'owner' ? <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Choose a new owner</h2><p className="mt-3 text-sm leading-6 text-neutral-400">Only an approved permanent member can receive ownership.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<select value={ownerTransferTarget} onChange={(event) => setOwnerTransferTarget(event.target.value)} className="omni-input mt-4">{ownerTransferCandidates.map((member) => <option key={member.user_id} value={member.user_id}>User {member.user_id.slice(0, 8)}</option>)}</select><div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setOwnerLeaveStep('choice')} className="omni-button omni-button-ghost">Back</button><button type="button" disabled={leaving || !ownerTransferTarget} onClick={() => void completeOwnerTransferAndLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Transfer and leave'}</button></div></> : <><h2 id="leave-room-title" className="mt-2 text-xl font-semibold text-white">Leave this room?</h2><p className="mt-3 text-sm leading-6 text-neutral-400">You can rejoin later when the room is open and you are not restricted.</p>{leaveError && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200">{leaveError}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" disabled={leaving} onClick={() => setShowLeaveConfirmation(false)} className="omni-button omni-button-ghost">Cancel</button><button type="button" disabled={leaving} onClick={() => void handleLeave()} className="omni-button omni-button-primary">{leaving ? 'Leaving…' : 'Leave room'}</button></div></>}</section></div>}
       {featureEnabled('chat') && <VoiceDock panelOpen={isOpen('voice')} onOpen={() => openWindow('voice')} />}
