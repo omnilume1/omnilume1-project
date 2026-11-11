@@ -16,7 +16,8 @@ import Stripes from '@/components/landing/Stripes';
 import styles from './landing.module.css';
 
 // Plays the drawn-mark intro once per tab session; runs before first paint.
-const INTRO_ONCE = "try{if(sessionStorage.getItem('ol-intro'))document.documentElement.dataset.introSeen='';else sessionStorage.setItem('ol-intro','1')}catch(e){}";
+// It also tags /?v=b (the second headline) without reading searchParams, so the page stays static.
+const INTRO_ONCE = "try{if(/[?&]v=b(?:&|$)/.test(location.search))document.documentElement.dataset.lp='b';if(sessionStorage.getItem('ol-intro'))document.documentElement.dataset.introSeen='';else sessionStorage.setItem('ol-intro','1')}catch(e){}";
 
 const d = (seconds: number) => ({ ['--d' as string]: `${seconds}s` }) as CSSProperties;
 
@@ -39,7 +40,7 @@ const THUMBS = [
   { src: '/landing/explore.jpg', label: 'Find your next room' },
 ];
 
-export const metadata: Metadata = { title: 'Shared Rooms for Study, Watch and Listen | Omnilume' };
+export const metadata: Metadata = { title: 'OmniLume · Your hostel room, wherever everyone is', description: 'A room your friend group keeps open. Study, watch, play music or just talk, all in one place. One link in your WhatsApp group, nothing to install.' };
 
 // Static: no per-request work, so the CDN serves it. Member links go to app pages, where the proxy
 // sends anyone without a finished profile to setup and anyone signed out to sign in.
@@ -57,9 +58,7 @@ export default function Home() {
           <Link href="/" className={styles.logo} aria-label="OmniLume home"><OmniMark size={28} />OmniLume</Link>
           <nav className={styles.navLinks} aria-label="Site">
             <Link href="/explore">Explore</Link>
-            <Link href="/explore">Rooms</Link>
-            <a href="#cards">Features</a>
-            <a href="#ai">AI</a>
+            <a href="#how">How it works</a>
           </nav>
           <div className={styles.navRight}>
             <Link href="/login" className={`${styles.navLink} ${styles.guestOnly}`}>Sign in</Link>
@@ -71,15 +70,16 @@ export default function Home() {
 
         <main>
           <div className={styles.heroHead}>
-            <h1 className={styles.h1}>Rooms where friends study, watch and listen together</h1>
+            <h1 className={styles.h1}><span className={styles.hA}>Your hostel room, wherever everyone is.</span><span className={styles.hB}>Hang out like you&apos;re in the same room.</span></h1>
             <div>
-              <p className={styles.lede}>Made for study groups, friend groups and friends who live far apart. Open a room and everyone stays in step: one focus timer, one synced video, the same song at the same second, with chat on the side.</p>
+              <p className={styles.lede}>OmniLume is a room your friend group keeps open. Study, watch, play music or just talk, all in one place. One link in your WhatsApp group, nothing to install.</p>
               <div className={styles.actions}>
-                <Link href="/login" className={`${styles.btn} ${styles.btnPrimary} ${styles.guestOnly}`}>Get started <OmniIcon name="arrow" size={16} /></Link>
+                <Link href="/login?next=/create-room" className={`${styles.btn} ${styles.btnPrimary} ${styles.guestOnly}`}>Open your room <OmniIcon name="arrow" size={16} /></Link>
                 <Link href="/home" className={`${styles.btn} ${styles.btnPrimary} ${styles.memberOnly}`}>Go to your space <OmniIcon name="arrow" size={16} /></Link>
-                <Link href="/explore" className={`${styles.btn} ${styles.btnSecondary}`}>Explore rooms</Link>
+                <a href="#how" className={`${styles.btn} ${styles.btnSecondary}`}>How it works</a>
               </div>
-              <p className={styles.assure}>Free · Runs in your browser, nothing to install · Invite friends with a link</p>
+              <p className={styles.assure}>Pin one link in your WhatsApp group. That&apos;s your room.</p>
+              <p className={styles.assure}>Free · in your browser · one link for the whole group</p>
             </div>
           </div>
 
@@ -89,11 +89,11 @@ export default function Home() {
             <div className={`${styles.caption} mono`}><span>Live preview. Drag a window, or pick another page</span><span>Real OmniLume screens</span></div>
           </div>
 
-          <section className={styles.how} aria-labelledby="how-title" data-reveal>
-            <h2 id="how-title" className={styles.say}>How it works<span>Three steps to your first session together.</span></h2>
+          <section id="how" className={styles.how} aria-labelledby="how-title" data-reveal>
+            <h2 id="how-title" className={styles.say}>How it works<span>One link in your WhatsApp group. No app, no bots, no call cut-off, no ads. Rooms can self-destruct.</span></h2>
             <ol className={styles.steps}>
               <li><span className={`${styles.stepNo} mono`}>1</span><h3>Create a room</h3><p>Name it, pick how long it lasts and choose who can join.</p></li>
-              <li><span className={`${styles.stepNo} mono`}>2</span><h3>Share the link</h3><p>Send the invite link. Friends sign in and join from it.</p></li>
+              <li><span className={`${styles.stepNo} mono`}>2</span><h3>Share the link</h3><p>Friends tap the link and they&apos;re in.</p></li>
               <li><span className={`${styles.stepNo} mono`}>3</span><h3>Start together</h3><p>Run the focus timer, play a video or queue a song. Everyone stays in sync.</p></li>
             </ol>
           </section>
@@ -130,13 +130,6 @@ export default function Home() {
               <div className={styles.miniBar}><OmniIcon name="pause" size={16} /><span className="mono">42:18</span><span className={styles.track}><b style={{ width: '39%' }} /></span><span>In sync · 7</span></div>
             </div>
           </Card>
-          <Card icon="mic" name="Voice" desc="Talk while you watch or study, right inside the room." tint="#132a2e" glow="rgba(80,200,220,.24)">
-            <div className={styles.voice}>
-              <div className={styles.speaking}><span className={styles.av}>AK</span><span className={styles.levels}><b /><b /><b /><b /><b /></span>Aarav</div>
-              <div><span className={styles.av}>MR</span><span className={`${styles.levels} ${styles.quiet}`}><b /><b /><b /></span>Mei</div>
-              <div className={styles.speaking}><span className={styles.av}>RS</span><span className={styles.levels}><b /><b /><b /><b /><b /></span>Riya</div>
-            </div>
-          </Card>
           <Card icon="music" name="Listen together" desc="Hear the same song at the same second as your friends." tint="#10301d" glow="rgba(60,200,120,.34)">
             <div className={styles.vstack} style={{ gap: 0 }}><div className={styles.artLg}><AlbumArt /></div><div className={styles.spControls}><OmniIcon name="prev" size={22} /><span className={styles.spPlay}><OmniIcon name="play" size={18} /></span><OmniIcon name="next" size={22} /></div></div>
           </Card>
@@ -145,6 +138,13 @@ export default function Home() {
               {[['Slow Tide', '3:28', '#e09a7b,#2a3d6b'], ['Paper Lanterns', '4:02', '#7bc8e0,#3a2b55'], ['Night Bus', '2:51', '#c9a6ff,#1c1630'], ['Window Seat', '3:44', '#9be0a8,#2a3d6b'], ['Late Library', '5:10', '#ffd08a,#3a2b55']].map(([title, time, colors], index) => (
                 <div key={title} className={styles.trk} style={index === 4 ? { opacity: 0.5 } : undefined}><span className={styles.sq} style={{ background: `linear-gradient(135deg,${colors})` }} />{title}<span className="mono">{time}</span></div>
               ))}
+            </div>
+          </Card>
+          <Card icon="mic" name="Voice" desc="Talk while you watch or study, right inside the room." tint="#132a2e" glow="rgba(80,200,220,.24)">
+            <div className={styles.voice}>
+              <div className={styles.speaking}><span className={styles.av}>AK</span><span className={styles.levels}><b /><b /><b /><b /><b /></span>Aarav</div>
+              <div><span className={styles.av}>MR</span><span className={`${styles.levels} ${styles.quiet}`}><b /><b /><b /></span>Mei</div>
+              <div className={styles.speaking}><span className={styles.av}>RS</span><span className={styles.levels}><b /><b /><b /><b /><b /></span>Riya</div>
             </div>
           </Card>
           <Card icon="lock" name="Private messages" desc="End-to-end encrypted chats that only you and your friend can read." tint="#1b1a46" glow="rgba(110,100,255,.32)">
@@ -157,57 +157,10 @@ export default function Home() {
               <div className={styles.fr} style={{ opacity: 0.6 }}><span className={styles.av}>U1</span><div>user1<small>Last seen 2 h ago</small></div></div>
             </div>
           </Card>
+          <Card icon="lock" name="Private by default" desc="No ads, no third-party tracking, encrypted DMs, rooms that self-destruct." tint="#1b1a46" glow="rgba(110,100,255,.32)">
+            <div className={styles.bubbles}><span className={styles.e2e}><OmniIcon name="lock" size={12} />Encrypted on your device</span></div>
+          </Card>
         </FeatureCards>
-      </section>
-      </Suspense>
-
-      {/* 2. AI (planned) */}
-      <Suspense>
-      <section id="ai" className={`${styles.wrap} ${styles.ai}`} aria-labelledby="ai-title">
-        <div className={`${styles.kicker} mono`} data-reveal>OmniLume AI · coming soon</div>
-        <h2 id="ai-title" className={styles.big} data-reveal style={d(0.12)}>Meet your room companion</h2>
-        <p className={styles.sub} data-reveal style={d(0.24)}>OmniLume AI will use what is already in your room, the notes, the PDFs and the chat, to help everyone keep up.</p>
-        <div className={`${styles.aiFrame} glass glow`} data-reveal style={d(0.4)}>
-          <div className={styles.aiWin} aria-hidden="true">
-            <div className={styles.aiTool}><OmniIcon name="sidebar" size={16} /><OmniIcon name="play" size={16} /><OmniIcon name="pen" size={16} /></div>
-            <div className={styles.aiTop}><span>Make flashcards from chapter 7</span><span>OmniLume AI</span></div>
-            <div className={styles.aiSide}>
-              <div className={styles.aiSearch}><OmniIcon name="search" size={16} />Search chats</div>
-              <div className={`${styles.aiItem} ${styles.f}`}><OmniIcon name="folder" size={16} />Physics revision</div>
-              <div className={`${styles.aiItem} ${styles.f}`}><OmniIcon name="folder" size={16} />Friday film club</div>
-              <div className={`${styles.aiItem} ${styles.f}`}><OmniIcon name="message" size={16} />Recent</div>
-              <div className={`${styles.aiItem} ${styles.aiOn}`}>Make flashcards from chapter 7</div>
-              <div className={styles.aiItem}>Catch me up on the chat</div>
-              <div className={styles.aiItem}>Summarize today&apos;s session</div>
-              <div className={`${styles.aiItem} ${styles.dim}`}>Plan four focus rounds</div>
-              <div className={`${styles.aiItem} ${styles.dim}`}>Quiz me before Friday</div>
-            </div>
-            <div className={styles.aiMain}>
-              <div className={styles.ask}>Read our <span className={styles.chipx}><OmniIcon name="notes" size={12} />Shared notes</span> and <span className={styles.chipx}><OmniIcon name="file" size={12} />Chapter 7.pdf</span> and make flashcards for everyone in the room.</div>
-              <div className={styles.step} style={d(1.4)}><OmniIcon name="notes" size={16} />Reading shared notes</div>
-              <div className={styles.step} style={d(2.2)}><OmniIcon name="file" size={16} />Reading Chapter 7.pdf <span className={`${styles.cnt} mono`}>12 pages</span></div>
-              <div className={styles.step} style={d(3.0)}><OmniIcon name="spark" size={16} />Creating flashcards <span className={`${styles.cnt} mono`}>5</span></div>
-              <div className={`${styles.answer} ${styles.step}`} style={d(3.8)}>Done. I added 5 flashcards to the room, so everyone can study the same set.</div>
-              <div className={styles.cardsx}>
-                <div className={styles.flash} style={d(4.4)}><b>Torque</b>τ = Iα</div>
-                <div className={styles.flash} style={d(4.52)}><b>Solid disc</b>I = ½MR²</div>
-                <div className={styles.flash} style={d(4.64)}><b>Rolling</b>v = ωR</div>
-              </div>
-            </div>
-          </div>
-          <div className={styles.aiCap}><h3>Room AI chat</h3><p>Ask about anything in your room. It reads the notes, files and chat you already share, and answers for the whole group.</p></div>
-        </div>
-        <div className={styles.aiRow} data-reveal>
-          <div className={`${styles.aiMini} glass glow`}>
-            <div className={styles.quick}><OmniIcon name="spark" size={16} className={styles.accent} /><span className={styles.quickText}>Catch me up on the film club chat</span><small>Quick AI <span className={`${styles.key} mono`}>Tab</span></small></div>
-            <div><h3>Catch up in one line</h3><p>Missed an hour of chat? Ask for a summary of what the room talked about.</p></div>
-          </div>
-          <div className={`${styles.aiMini} glass glow`}>
-            <div className={`${styles.bubble} ${styles.them} ${styles.plan}`}>Plan four focus rounds for tonight and remind everyone at 9 pm</div>
-            <div><h3>Plans the session for you</h3><p>Sets the room timer, adds tasks and nudges people when it starts.</p></div>
-          </div>
-        </div>
-        <p className={styles.soon} data-reveal style={d(0.2)}>Planned feature. Not available yet</p>
       </section>
       </Suspense>
 
@@ -235,9 +188,10 @@ export default function Home() {
             <p className={styles.pillCap}>
               <span className={styles.v0}>One timer for the whole room, so breaks start together.</span>
               <span className={styles.v1}>One canvas for everyone in the room, drawn on live.</span>
-              <span className={styles.v2}>Notes and task lists the whole room edits together.</span>
+              <span className={styles.v2}>Notes the whole room edits together.</span>
               {' '}<a href="#cards">Learn more</a>
             </p>
+            <p className={styles.pillCap}>AI? Not yet. When it comes it&apos;s off by default, never reads your DMs, and the room shows when it&apos;s on.</p>
           </div>
           <div className={styles.stage2} data-reveal style={d(0.2)} aria-hidden="true">
             <div className={styles.corner}><Stripes count={8} seed={3} scale={0.5} className={styles.stripesCorner} /></div>
@@ -245,7 +199,7 @@ export default function Home() {
               <div className={styles.nwTitle}><span className={styles.v0}>Focus timer</span><span className={styles.v1}>Whiteboard</span><span className={styles.v2}>Shared notes</span></div>
               <div className={`${styles.nwV} ${styles.v0}`}><h4>Physics revision</h4><p>Round 2 of 4. Break starts for everyone at 9:46 pm.</p><hr /><div className={`${styles.nwTimer} mono`} data-clock="1122">18:42</div><div className={styles.track} style={{ marginTop: 20 }}><b style={{ width: '62%', background: '#8f7be8' }} /></div><div className={styles.tl} style={{ marginTop: 18 }}><span className={styles.av}>RS</span><span className={styles.av} style={{ marginLeft: -8 }}>DV</span><span className={styles.av} style={{ marginLeft: -8 }}>NP</span>4 studying</div></div>
               <div className={`${styles.nwV} ${styles.v1}`}><h4>Whiteboard</h4><p>Riya and Dev are drawing.</p><hr /><div className={styles.board}><svg width="384" height="230" viewBox="0 0 384 230" fill="none" strokeLinecap="round"><circle cx="110" cy="110" r="70" stroke="#ffd08a" strokeWidth="3" /><path d="M110 110 L172 78" stroke="#ffd08a" strokeWidth="3" /><path d="M220 60 C 270 40 330 60 340 110 C 350 150 300 180 260 176" stroke="#b9a8ff" strokeWidth="3" /><text x="230" y="214" fill="#fff" fillOpacity=".8" fontFamily="inherit" fontSize="16">ω = v / R</text></svg><SketchPad /></div></div>
-              <div className={`${styles.nwV} ${styles.v2}`}><h4>Shared notes</h4><p>Go through <span className={styles.link}>chapter 7</span> before the quiz on Friday and add anything unclear to the board.</p><hr /><h4 style={{ fontSize: 20 }}>Task list</h4><div className={`${styles.tl} ${styles.done}`}><span className={styles.box} />Read rotational motion</div><div className={styles.tl}><span className={styles.box} />Past paper 2023, Q4 to Q9</div><div className={styles.tl}><span className={styles.box} />Flashcards: moments of inertia</div><div className={`${styles.tl} ${styles.fade}`}><span className={styles.box} />Ask Riya about Q6</div></div>
+              <div className={`${styles.nwV} ${styles.v2}`}><h4>Shared notes</h4><p>Go through <span className={styles.link}>chapter 7</span> before the quiz on Friday and add anything unclear to the board.</p></div>
             </div>
           </div>
         </WhatElse>
@@ -282,9 +236,8 @@ export default function Home() {
             <div className={styles.foot} data-reveal>
               <div><h3>Product</h3><Link href="/explore">Rooms</Link><Link href="/explore">Explore</Link><Link href="/music">Music</Link><Link href="/messages">Messages</Link></div>
               <div><h3>Core features</h3><Link href="/watch-together">Watch together</Link><Link href="/study-together">Study together</Link><a href="#cards">Whiteboard</a><Link href="/listen-together">Listen together</Link><a href="#cards">Voice</a></div>
-              <div><h3>Coming soon</h3><a href="#ai">OmniLume AI</a><a href="#ai">Room flashcards</a><a href="#ai">Session planner</a></div>
               <div><h3>Account</h3><Link href="/login">Sign in</Link><Link href="/login">Create account</Link><Link href="/forgot-password">Forgot password</Link></div>
-              <div><h3>OmniLume</h3><a href="#more">About</a><span>Privacy</span><span>Terms</span></div>
+              <div><h3>OmniLume</h3><a href="#more">About</a><Link href="/privacy">Privacy</Link><Link href="/terms">Terms</Link><Link href="/copyright">Copyright</Link></div>
             </div>
             <div className={styles.footBottom} data-reveal style={d(0.2)}><span className={styles.logo}><OmniMark size={44} />OmniLume</span><span>© {new Date().getFullYear()} OmniLume</span></div>
           </div>

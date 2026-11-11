@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import styles from '@/app/landing.module.css';
 
-const TABS = [{ label: 'Study', first: 0 }, { label: 'Watch', first: 4 }, { label: 'Music', first: 6 }, { label: 'Social', first: 8 }];
+const TABS = [{ label: 'Desk', first: 0 }, { label: 'Screen', first: 4 }, { label: 'Speaker', first: 5 }, { label: 'Bed', first: 7 }];
 
 // Tabs scroll the rail to their first card; scrolling the rail by hand moves
 // the tab. The highlight slides with transform only.
