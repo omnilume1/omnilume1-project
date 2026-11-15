@@ -372,7 +372,9 @@ please understand the existing security model and test the affected flows.
 
 ## 📜 License
 
-See the repository for licensing information.
+OmniLume is free software, licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
+You may use, modify and share it. If you run a modified version as a network service, you must make your source code available to its users under the same license.
 
 ---
 
